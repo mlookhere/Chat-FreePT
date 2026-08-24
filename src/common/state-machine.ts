@@ -41,8 +41,56 @@ export interface ReduceResult {
   effects: Effect[];
 }
 
+interface ReduceContext {
+  state: RunState;
+  effects: Effect[];
+  settings: Settings;
+  now: number;
+}
+
+type UserEvent = Extract<
+  MachineEvent,
+  {
+    type:
+      | "USER_START"
+      | "USER_START_DEVELOPMENT"
+      | "USER_PAUSE"
+      | "USER_RESUME"
+      | "USER_STOP"
+      | "USER_REPLY";
+  }
+>;
+type SendEvent = Extract<
+  MachineEvent,
+  { type: "INSERT_OK" | "INSERT_FAIL" | "SEND_OK" | "SEND_FAIL" }
+>;
+type StreamEvent = Extract<
+  MachineEvent,
+  { type: "STREAM_STARTED" | "REPLY_COMPLETE" | "STREAM_STUCK" }
+>;
+type SystemEvent = Extract<MachineEvent, { type: "COOLDOWN_ELAPSED" | "PAGE_SIGNAL" }>;
+
 const MAX_LOG = 200;
 const ACTIVE_STATUSES = new Set(["inserting", "sending", "streaming", "cooldown"]);
+const USER_EVENTS = new Set<MachineEvent["type"]>([
+  "USER_START",
+  "USER_START_DEVELOPMENT",
+  "USER_PAUSE",
+  "USER_RESUME",
+  "USER_STOP",
+  "USER_REPLY",
+]);
+const SEND_EVENTS = new Set<MachineEvent["type"]>([
+  "INSERT_OK",
+  "INSERT_FAIL",
+  "SEND_OK",
+  "SEND_FAIL",
+]);
+const STREAM_EVENTS = new Set<MachineEvent["type"]>([
+  "STREAM_STARTED",
+  "REPLY_COMPLETE",
+  "STREAM_STUCK",
+]);
 
 export function newRunState(conversationId: string, now: number): RunState {
   return {
@@ -72,34 +120,61 @@ export function cooldownRemainingMs(state: RunState, now = Date.now()): number {
   return Math.max(0, (state.cooldownUntil ?? now) - now);
 }
 
-/**
- * The entire orchestration decision logic, as a pure function. The run controller feeds
- * DOM/UI events in and executes the returned effects; nothing here touches the page,
- * timers, or chrome.* APIs.
- */
+/** Pure orchestration reducer; event-domain handlers keep transition logic independently bounded. */
 export function reduce(prev: RunState, event: MachineEvent, settings: Settings): ReduceResult {
   const now = Date.now();
-  const state: RunState = { ...prev, updatedAt: now, log: [...prev.log] };
-  const effects: Effect[] = [];
-
-  const note = (kind: ActivityEntry["kind"], text: string): void => {
-    state.log.push({ at: now, kind, text });
-    if (state.log.length > MAX_LOG) state.log.splice(0, state.log.length - MAX_LOG);
+  const ctx: ReduceContext = {
+    state: { ...prev, updatedAt: now, log: [...prev.log] },
+    effects: [],
+    settings,
+    now,
   };
 
-  const fail = (code: ErrorCode, message: string): void => {
-    state.status = "error";
-    state.errorCode = code;
-    state.pauseReason = message;
-    note("error", message);
-    effects.push({ do: "badge", text: "!" });
-    effects.push({ do: "notify", title: "Chat FreePT paused", message });
-  };
+  let accepted: boolean;
+  if (isUserEvent(event)) accepted = reduceUserEvent(ctx, event);
+  else if (isSendEvent(event)) accepted = reduceSendEvent(ctx, event);
+  else if (isStreamEvent(event)) accepted = reduceStreamEvent(ctx, event);
+  else accepted = reduceSystemEvent(ctx, event);
 
+  if (!accepted) return { state: prev, effects: [] };
+  if (ctx.state.status !== "cooldown") delete ctx.state.cooldownUntil;
+  return { state: ctx.state, effects: ctx.effects };
+}
+
+function isUserEvent(event: MachineEvent): event is UserEvent {
+  return USER_EVENTS.has(event.type);
+}
+
+function isSendEvent(event: MachineEvent): event is SendEvent {
+  return SEND_EVENTS.has(event.type);
+}
+
+function isStreamEvent(event: MachineEvent): event is StreamEvent {
+  return STREAM_EVENTS.has(event.type);
+}
+
+function note(ctx: ReduceContext, kind: ActivityEntry["kind"], text: string): void {
+  ctx.state.log.push({ at: ctx.now, kind, text });
+  if (ctx.state.log.length > MAX_LOG) {
+    ctx.state.log.splice(0, ctx.state.log.length - MAX_LOG);
+  }
+}
+
+function fail(ctx: ReduceContext, code: ErrorCode, message: string): void {
+  ctx.state.status = "error";
+  ctx.state.errorCode = code;
+  ctx.state.pauseReason = message;
+  note(ctx, "error", message);
+  ctx.effects.push({ do: "badge", text: "!" });
+  ctx.effects.push({ do: "notify", title: "Chat FreePT paused", message });
+}
+
+function reduceUserEvent(ctx: ReduceContext, event: UserEvent): boolean {
+  const state = ctx.state;
   switch (event.type) {
     case "USER_START": {
       if (state.status !== "idle" && state.phase !== "stopped" && state.phase !== "complete") {
-        return { state: prev, effects: [] };
+        return false;
       }
       state.phase = "planning";
       state.status = "inserting";
@@ -109,171 +184,151 @@ export function reduce(prev: RunState, event: MachineEvent, settings: Settings):
       state.autoSends = 0;
       state.nudges = 0;
       state.repliesSinceContract = 0;
-      state.startedAt = now;
+      state.startedAt = ctx.now;
       delete state.errorCode;
       delete state.pauseReason;
-      note("info", "Planning started");
-      effects.push({ do: "insertAndSend", kind: "plan" });
-      effects.push({ do: "badge", text: "RUN" });
-      break;
+      note(ctx, "info", "Planning started");
+      ctx.effects.push({ do: "insertAndSend", kind: "plan" }, { do: "badge", text: "RUN" });
+      return true;
     }
-
-    case "USER_START_DEVELOPMENT": {
-      if (state.phase !== "plan_ready") return { state: prev, effects: [] };
+    case "USER_START_DEVELOPMENT":
+      if (state.phase !== "plan_ready") return false;
       state.phase = "developing";
       state.status = "inserting";
       state.autoSends = 0;
       state.nudges = 0;
-      note("info", "Development started");
-      effects.push({ do: "insertAndSend", kind: "develop" });
-      effects.push({ do: "badge", text: "RUN" });
-      break;
-    }
-
-    case "USER_PAUSE": {
-      if (state.status === "paused") return { state: prev, effects: [] };
+      note(ctx, "info", "Development started");
+      ctx.effects.push({ do: "insertAndSend", kind: "develop" }, { do: "badge", text: "RUN" });
+      return true;
+    case "USER_PAUSE":
+      if (state.status === "paused") return false;
       state.status = "paused";
       state.pauseReason = "Paused by you";
-      note("info", "Paused");
-      effects.push({ do: "badge", text: "II" });
-      break;
-    }
-
-    case "USER_RESUME": {
+      note(ctx, "info", "Paused");
+      ctx.effects.push({ do: "badge", text: "II" });
+      return true;
+    case "USER_RESUME":
       if (
         state.status !== "paused" &&
         state.status !== "error" &&
         state.status !== "awaiting_user"
       ) {
-        return { state: prev, effects: [] };
+        return false;
       }
       state.status = "streaming";
       delete state.pauseReason;
       delete state.errorCode;
-      note("info", "Resumed — re-checking conversation state");
-      effects.push({ do: "reconcile" });
-      effects.push({ do: "badge", text: "RUN" });
-      break;
-    }
-
-    case "USER_STOP": {
+      note(ctx, "info", "Resumed — re-checking conversation state");
+      ctx.effects.push({ do: "reconcile" }, { do: "badge", text: "RUN" });
+      return true;
+    case "USER_STOP":
       state.phase = "stopped";
       state.status = "idle";
-      note("info", "Stopped");
-      effects.push({ do: "badge", text: "" });
-      break;
-    }
-
-    case "USER_REPLY": {
+      note(ctx, "info", "Stopped");
+      ctx.effects.push({ do: "badge", text: "" });
+      return true;
+    case "USER_REPLY":
       if (
         state.status !== "awaiting_user" &&
         state.status !== "paused" &&
         state.status !== "error"
       ) {
-        return { state: prev, effects: [] };
+        return false;
       }
       state.status = "inserting";
       state.nudges = 0;
       delete state.pauseReason;
       delete state.errorCode;
-      note("send", "Sending your reply");
-      effects.push({ do: "insertAndSend", kind: "user_text", text: event.text });
-      effects.push({ do: "badge", text: "RUN" });
-      break;
-    }
-
-    case "INSERT_OK": {
-      if (state.status !== "inserting") return { state: prev, effects: [] };
-      state.status = "sending";
-      break;
-    }
-
-    case "INSERT_FAIL": {
-      fail("composer-insert-failed", `Could not write into the composer: ${event.detail}`);
-      break;
-    }
-
-    case "SEND_OK": {
-      if (state.status !== "sending") return { state: prev, effects: [] };
-      state.status = "streaming";
-      break;
-    }
-
-    case "SEND_FAIL": {
-      fail("send-failed", `Could not send the message: ${event.detail}`);
-      break;
-    }
-
-    case "STREAM_STARTED": {
-      if (state.status === "paused" || state.status === "idle") return { state: prev, effects: [] };
-      state.status = "streaming";
-      break;
-    }
-
-    case "REPLY_COMPLETE": {
-      if (state.status !== "streaming" && state.status !== "sending") {
-        return { state: prev, effects: [] };
-      }
-      state.repliesSinceContract += 1;
-      handleReply(state, event.marker, event.text, settings, effects, note, fail);
-      break;
-    }
-
-    case "STREAM_STUCK": {
-      fail(
-        "stream-stuck",
-        `ChatGPT has been generating for over ${settings.maxStreamMinutes} minutes — check the tab.`,
+      note(ctx, "send", "Sending your reply");
+      ctx.effects.push(
+        { do: "insertAndSend", kind: "user_text", text: event.text },
+        { do: "badge", text: "RUN" },
       );
-      break;
-    }
-
-    case "COOLDOWN_ELAPSED": {
-      if (state.status !== "cooldown") return { state: prev, effects: [] };
-      state.status = "inserting";
-      state.autoSends += 1;
-      const refresh = state.repliesSinceContract >= settings.contractRefreshEvery;
-      if (refresh) state.repliesSinceContract = 0;
-      note("send", refresh ? "Auto-continue (with contract refresh)" : "Auto-continue");
-      effects.push({ do: "insertAndSend", kind: refresh ? "contract_refresh" : "continue" });
-      break;
-    }
-
-    case "PAGE_SIGNAL": {
-      if (!isActive(state) && state.status !== "awaiting_user") return { state: prev, effects: [] };
-      switch (event.signal) {
-        case "rate-limit":
-          fail("rate-limited", "ChatGPT reported a usage limit. Resume when it lifts.");
-          break;
-        case "logged-out":
-          fail("logged-out", "You appear to be logged out of ChatGPT.");
-          break;
-        case "network-error":
-          fail("network-error", "ChatGPT hit an error mid-reply. Use Regenerate, then Resume.");
-          break;
-        case "conversation-full":
-          fail(
-            "conversation-full",
-            "This conversation hit its length limit. Use the handoff prompt in a new chat.",
-          );
-          break;
-      }
-      break;
-    }
+      return true;
   }
-
-  if (state.status !== "cooldown") delete state.cooldownUntil;
-  return { state, effects };
 }
 
-function handleReply(
-  state: RunState,
-  marker: Marker | null,
-  text: string,
-  settings: Settings,
-  effects: Effect[],
-  note: (kind: ActivityEntry["kind"], text: string) => void,
-  fail: (code: ErrorCode, message: string) => void,
-): void {
+function reduceSendEvent(ctx: ReduceContext, event: SendEvent): boolean {
+  switch (event.type) {
+    case "INSERT_OK":
+      if (ctx.state.status !== "inserting") return false;
+      ctx.state.status = "sending";
+      return true;
+    case "INSERT_FAIL":
+      fail(ctx, "composer-insert-failed", `Could not write into the composer: ${event.detail}`);
+      return true;
+    case "SEND_OK":
+      if (ctx.state.status !== "sending") return false;
+      ctx.state.status = "streaming";
+      return true;
+    case "SEND_FAIL":
+      fail(ctx, "send-failed", `Could not send the message: ${event.detail}`);
+      return true;
+  }
+}
+
+function reduceStreamEvent(ctx: ReduceContext, event: StreamEvent): boolean {
+  switch (event.type) {
+    case "STREAM_STARTED":
+      if (ctx.state.status === "paused" || ctx.state.status === "idle") return false;
+      ctx.state.status = "streaming";
+      return true;
+    case "REPLY_COMPLETE":
+      if (ctx.state.status !== "streaming" && ctx.state.status !== "sending") return false;
+      ctx.state.repliesSinceContract += 1;
+      handleReply(ctx, event.marker, event.text);
+      return true;
+    case "STREAM_STUCK":
+      fail(
+        ctx,
+        "stream-stuck",
+        `ChatGPT has been generating for over ${ctx.settings.maxStreamMinutes} minutes — check the tab.`,
+      );
+      return true;
+  }
+}
+
+function reduceSystemEvent(ctx: ReduceContext, event: SystemEvent): boolean {
+  switch (event.type) {
+    case "COOLDOWN_ELAPSED": {
+      if (ctx.state.status !== "cooldown") return false;
+      ctx.state.status = "inserting";
+      ctx.state.autoSends += 1;
+      const refresh = ctx.state.repliesSinceContract >= ctx.settings.contractRefreshEvery;
+      if (refresh) ctx.state.repliesSinceContract = 0;
+      note(ctx, "send", refresh ? "Auto-continue (with contract refresh)" : "Auto-continue");
+      ctx.effects.push({ do: "insertAndSend", kind: refresh ? "contract_refresh" : "continue" });
+      return true;
+    }
+    case "PAGE_SIGNAL":
+      if (!isActive(ctx.state) && ctx.state.status !== "awaiting_user") return false;
+      handlePageSignal(ctx, event.signal);
+      return true;
+  }
+}
+
+function handlePageSignal(ctx: ReduceContext, signal: PageSignal): void {
+  switch (signal) {
+    case "rate-limit":
+      fail(ctx, "rate-limited", "ChatGPT reported a usage limit. Resume when it lifts.");
+      return;
+    case "logged-out":
+      fail(ctx, "logged-out", "You appear to be logged out of ChatGPT.");
+      return;
+    case "network-error":
+      fail(ctx, "network-error", "ChatGPT hit an error mid-reply. Use Regenerate, then Resume.");
+      return;
+    case "conversation-full":
+      fail(
+        ctx,
+        "conversation-full",
+        "This conversation hit its length limit. Use the handoff prompt in a new chat.",
+      );
+  }
+}
+
+function handleReply(ctx: ReduceContext, marker: Marker | null, text: string): void {
+  const state = ctx.state;
   if (!marker) {
     if (state.phase !== "planning" && state.phase !== "developing") {
       state.status = "awaiting_user";
@@ -282,10 +337,10 @@ function handleReply(
     if (state.nudges === 0) {
       state.nudges = 1;
       state.status = "inserting";
-      note("warn", "Reply had no status marker — sending recovery nudge");
-      effects.push({ do: "insertAndSend", kind: "nudge" });
+      note(ctx, "warn", "Reply had no status marker — sending recovery nudge");
+      ctx.effects.push({ do: "insertAndSend", kind: "nudge" });
     } else {
-      fail("marker-missing", "ChatGPT stopped emitting the status marker.");
+      fail(ctx, "marker-missing", "ChatGPT stopped emitting the status marker.");
     }
     return;
   }
@@ -293,66 +348,73 @@ function handleReply(
   state.nudges = 0;
   state.lastMarker = marker;
   if (marker.repo) state.repo = marker.repo;
-  note("marker", marker.raw);
+  note(ctx, "marker", marker.raw);
+  handleMarker(ctx, marker, text);
+}
 
+function handleMarker(ctx: ReduceContext, marker: Marker, text: string): void {
+  const state = ctx.state;
   switch (marker.status) {
-    case "CONTINUE": {
-      if (state.phase === "plan_ready") state.phase = "planning";
-      if (state.phase !== "planning" && state.phase !== "developing") {
-        state.status = "awaiting_user";
-        return;
-      }
-      if (state.autoSends >= settings.autoContinueCap) {
-        fail(
-          "cap-reached",
-          `Auto-continue cap (${settings.autoContinueCap}) reached for this phase.`,
-        );
-        return;
-      }
-      state.status = "cooldown";
-      state.cooldownUntil = state.updatedAt + settings.sendDelayMs;
-      effects.push({ do: "startCooldown", ms: settings.sendDelayMs });
+    case "CONTINUE":
+      handleContinue(ctx);
       return;
-    }
     case "NEEDS_INPUT":
-    case "ERROR": {
+    case "ERROR":
       state.status = "awaiting_user";
       state.pauseReason = marker.note ?? "ChatGPT needs your input.";
-      effects.push({ do: "badge", text: "?" });
-      effects.push({
-        do: "notify",
-        title: "Chat FreePT needs you",
-        message: marker.note ?? "ChatGPT is waiting for your input.",
-      });
+      ctx.effects.push(
+        { do: "badge", text: "?" },
+        {
+          do: "notify",
+          title: "Chat FreePT needs you",
+          message: marker.note ?? "ChatGPT is waiting for your input.",
+        },
+      );
       return;
-    }
-    case "PLAN_READY": {
+    case "PLAN_READY":
       state.phase = "plan_ready";
       state.status = "awaiting_user";
       state.planSummary = marker.note ?? excerpt(text);
-      effects.push({ do: "badge", text: "PLAN" });
-      effects.push({
-        do: "notify",
-        title: "Master plan ready",
-        message: "Review the plan, then press Start development.",
-      });
+      ctx.effects.push(
+        { do: "badge", text: "PLAN" },
+        {
+          do: "notify",
+          title: "Master plan ready",
+          message: "Review the plan, then press Start development.",
+        },
+      );
       return;
-    }
-    case "COMPLETE": {
+    case "COMPLETE":
       state.phase = "complete";
       state.status = "complete";
-      effects.push({ do: "badge", text: "DONE" });
-      effects.push({ do: "showModal" });
-      effects.push({
-        do: "notify",
-        title: "Development complete",
-        message: state.repo
-          ? `ChatGPT reports ${state.repo} is done.`
-          : "ChatGPT reports the project is done.",
-      });
-      return;
-    }
+      ctx.effects.push(
+        { do: "badge", text: "DONE" },
+        { do: "showModal" },
+        {
+          do: "notify",
+          title: "Development complete",
+          message: state.repo
+            ? `ChatGPT reports ${state.repo} is done.`
+            : "ChatGPT reports the project is done.",
+        },
+      );
   }
+}
+
+function handleContinue(ctx: ReduceContext): void {
+  const state = ctx.state;
+  if (state.phase === "plan_ready") state.phase = "planning";
+  if (state.phase !== "planning" && state.phase !== "developing") {
+    state.status = "awaiting_user";
+    return;
+  }
+  if (state.autoSends >= ctx.settings.autoContinueCap) {
+    fail(ctx, "cap-reached", `Auto-continue cap (${ctx.settings.autoContinueCap}) reached for this phase.`);
+    return;
+  }
+  state.status = "cooldown";
+  state.cooldownUntil = ctx.now + ctx.settings.sendDelayMs;
+  ctx.effects.push({ do: "startCooldown", ms: ctx.settings.sendDelayMs });
 }
 
 function excerpt(text: string): string {
