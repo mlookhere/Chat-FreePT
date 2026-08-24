@@ -71,6 +71,8 @@ export interface RunState {
   nudges: number;
   /** Assistant replies since the last full-contract injection (refresh every N). */
   repliesSinceContract: number;
+  /** Absolute epoch-ms deadline for a persisted auto-continue cooldown. */
+  cooldownUntil?: number;
   startedAt: number;
   updatedAt: number;
   log: ActivityEntry[];
