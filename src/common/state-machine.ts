@@ -66,6 +66,12 @@ export function isActive(state: RunState): boolean {
   return ACTIVE_STATUSES.has(state.status);
 }
 
+/** Remaining delay for a persisted cooldown. Legacy cooldowns without a deadline resume now. */
+export function cooldownRemainingMs(state: RunState, now = Date.now()): number {
+  if (state.status !== "cooldown") return 0;
+  return Math.max(0, (state.cooldownUntil ?? now) - now);
+}
+
 /**
  * The entire orchestration decision logic, as a pure function. The run controller feeds
  * DOM/UI events in and executes the returned effects; nothing here touches the page,
@@ -255,6 +261,7 @@ export function reduce(prev: RunState, event: MachineEvent, settings: Settings):
     }
   }
 
+  if (state.status !== "cooldown") delete state.cooldownUntil;
   return { state, effects };
 }
 
@@ -303,6 +310,7 @@ function handleReply(
         return;
       }
       state.status = "cooldown";
+      state.cooldownUntil = state.updatedAt + settings.sendDelayMs;
       effects.push({ do: "startCooldown", ms: settings.sendDelayMs });
       return;
     }
