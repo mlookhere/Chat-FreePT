@@ -1,0 +1,38 @@
+{
+  "name": "chat-freept",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension that turns a ChatGPT conversation into an autonomous CI-gated development loop, orchestrated through ChatGPT's GitHub MCP connector.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/package.mjs",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src tests scripts",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.{ts,html,json,css}\" \"tests/**/*.ts\" \"scripts/*.mjs\" \"*.md\"",
+    "format:check": "prettier --check \"src/**/*.{ts,html,json,css}\" \"tests/**/*.ts\" \"scripts/*.mjs\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mlookhere/Chat-FreePT.git"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/chrome": "^0.2.7",
+    "@vitest/coverage-v8": "^4.1.11",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.9.0",
+    "globals": "^17.11.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.9.6",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.11"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}

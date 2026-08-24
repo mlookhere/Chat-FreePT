@@ -1,0 +1,34 @@
+# Secrets
+.env
+
+# Node
+node_modules/
+
+# Python (CI control plane tooling)
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+
+# CI evidence and build output
+artifacts/
+dist/
+build/
+coverage/
+*.zip
+
+# Editors
+.vscode/
+.idea/
+
+# Claude Code CI workflow local state
+.ci-venv/
+.claude/session-cache/
+.worktrees/
+
+# Per-machine Claude Code settings. Holds local permission grants, so it is
+# deliberately never shared: the checked-in .claude/settings.json is the
+# authoritative policy for everyone.
+.claude/settings.local.json

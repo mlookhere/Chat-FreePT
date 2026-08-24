@@ -1,0 +1,453 @@
+#!/usr/bin/env python3
+"""Keep runtime dependencies declared in exactly one place.
+
+`requirements.txt` and `[project].dependencies` used to hold the same nine lines. Nothing
+compared them, and only one of them was ever audited -- `pip-audit` reads
+`requirements.txt` -- so a dependency added to `pyproject.toml` alone would ship without
+ever being scanned (Issue #16).
+
+The fix is delegation rather than comparison: `pyproject.toml` declares its dependencies
+`dynamic` and reads `requirements.txt`, so the two cannot disagree. This module guards the
+arrangement itself, because the way it would break is not a mismatch appearing -- it is
+someone re-adding a static list, at which point the drift is back and nothing says so.
+
+The `--artifacts` half has since grown a second question of the same shape: not only
+whether the declaration reached the distribution, but whether the files the application
+reads at run time did. `packages.find` packages modules, and the web UI is data, so the
+wheel shipped without the page `GET /` serves (Issue #55).
+
+Deliberately line-oriented rather than parsed. `requires-python` is `>=3.10`, `tomllib`
+arrived in 3.11, and the fast gate runs under whichever interpreter `scripts/bootstrap`
+resolved. The facts being checked are exact declarations in files this repository owns,
+not arbitrary values, so reading them as text costs nothing in precision. The structural
+cross-check that a real parser affords lives in `tests/test_dependencies.py`, where it can
+skip on an old interpreter without the gate itself going quiet.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PYPROJECT = ROOT / "pyproject.toml"
+CONFIG = ROOT / ".claude-workflow.json"
+
+
+def project() -> dict:
+    """The consumer's half of the configuration.
+
+    This module is part of a control plane that is meant to be adopted by other repositories
+    (Issue #93). Every value it used to name directly -- the package directory, the packaged
+    assets, the call sites this project forbids -- belongs to whoever adopts it, so they are
+    read from `.claude-workflow.json` rather than written here. Nothing in this file names a
+    product now, and `self_test.check_no_product_names` fails the gate if that changes.
+    """
+    try:
+        return json.loads(CONFIG.read_text(encoding="utf-8")).get("project", {})
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def manifest() -> str:
+    """The file the dependencies are declared in, audited from, and built into the wheel from.
+
+    `requirements.txt` was written into this module in six places. A consumer whose manifest
+    sits anywhere else -- this repository's is `ci/requirements-ci.txt` -- then failed
+    `check_audit_target` for a configuration that was correct, because the check compared
+    against a literal rather than against what the repository declares (Issue #9).
+    """
+    return str(project().get("dependency_manifest") or "requirements.txt")
+
+
+def requirements_path() -> Path:
+    return ROOT / manifest()
+
+
+def package_dir() -> Path | None:
+    name = project().get("package_dir")
+    return ROOT / name if name else None
+
+
+# Package data the application reads at run time, named as it appears inside a wheel.
+# Anything listed here must be in the built distributions, not merely in the checkout.
+def packaged_assets() -> tuple[str, ...]:
+    return tuple(project().get("packaged_assets", ()))
+
+
+# A table heading, tolerating indentation and a trailing comment. Anchoring on `$` alone
+# would leave `[project]  # comment` unrecognised and silently fold its body into whichever
+# table came before it, which is a gate that stops looking where it thinks it is looking.
+SECTION = re.compile(r"(?m)^[ \t]*\[([^\]]+)\][ \t]*(?:#.*)?$")
+# TOML permits whitespace before a key, so anchoring hard at the line start let a single
+# leading space restore a static list with the gate none the wiser.
+STATIC_DEPENDENCIES = re.compile(r"(?m)^[ \t]*dependencies[ \t]*=[ \t]*\[")
+DYNAMIC_DEPENDENCIES = re.compile(r"(?m)^[ \t]*dynamic[ \t]*=[ \t]*\[(?P<items>[^\]]*)\]")
+# The inline form, `dependencies = { file = ["requirements.txt"] }`. The equivalent
+# sub-table form is read separately, from its own section.
+DELEGATION = re.compile(r"(?m)^[ \t]*dependencies[ \t]*=[ \t]*\{[^}]*file[^[]*\[(?P<files>[^\]]*)\]")
+DELEGATION_TABLE = re.compile(r"(?m)^[ \t]*file[ \t]*=[ \t]*\[(?P<files>[^\]]*)\]")
+# The forbidden call-site patterns are a backstop, not a proof: an alias, a `getattr`, or a
+# name bound and then called all evade them. For the rule Knowledge Nexus declares, the
+# property that actually holds is enforced at run time by `_require_local_api`, which refuses
+# any Chroma client that did not resolve to the embedded implementation.
+QUOTES = ('"""', "'''", '"', "'")
+# A requirement as setuptools will read it: a name, optional extras, then either a version
+# specifier or a PEP 508 direct reference, then an optional marker. Inline comments are
+# stripped before matching -- setuptools strips them too, verified against a real build.
+REQUIREMENT = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*"
+    r"(?:\[[^\]]+\])?"
+    r"[ \t]*(?:[<>=!~][^;]*|@[ \t]+\S+)?"
+    r"(?:;.*)?$"
+)
+
+
+def sections(text: str) -> dict[str, str]:
+    """Each `[table]` mapped to its body, so a key is checked in the table that owns it."""
+    heads = list(SECTION.finditer(text))
+    found: dict[str, str] = {}
+    for index, head in enumerate(heads):
+        end = heads[index + 1].start() if index + 1 < len(heads) else len(text)
+        found[head.group(1)] = text[head.end() : end]
+    return found
+
+
+def quoted(values: str) -> list[str]:
+    return re.findall(r"[\"']([^\"']+)[\"']", values)
+
+
+def check_pyproject(text: str) -> list[str]:
+    tables = sections(text)
+    project = tables.get("project", "")
+    failures: list[str] = []
+
+    if STATIC_DEPENDENCIES.search(project):
+        failures.append(
+            "pyproject.toml: [project] declares a static dependencies list again, which is the "
+            "duplication Issue #16 removed; a dependency added there and not to requirements.txt "
+            "would ship unaudited, because pip-audit reads requirements.txt"
+        )
+
+    dynamic = DYNAMIC_DEPENDENCIES.search(project)
+    if not dynamic or "dependencies" not in quoted(dynamic.group("items")):
+        failures.append(
+            'pyproject.toml: [project] must declare dynamic = ["dependencies"] so the wheel '
+            "metadata is built from requirements.txt rather than from a second copy"
+        )
+
+    # Both spellings are the same TOML: an inline table under [tool.setuptools.dynamic], or
+    # its own [tool.setuptools.dynamic.dependencies] section. Rejecting the second would be
+    # a gate refusing a correct configuration.
+    inline = DELEGATION.search(tables.get("tool.setuptools.dynamic", ""))
+    table = DELEGATION_TABLE.search(tables.get("tool.setuptools.dynamic.dependencies", ""))
+    delegation = inline or table
+    if not delegation:
+        failures.append(
+            "pyproject.toml: [tool.setuptools.dynamic] must map dependencies to a file, or the "
+            "dynamic declaration has nothing to read"
+        )
+    elif quoted(delegation.group("files")) != [manifest()]:
+        failures.append(
+            "pyproject.toml: [tool.setuptools.dynamic] reads "
+            f"{quoted(delegation.group('files'))}, but {manifest()} is the file pip-audit "
+            "scans; reading anything else puts the shipped set back out of reach of the audit"
+        )
+    return failures
+
+
+def check_requirements(text: str) -> list[str]:
+    """Every line must be something setuptools can turn into dependency metadata.
+
+    This file is read by pip *and* by the build backend, and the two do not accept the same
+    grammar: `-r other.txt` and `--index-url` are pip input, not metadata. Catching that
+    here is the point, because the wheel is where it would otherwise surface.
+
+    An inline `#` comment is fine -- setuptools strips it, confirmed against a real build --
+    so it is stripped here too rather than reported.
+    """
+    entries = [
+        (number, stripped)
+        for number, line in enumerate(text.splitlines(), start=1)
+        if (stripped := line.split("#")[0].strip())
+    ]
+    if not entries:
+        return [
+            "requirements.txt: no requirements found; it is the source the wheel metadata is "
+            "built from, so an empty file would silently ship a package that depends on nothing"
+        ]
+    return [
+        f"requirements.txt:{number}: {entry!r} is not a requirement setuptools can read as "
+        "dependency metadata"
+        for number, entry in entries
+        if not REQUIREMENT.match(entry)
+    ]
+
+
+def check_audit_target(config_text: str) -> list[str]:
+    """Whatever the audit scans has to be the file the package is built from.
+
+    And it has to actually run. A correct `security` command that no stage invokes audits
+    nothing, which looks identical to being audited from in here.
+    """
+    try:
+        config = json.loads(config_text)
+        commands = config["commands"]["security"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return [".claude-workflow.json: no security commands found to audit dependencies"]
+    stages = [name for name, groups in config.get("stages", {}).items() if "security" in groups]
+    if not stages:
+        return [
+            ".claude-workflow.json: no stage runs the security group, so the dependency audit "
+            "never executes however it is configured"
+        ]
+    audits = [command for command in commands if "pip-audit" in command]
+    if not audits:
+        return [
+            ".claude-workflow.json: the security stage runs no pip-audit, so runtime dependencies "
+            "are never scanned"
+        ]
+    stray = [command for command in audits if manifest() not in command]
+    return [
+        f".claude-workflow.json: security command {command!r} does not audit {manifest()}, "
+        "which is the file the package's dependencies are built from"
+        for command in stray
+    ]
+
+
+def declared(text: str) -> list[str]:
+    """The requirement lines, as setuptools will read them."""
+    return [stripped for line in text.splitlines() if (stripped := line.split("#")[0].strip())]
+
+
+def metadata_requirements(blob: str) -> list[str]:
+    """Runtime `Requires-Dist` entries, ignoring anything gated behind an extra."""
+    return [
+        value.strip()
+        for line in blob.splitlines()
+        if line.startswith("Requires-Dist:") and "extra ==" not in (value := line.split(":", 1)[1])
+    ]
+
+
+def check_artifacts(directory: Path, expected: list[str]) -> list[str]:
+    """The declaration being right is not the same as the artifact being right.
+
+    Reading dependencies from a file means the file has to reach the source distribution,
+    and setuptools includes it only because it notices the reference -- there is no
+    `MANIFEST.in` saying so. A pruning manifest, or a change of build backend, would
+    produce an sdist that cannot be built, and that would surface at release rather than
+    here. The other half is quieter still: a `requirements.txt` that is present but
+    unreadable at build time yields a wheel with no dependencies at all, which installs
+    cleanly and fails on the first import.
+    """
+    import tarfile
+    import zipfile
+
+    failures: list[str] = []
+    sdists, wheels = distributions(directory)
+    if not sdists or not wheels:
+        return [
+            f"{directory}: expected a source distribution and a wheel to inspect; "
+            f"found {len(sdists)} sdist(s) and {len(wheels)} wheel(s)"
+        ]
+
+    with tarfile.open(sdists[-1]) as archive:
+        names = archive.getnames()
+        if not any(name.endswith(f"/{manifest()}") for name in names):
+            failures.append(
+                f"{sdists[-1].name}: {manifest()} is not in the source distribution, so the "
+                "dynamic dependency source is missing and the sdist cannot be built"
+            )
+        info = next((name for name in names if name.endswith("PKG-INFO")), None)
+        if info:
+            handle = archive.extractfile(info)
+            content = handle.read().decode("utf-8") if handle else ""
+            failures += compare(sdists[-1].name, metadata_requirements(content), expected)
+
+    with zipfile.ZipFile(wheels[-1]) as wheel:
+        name = next((item for item in wheel.namelist() if item.endswith("METADATA")), None)
+        if name:
+            content = wheel.read(name).decode("utf-8")
+            failures += compare(wheels[-1].name, metadata_requirements(content), expected)
+    return failures
+
+
+def distributions(directory: Path) -> tuple[list[Path], list[Path]]:
+    """The sdists and wheels in a directory, sorted, so every check reads the same pair."""
+    return sorted(directory.glob("*.tar.gz")), sorted(directory.glob("*.whl"))
+
+
+def check_packaged_assets(directory: Path) -> list[str]:
+    """The application's data files have to be inside the distributions, not just the tree.
+
+    `[tool.setuptools.packages.find]` collects modules. The web UI is data, nothing carried
+    it, and so the wheel the release pipeline uploads contained no UI at all: the API routes
+    answered and `GET /` returned a 500 from a file that was never packaged (Issue #55).
+
+    Every gate stayed green through that, because tests and CI install the project editable,
+    where the checkout supplies what the distribution omits. Reading the archive is the only
+    check that distinguishes the artifact from the tree it was built from.
+    """
+    import tarfile
+    import zipfile
+
+    sdists, wheels = distributions(directory)
+    if not sdists or not wheels:
+        return [
+            f"{directory}: expected a source distribution and a wheel to inspect for "
+            f"{', '.join(packaged_assets())}; found {len(sdists)} sdist(s) and {len(wheels)} wheel(s)"
+        ]
+
+    failures: list[str] = []
+    with zipfile.ZipFile(wheels[-1]) as wheel:
+        packaged = set(wheel.namelist())
+        failures += [
+            f"{wheels[-1].name}: does not contain {asset}, so an install of this wheel serves no "
+            "web UI and answers the first request for it with a 500"
+            for asset in packaged_assets()
+            if asset not in packaged
+        ]
+
+    with tarfile.open(sdists[-1]) as archive:
+        # Every member of an sdist is prefixed with its root directory, which carries the
+        # project version, so the asset is matched by its path within the package.
+        members = archive.getnames()
+        failures += [
+            f"{sdists[-1].name}: does not contain {asset}, so a wheel built from this source "
+            "distribution would ship without it"
+            for asset in packaged_assets()
+            if not any(name.endswith(f"/{asset}") for name in members)
+        ]
+    return failures
+
+
+def normalise(entry: str) -> tuple[str, tuple[str, ...]]:
+    """A requirement reduced to what it means, not how it was written.
+
+    setuptools reorders a multi-clause specifier -- `chromadb>=0.5,<1.0` comes back as
+    `chromadb<1.0,>=0.5` -- so comparing the raw strings reports a mismatch between a
+    requirement and itself. That went unnoticed while every requirement had one clause.
+    """
+    text = "".join(entry.split())
+    marker = ""
+    if ";" in text:
+        text, marker = text.split(";", 1)
+    for index, char in enumerate(text):
+        if char in "<>=!~@":
+            name, clauses = text[:index], text[index:]
+            break
+    else:
+        name, clauses = text, ""
+    # PEP 503 canonicalisation: a dot and an underscore are the same separator, so
+    # `zope.interface` and `zope-interface` are one package and must compare equal.
+    canonical = re.sub(r"[-_.]+", "-", name).lower()
+    parts = tuple(sorted(part for part in clauses.split(",") if part))
+    # setuptools emits double-quoted marker strings where the source file may use single
+    # quotes; the marker means the same thing either way.
+    return canonical, parts + ((";" + marker.replace("'", '"'),) if marker else ())
+
+
+def compare(artifact: str, found: list[str], expected: list[str]) -> list[str]:
+    if sorted(map(normalise, found)) == sorted(map(normalise, expected)):
+        return []
+    return [
+        f"{artifact}: runtime dependencies do not match requirements.txt; "
+        f"the artifact declares {found or 'nothing'} and requirements.txt declares {expected}"
+    ]
+
+
+def code_only(line: str) -> str:
+    """The line with comments and string bodies removed.
+
+    Writing `HttpClient(` inside a docstring in order to *forbid* it should not break the
+    fast gate, and neither should a trailing comment that mentions it. Only code counts.
+    """
+    kept: list[str] = []
+    quote = ""
+    index = 0
+    while index < len(line):
+        if quote:
+            if line.startswith(quote, index):
+                index += len(quote)
+                quote = ""
+            else:
+                index += 1
+            continue
+        opened = next((mark for mark in QUOTES if line.startswith(mark, index)), "")
+        if opened:
+            quote = opened
+            index += len(opened)
+            continue
+        if line[index] == "#":
+            break
+        kept.append(line[index])
+        index += 1
+    return "".join(kept)
+
+
+def check_forbidden_call_sites() -> list[str]:
+    """Call sites the consumer has decided its own code must not contain.
+
+    Knowledge Nexus uses this for one rule, and the rule is a good illustration of why it has
+    to be data rather than code. `chromadb>=0.5,<1.0` keeps the install off every version
+    affected by PYSEC-2026-311, but that pin is only half the argument: the other half is
+    that the embedded client never opens the HTTP surface the advisory targets. `HttpClient`
+    or `AsyncHttpClient` would, and would do it quietly, because nothing else in the build
+    would change. The pin and this check hold that position together.
+
+    That reasoning is entirely about one project's dependencies. It used to live in this
+    module as `check_no_chroma_server_client`, called unconditionally, which meant a control
+    plane intended for reuse carried an argument about Chroma into every repository that
+    adopted it (Issue #93). The mechanism is generic; the rule is the consumer's.
+    """
+    package = package_dir()
+    rules = project().get("forbidden_call_sites", [])
+    if not package or not rules or not package.is_dir():
+        return []
+
+    compiled = [(re.compile(rule["pattern"]), rule["message"]) for rule in rules]
+    failures: list[str] = []
+    for path in sorted(package.rglob("*.py")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for number, line in enumerate(text.splitlines(), start=1):
+            stripped = code_only(line)
+            for pattern, message in compiled:
+                if pattern.search(stripped):
+                    failures.append(f"{path.relative_to(ROOT).as_posix()}:{number}: {message}")
+    return failures
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Keep runtime dependencies declared once.")
+    parser.add_argument(
+        "--artifacts",
+        type=Path,
+        help=(
+            "also verify built distributions in this directory: their dependency metadata "
+            "against requirements.txt, and their contents against the packaged assets"
+        ),
+    )
+    args = parser.parse_args()
+
+    requirements = requirements_path().read_text(encoding="utf-8")
+    failures = check_pyproject(PYPROJECT.read_text(encoding="utf-8"))
+    failures += check_requirements(requirements)
+    failures += check_audit_target(CONFIG.read_text(encoding="utf-8"))
+    failures += check_forbidden_call_sites()
+    if args.artifacts:
+        failures += check_artifacts(args.artifacts, declared(requirements))
+        failures += check_packaged_assets(args.artifacts)
+    for failure in failures:
+        print(f"failure: {failure}")
+    if failures:
+        print(f"Dependency source check failed with {len(failures)} finding(s).")
+        return 1
+    scope = "declaration and built artifacts" if args.artifacts else "declaration"
+    print(f"Dependency source check passed ({scope}): requirements.txt is the only declaration.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

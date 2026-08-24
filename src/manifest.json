@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Chat FreePT",
+  "version": "0.1.0",
+  "description": "Turns a ChatGPT conversation into an autonomous CI-pipeline dev loop driven through ChatGPT's GitHub MCP connector.",
+  "permissions": ["storage", "notifications"],
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Chat FreePT"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

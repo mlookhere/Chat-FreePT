@@ -1,0 +1,84 @@
+name: Security and supply chain
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [master, dev]
+  schedule:
+    - cron: '17 4 * * 3'
+  workflow_dispatch:
+
+permissions: {}
+
+# Two jobs below require GitHub Advanced Security, which is unavailable for a
+# private repository on this plan -- the same limitation that makes branch
+# protection and environments return 403. Left ungated they failed on every pull
+# request, which trains reviewers to ignore CI. They are gated on
+# ENABLE_ADVANCED_SECURITY so they skip (neutral, non-blocking) rather than fail,
+# and run unchanged once the variable is set to "true".
+#
+# Do not delete these gates to "fix the red checks". What they cover is retained:
+#   - dangerous workflow patterns: workflow/check_workflow_policy.py, which runs
+#     unconditionally in the workflow-policy job below and is stricter than
+#     CodeQL's Actions queries about the patterns this repository cares about.
+#   - vulnerable dependencies: pip-audit, which runs in the `Dependency audit` job on
+#     every pull request as well as in the release stage (Issue #28). It audits
+#     requirements.txt, which since Issue #16 is the file the wheel's dependency
+#     metadata is built from, so it covers the set that actually ships.
+jobs:
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request' && vars.ENABLE_ADVANCED_SECURITY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v4
+        with:
+          fail-on-severity: high
+
+  workflow-policy:
+    name: Workflow policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate the Claude workflow control plane
+        run: python3 workflow/self_test.py --ci
+      - name: Reject dangerous workflow patterns
+        run: |
+          python3 workflow/check_workflow_policy.py
+          if [[ "${{ vars.ENFORCE_PINNED_ACTIONS }}" == "true" ]]; then
+            python3 workflow/pin_actions.py --check
+          else
+            echo "Pinned Action enforcement activates after ./scripts/setup-github."
+          fi
+
+  codeql-actions:
+    name: CodeQL for Actions
+    if: github.event_name != 'merge_group' && vars.ENABLE_ADVANCED_SECURITY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      security-events: write
+      packages: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
+        with:
+          languages: actions
+          queries: security-and-quality
+      - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4

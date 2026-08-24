@@ -1,0 +1,128 @@
+name: PR CI
+
+on:
+  merge_group:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  CI_BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
+
+jobs:
+  metadata:
+    name: PR metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate Issue link, branch, and risk labels
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 workflow/validate_pr.py
+      - name: Merge queue metadata already validated by source PR
+        if: github.event_name == 'merge_group'
+        run: echo "Metadata is enforced on the pull request before it enters the merge queue."
+
+  fast:
+    name: Fast deterministic gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ci/requirements-ci.txt
+      - run: ./scripts/bootstrap --ci
+      - run: ./ci/run fast
+      - name: Upload deterministic gate report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fast-ci-${{ github.run_id }}
+          path: artifacts/ci/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The typed-advisory job that ran here reported findings that depend on third-party
+  # signatures, which the fast gate cannot see because it type-checks with
+  # `no_site_packages = true`. This repository has no third-party runtime dependencies to
+  # be checked against -- `workflow/typed_advisory.py` still ships for consumers that do,
+  # and it exits 1 when `project.typed_advisory_witness` is unset rather than pretending
+  # to have proved something, so keeping the job here would only mean a permanently red
+  # check.
+
+  audit:
+    # A separate job rather than a step inside the gates above. pip-audit resolves the
+    # full transitive set into an isolated environment, which takes about as long as the
+    # rest of the PR gate put together, so running it alongside keeps the wall clock flat.
+    # It also gives a dependency finding its own named check, instead of a test-and-build
+    # failure that has to be opened to understand.
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ci/requirements-ci.txt
+      - run: ./scripts/bootstrap --ci
+      - run: ./ci/run audit
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: audit-ci-${{ github.run_id }}
+          path: artifacts/ci/
+          if-no-files-found: warn
+          retention-days: 14
+
+  pr-tests:
+    name: PR test/build gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ci/requirements-ci.txt
+      - run: ./scripts/bootstrap --ci
+      - run: ./ci/run pr
+      - name: Upload PR gate report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pr-ci-${{ github.run_id }}
+          path: artifacts/ci/
+          if-no-files-found: warn
+          retention-days: 14
