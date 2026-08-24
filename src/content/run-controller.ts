@@ -151,10 +151,13 @@ export class RunController {
 
   private scheduleCooldown(ms: number): void {
     if (this.cooldownTimer !== undefined || this.disposed) return;
-    this.cooldownTimer = setTimeout(() => {
-      this.cooldownTimer = undefined;
-      this.dispatch({ type: "COOLDOWN_ELAPSED" });
-    }, Math.max(0, ms));
+    this.cooldownTimer = setTimeout(
+      () => {
+        this.cooldownTimer = undefined;
+        this.dispatch({ type: "COOLDOWN_ELAPSED" });
+      },
+      Math.max(0, ms),
+    );
   }
 
   private clearCooldownTimer(): void {
