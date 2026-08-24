@@ -10,13 +10,22 @@ beforeEach(() => {
   `;
 });
 
+function sendButton(): HTMLButtonElement {
+  const button = document.querySelector("button[data-testid='send-button']");
+  if (!(button instanceof HTMLButtonElement)) throw new Error("send button missing");
+  return button;
+}
+
+function composer(): HTMLElement {
+  const element = document.getElementById("prompt-textarea");
+  if (!element) throw new Error("composer missing");
+  return element;
+}
+
 describe("composer cancellation", () => {
   it("does not click Send when the operation was cancelled", async () => {
-    const button = document.querySelector(
-      '[data-testid="send-button"]',
-    ) as HTMLButtonElement;
     const clicked = vi.fn();
-    button.addEventListener("click", clicked);
+    sendButton().addEventListener("click", clicked);
 
     const result = await clickSend(() => false, () => true);
 
@@ -25,21 +34,17 @@ describe("composer cancellation", () => {
   });
 
   it("does not overwrite a draft when insertion was cancelled", async () => {
-    const composer = document.querySelector("#prompt-textarea") as HTMLElement;
-    composer.textContent = "keep my draft";
+    composer().textContent = "keep my draft";
 
     const result = await insertPrompt("replace this", () => true);
 
     expect(result).toEqual({ ok: false, error: "insert cancelled" });
-    expect(composer.textContent).toBe("keep my draft");
+    expect(composer().textContent).toBe("keep my draft");
   });
 
   it("clicks a ready Send button on an active operation", async () => {
-    const button = document.querySelector(
-      '[data-testid="send-button"]',
-    ) as HTMLButtonElement;
     const clicked = vi.fn();
-    button.addEventListener("click", clicked);
+    sendButton().addEventListener("click", clicked);
 
     const result = await clickSend(() => false);
 
