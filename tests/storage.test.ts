@@ -72,6 +72,23 @@ describe("tab lock", () => {
     expect(await storage.acquireTabLock("c1", "tab-b")).toBe(true);
   });
 
+  it("heartbeats only a lock owned by the same tab", async () => {
+    await storage.acquireTabLock("c1", "tab-a");
+    expect(await storage.heartbeatTabLock("c1", "tab-a")).toBe(true);
+    expect(await storage.heartbeatTabLock("c1", "tab-b")).toBe(false);
+  });
+
+  it("does not let a suspended old owner overwrite a newer owner", async () => {
+    await storage.acquireTabLock("c1", "tab-a");
+    const key = "cfpt:lock:c1";
+    const lock = stores.local[key] as { nonce: string; at: number };
+    stores.local[key] = { ...lock, at: Date.now() - 60_000 };
+
+    expect(await storage.acquireTabLock("c1", "tab-b")).toBe(true);
+    expect(await storage.heartbeatTabLock("c1", "tab-a")).toBe(false);
+    expect(await storage.acquireTabLock("c1", "tab-c")).toBe(false);
+  });
+
   it("release only removes its own lock", async () => {
     await storage.acquireTabLock("c1", "tab-a");
     await storage.releaseTabLock("c1", "tab-b");

@@ -75,30 +75,30 @@ export class Panel {
     this.panelEl.classList.toggle("cfpt-hidden", !show);
   }
 
-  render(state: RunState): void {
-    this.fab.dataset["state"] = fabState(state);
+  render(state: RunState, passive = false): void {
+    this.fab.dataset["state"] = passive ? "attention" : fabState(state);
 
-    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}`;
+    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${passive}`;
     if (viewKey !== this.lastViewKey) {
       this.lastViewKey = viewKey;
       this.stopArmed = false;
-      this.panelEl.innerHTML = this.viewHtml(state);
+      this.panelEl.innerHTML = this.viewHtml(state, passive);
     }
     this.updateDynamic(state);
   }
 
-  private viewHtml(state: RunState): string {
+  private viewHtml(state: RunState, passive: boolean): string {
     return `
       <div class="cfpt-header">
         <span class="cfpt-title">Chat FreePT</span>
         <span class="cfpt-chip" data-phase="${esc(state.phase)}">${esc(phaseLabel(state.phase))}</span>
         <button class="cfpt-btn" data-action="close" style="margin:0;padding:2px 8px">×</button>
       </div>
-      <div class="cfpt-body">${this.bodyHtml(state)}</div>
+      <div class="cfpt-body">${this.bodyHtml(state, passive)}</div>
     `;
   }
 
-  private bodyHtml(state: RunState): string {
+  private bodyHtml(state: RunState, passive: boolean): string {
     const health = healthCheck();
     const warn =
       health.missing.length > 0
@@ -106,6 +106,8 @@ export class Panel {
             health.missing.join(", "),
           )}. Auto-run cannot operate until the extension is updated.</div>`
         : "";
+
+    if (passive) return warn + this.passiveHtml(state);
 
     switch (state.status) {
       case "idle":
@@ -128,6 +130,17 @@ export class Panel {
       default:
         return warn;
     }
+  }
+
+  private passiveHtml(state: RunState): string {
+    return `
+      <h3>Active in another tab</h3>
+      <p class="cfpt-note">Another ChatGPT tab currently owns this conversation. This tab is
+      read-only and will take over automatically if the other tab closes or stops responding.</p>
+      <p class="cfpt-note">Current state: ${esc(phaseLabel(state.phase))} · ${esc(
+        STATUS_LABEL[state.status] ?? state.status,
+      )}</p>
+    `;
   }
 
   private ideaFormHtml(state: RunState): string {
@@ -247,25 +260,15 @@ export class Panel {
   }
 
   private onClick(e: Event): void {
-    const target = (e.target as HTMLElement).closest("[data-action]");
+    const target = (e.target as HTMLElement).closest("[data-action]") as HTMLElement | null;
     if (!target) return;
-    const action = (target as HTMLElement).dataset["action"];
-    switch (action) {
+    switch (target.dataset["action"]) {
       case "close":
         this.toggle(false);
         break;
-      case "start": {
-        const idea = this.refValue("idea");
-        if (!idea.trim()) return;
-        const mode = this.radioValue("repomode") === "existing" ? "existing" : "new";
-        this.hooks.onEvent({
-          type: "USER_START",
-          idea,
-          repoMode: mode,
-          repoName: this.refValue("reponame").trim(),
-        });
+      case "start":
+        this.startProject();
         break;
-      }
       case "startdev":
         this.hooks.onEvent({ type: "USER_START_DEVELOPMENT" });
         break;
@@ -278,36 +281,56 @@ export class Panel {
       case "sendnow":
         this.hooks.onEvent({ type: "COOLDOWN_ELAPSED" });
         break;
-      case "reply": {
-        const text = this.refValue("reply");
-        if (!text.trim()) return;
-        this.hooks.onEvent({ type: "USER_REPLY", text });
+      case "reply":
+        this.sendReply();
         break;
-      }
-      case "stop": {
-        if (!this.stopArmed) {
-          this.stopArmed = true;
-          (target as HTMLElement).textContent = "Confirm stop";
-          setTimeout(() => {
-            this.stopArmed = false;
-            if (target.isConnected) (target as HTMLElement).textContent = "Stop";
-          }, 3000);
-          return;
-        }
-        this.hooks.onEvent({ type: "USER_STOP" });
+      case "stop":
+        this.stopRun(target);
         break;
-      }
       case "newproject":
         this.hooks.onNewProject();
         break;
-      case "copyhandoff": {
-        const prompt = this.hooks.getHandoffPrompt();
-        void navigator.clipboard.writeText(prompt).then(() => {
-          (target as HTMLElement).textContent = "Copied — paste it into a new chat";
-        });
+      case "copyhandoff":
+        this.copyHandoff(target);
         break;
-      }
     }
+  }
+
+  private startProject(): void {
+    const idea = this.refValue("idea");
+    if (!idea.trim()) return;
+    this.hooks.onEvent({
+      type: "USER_START",
+      idea,
+      repoMode: this.radioValue("repomode") === "existing" ? "existing" : "new",
+      repoName: this.refValue("reponame").trim(),
+    });
+  }
+
+  private sendReply(): void {
+    const text = this.refValue("reply");
+    if (!text.trim()) return;
+    this.hooks.onEvent({ type: "USER_REPLY", text });
+  }
+
+  private stopRun(target: HTMLElement): void {
+    if (!this.stopArmed) {
+      this.stopArmed = true;
+      target.textContent = "Confirm stop";
+      setTimeout(() => {
+        this.stopArmed = false;
+        if (target.isConnected) target.textContent = "Stop";
+      }, 3000);
+      return;
+    }
+    this.hooks.onEvent({ type: "USER_STOP" });
+  }
+
+  private copyHandoff(target: HTMLElement): void {
+    const prompt = this.hooks.getHandoffPrompt();
+    void navigator.clipboard.writeText(prompt).then(() => {
+      target.textContent = "Copied — paste it into a new chat";
+    });
   }
 
   private refValue(ref: string): string {

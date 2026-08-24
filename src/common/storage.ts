@@ -55,10 +55,14 @@ export async function acquireTabLock(conversationId: string, nonce: string): Pro
   return true;
 }
 
-export async function heartbeatTabLock(conversationId: string, nonce: string): Promise<void> {
-  await chrome.storage.local.set({
-    [lockKey(conversationId)]: { nonce, at: Date.now() } satisfies TabLock,
-  });
+/** Refresh only a lock this tab still owns; never overwrite a newer owner after suspension. */
+export async function heartbeatTabLock(conversationId: string, nonce: string): Promise<boolean> {
+  const key = lockKey(conversationId);
+  const found = await chrome.storage.local.get(key);
+  const lock = found[key] as TabLock | undefined;
+  if (!lock || lock.nonce !== nonce) return false;
+  await chrome.storage.local.set({ [key]: { nonce, at: Date.now() } satisfies TabLock });
+  return true;
 }
 
 export async function releaseTabLock(conversationId: string, nonce: string): Promise<void> {
