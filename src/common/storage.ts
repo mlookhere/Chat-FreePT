@@ -79,3 +79,31 @@ export async function migrateRunKey(state: RunState, newConversationId: string):
   if (old !== newConversationId) await chrome.storage.local.remove(runKey(old));
   return next;
 }
+
+/**
+ * Move a pending run to its permanent conversation id without creating a second driver.
+ * The caller already owns the old-id lock and must pause its old-id heartbeat while this
+ * transfer runs.
+ */
+export async function adoptConversationOwnership(
+  state: RunState,
+  newConversationId: string,
+  nonce: string,
+): Promise<RunState | null> {
+  const oldConversationId = state.conversationId;
+  if (oldConversationId === newConversationId) return state;
+
+  const acquired = await acquireTabLock(newConversationId, nonce);
+  if (!acquired) return null;
+
+  let migrated: RunState;
+  try {
+    migrated = await migrateRunKey(state, newConversationId);
+  } catch (error) {
+    await releaseTabLock(newConversationId, nonce);
+    throw error;
+  }
+
+  await releaseTabLock(oldConversationId, nonce);
+  return migrated;
+}
