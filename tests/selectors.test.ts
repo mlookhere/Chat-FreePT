@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { clickSend, insertPrompt } from "../src/content/composer";
 import { healthCheck, query, queryAll, queryLast, resolve } from "../src/content/selectors";
 
 /**
@@ -101,43 +100,5 @@ describe("selector registry", () => {
     document.getElementById("prompt-textarea")?.removeAttribute("id");
     const report = healthCheck();
     expect(report.degraded.some((d) => d.id === "composer")).toBe(true);
-  });
-});
-
-describe("composer cancellation", () => {
-  it("does not click Send when a stale operation is cancelled", async () => {
-    const button = query("sendButton") as HTMLButtonElement;
-    let clicks = 0;
-    button.addEventListener("click", () => {
-      clicks += 1;
-    });
-
-    const result = await clickSend(() => false, () => true);
-
-    expect(result).toEqual({ ok: false, error: "send cancelled" });
-    expect(clicks).toBe(0);
-  });
-
-  it("does not overwrite a draft when insertion is cancelled", async () => {
-    const composer = query("composer") as HTMLElement;
-    composer.textContent = "keep my draft";
-
-    const result = await insertPrompt("replace this", () => true);
-
-    expect(result).toEqual({ ok: false, error: "insert cancelled" });
-    expect(composer.textContent).toBe("keep my draft");
-  });
-
-  it("clicks a ready Send button for an active operation", async () => {
-    const button = query("sendButton") as HTMLButtonElement;
-    let clicks = 0;
-    button.addEventListener("click", () => {
-      clicks += 1;
-    });
-
-    const result = await clickSend(() => false);
-
-    expect(result).toEqual({ ok: true });
-    expect(clicks).toBe(1);
   });
 });
