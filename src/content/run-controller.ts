@@ -190,6 +190,7 @@ export class RunController {
   }
 
   private async insertAndSend(kind: string, text?: string): Promise<void> {
+    if (this.disposed) return;
     const health = healthCheck();
     if (health.missing.length > 0) {
       this.dispatch({
@@ -216,7 +217,8 @@ export class RunController {
     }
 
     const prompt = this.buildPrompt(kind, text);
-    const inserted = await insertPrompt(prompt);
+    const inserted = await insertPrompt(prompt, () => this.disposed);
+    if (this.disposed) return;
     if (!inserted.ok) {
       this.dispatch({ type: "INSERT_FAIL", detail: inserted.error ?? "unknown" });
       return;
@@ -224,7 +226,11 @@ export class RunController {
     this.dispatch({ type: "INSERT_OK" });
 
     this.watcher.expectReply();
-    const sent = await clickSend(() => this.watcher.isStreaming());
+    const sent = await clickSend(
+      () => this.watcher.isStreaming(),
+      () => this.disposed,
+    );
+    if (this.disposed) return;
     if (!sent.ok) {
       this.watcher.cancelExpectedReply();
       this.dispatch({ type: "SEND_FAIL", detail: sent.error ?? "unknown" });
