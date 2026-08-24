@@ -3,11 +3,12 @@ import { buildHandoffPrompt } from "../common/prompts";
 import { isActive, newRunState } from "../common/state-machine";
 import {
   acquireTabLock,
+  adoptConversationOwnership,
   heartbeatTabLock,
   loadRun,
   loadSettings,
-  migrateRunKey,
   releaseTabLock,
+  saveRun,
 } from "../common/storage";
 import type { ContentRequest } from "../common/types";
 import { conversationIdFromUrl, watchNavigation } from "./navigation";
@@ -27,10 +28,22 @@ function conversationKeyFromLocation(): string {
   return conversationIdFromUrl(location.href) ?? `pending:${crypto.randomUUID()}`;
 }
 
+function stopHeartbeat(): void {
+  if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
+  heartbeatTimer = undefined;
+}
+
+function startHeartbeat(): void {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    void heartbeatTabLock(currentConvId, tabNonce);
+  }, HEARTBEAT_MS);
+}
+
 async function initConversation(convId: string): Promise<void> {
   controller?.dispose();
   controller = null;
-  if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
+  stopHeartbeat();
   currentConvId = convId;
 
   const settings = await loadSettings();
@@ -42,9 +55,7 @@ async function initConversation(convId: string): Promise<void> {
     panel?.render(state);
     return;
   }
-  heartbeatTimer = setInterval(() => {
-    void heartbeatTabLock(currentConvId, tabNonce);
-  }, HEARTBEAT_MS);
+  startHeartbeat();
 
   const ctl = new RunController(state, settings, {
     onChange: (s) => panel?.render(s),
@@ -62,17 +73,39 @@ async function initConversation(convId: string): Promise<void> {
   }
 }
 
-function onNavigate(href: string): void {
+async function onNavigate(href: string): Promise<void> {
   const urlConv = conversationIdFromUrl(href);
 
-  // A brand-new chat just got its permanent id — adopt it, don't restart.
+  // A brand-new chat just got its permanent id — transfer both state and driver ownership.
   if (urlConv && currentConvId.startsWith("pending:") && controller) {
     const pendingId = currentConvId;
+    const ctl = controller;
+    stopHeartbeat();
+
+    let migrated;
+    try {
+      migrated = await adoptConversationOwnership(ctl.state, urlConv, tabNonce);
+    } catch (error) {
+      log.warn("failed to adopt permanent conversation id", error);
+      startHeartbeat();
+      return;
+    }
+
+    if (!migrated) {
+      ctl.dispose();
+      controller = null;
+      await releaseTabLock(pendingId, tabNonce);
+      currentConvId = urlConv;
+      const state = (await loadRun(urlConv)) ?? newRunState(urlConv, Date.now());
+      panel?.render(state);
+      log.warn("another tab owns the permanent conversation id; staying passive");
+      return;
+    }
+
     currentConvId = urlConv;
-    controller.adoptConversationId(urlConv);
-    void migrateRunKey(controller.state, urlConv);
-    void releaseTabLock(pendingId, tabNonce);
-    void acquireTabLock(urlConv, tabNonce);
+    ctl.state = migrated;
+    panel?.render(migrated);
+    startHeartbeat();
     log.info("adopted conversation id", urlConv);
     return;
   }
@@ -80,12 +113,12 @@ function onNavigate(href: string): void {
   if (urlConv === currentConvId) return;
   if (!urlConv && currentConvId.startsWith("pending:")) return;
 
-  // Real conversation switch: pause anything active, then re-init for the new one.
+  // Real conversation switch: pause anything active, release ownership, then initialize.
   if (controller && isActive(controller.state)) {
     controller.dispatch({ type: "USER_PAUSE" });
   }
-  void releaseTabLock(currentConvId, tabNonce);
-  void initConversation(urlConv ?? `pending:${crypto.randomUUID()}`);
+  await releaseTabLock(currentConvId, tabNonce);
+  await initConversation(urlConv ?? `pending:${crypto.randomUUID()}`);
 }
 
 async function boot(): Promise<void> {
@@ -102,6 +135,7 @@ async function boot(): Promise<void> {
       if (!controller) return;
       const fresh = newRunState(currentConvId, Date.now());
       controller.state = fresh;
+      void saveRun(fresh).catch((err) => log.warn("state save failed", err));
       panel?.render(fresh);
     },
     getHandoffPrompt: () => (controller ? buildHandoffPrompt(controller.state) : ""),
@@ -115,7 +149,7 @@ async function boot(): Promise<void> {
     void releaseTabLock(currentConvId, tabNonce);
   });
 
-  watchNavigation(onNavigate);
+  watchNavigation((href) => void onNavigate(href));
   await initConversation(conversationKeyFromLocation());
   log.info("Chat FreePT ready");
 }
