@@ -12,7 +12,9 @@ beforeEach(() => {
 
 describe("composer cancellation", () => {
   it("does not click Send when the operation was cancelled", async () => {
-    const button = document.querySelector('[data-testid="send-button"]') as HTMLButtonElement;
+    const button = document.querySelector(
+      '[data-testid="send-button"]',
+    ) as HTMLButtonElement;
     const clicked = vi.fn();
     button.addEventListener("click", clicked);
 
@@ -33,7 +35,9 @@ describe("composer cancellation", () => {
   });
 
   it("clicks a ready Send button on an active operation", async () => {
-    const button = document.querySelector('[data-testid="send-button"]') as HTMLButtonElement;
+    const button = document.querySelector(
+      '[data-testid="send-button"]',
+    ) as HTMLButtonElement;
     const clicked = vi.fn();
     button.addEventListener("click", clicked);
 
