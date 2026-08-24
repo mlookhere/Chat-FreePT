@@ -1,0 +1,21 @@
+name: Format debug
+
+on:
+  push:
+    branches:
+      - work/20-controller-integration
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Print Prettier diff
+        run: |
+          npx prettier --write tests/selectors.test.ts
+          git diff -- tests/selectors.test.ts
