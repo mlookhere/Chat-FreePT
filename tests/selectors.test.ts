@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { healthCheck, query, queryLast, resolve } from "../src/content/selectors";
+import { healthCheck, query, queryAll, queryLast, resolve } from "../src/content/selectors";
 
 /**
  * Synthetic fixture reflecting chatgpt.com's known structure (composer, send button,
@@ -46,6 +46,20 @@ describe("selector registry", () => {
   it("queryLast returns the newest assistant message", () => {
     const el = queryLast("assistantMessage");
     expect(el?.getAttribute("data-message-id")).toBe("a2");
+  });
+
+  it("queryAll returns all alert and toast matches", () => {
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<div role="alert">one</div><div class="toast-banner">two</div>',
+    );
+    expect(queryAll("pageAlert").map((el) => el.textContent)).toEqual(["one", "two"]);
+  });
+
+  it("resolves tool indicators inside a scoped assistant turn", () => {
+    const turn = queryLast("assistantMessage") as HTMLElement;
+    turn.insertAdjacentHTML("beforeend", '<span data-testid="tool-call">GitHub</span>');
+    expect(query("toolIndicator", turn)?.textContent).toBe("GitHub");
   });
 
   it("falls back down the candidate list", () => {
