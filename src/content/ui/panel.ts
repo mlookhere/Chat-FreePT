@@ -75,30 +75,30 @@ export class Panel {
     this.panelEl.classList.toggle("cfpt-hidden", !show);
   }
 
-  render(state: RunState): void {
-    this.fab.dataset["state"] = fabState(state);
+  render(state: RunState, passive = false): void {
+    this.fab.dataset["state"] = passive ? "attention" : fabState(state);
 
-    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}`;
+    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${passive}`;
     if (viewKey !== this.lastViewKey) {
       this.lastViewKey = viewKey;
       this.stopArmed = false;
-      this.panelEl.innerHTML = this.viewHtml(state);
+      this.panelEl.innerHTML = this.viewHtml(state, passive);
     }
     this.updateDynamic(state);
   }
 
-  private viewHtml(state: RunState): string {
+  private viewHtml(state: RunState, passive: boolean): string {
     return `
       <div class="cfpt-header">
         <span class="cfpt-title">Chat FreePT</span>
         <span class="cfpt-chip" data-phase="${esc(state.phase)}">${esc(phaseLabel(state.phase))}</span>
         <button class="cfpt-btn" data-action="close" style="margin:0;padding:2px 8px">×</button>
       </div>
-      <div class="cfpt-body">${this.bodyHtml(state)}</div>
+      <div class="cfpt-body">${this.bodyHtml(state, passive)}</div>
     `;
   }
 
-  private bodyHtml(state: RunState): string {
+  private bodyHtml(state: RunState, passive: boolean): string {
     const health = healthCheck();
     const warn =
       health.missing.length > 0
@@ -106,6 +106,8 @@ export class Panel {
             health.missing.join(", "),
           )}. Auto-run cannot operate until the extension is updated.</div>`
         : "";
+
+    if (passive) return warn + this.passiveHtml(state);
 
     switch (state.status) {
       case "idle":
@@ -128,6 +130,17 @@ export class Panel {
       default:
         return warn;
     }
+  }
+
+  private passiveHtml(state: RunState): string {
+    return `
+      <h3>Active in another tab</h3>
+      <p class="cfpt-note">Another ChatGPT tab currently owns this conversation. This tab is
+      read-only and will take over automatically if the other tab closes or stops responding.</p>
+      <p class="cfpt-note">Current state: ${esc(phaseLabel(state.phase))} · ${esc(
+        STATUS_LABEL[state.status] ?? state.status,
+      )}</p>
+    `;
   }
 
   private ideaFormHtml(state: RunState): string {
