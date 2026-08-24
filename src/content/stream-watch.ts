@@ -1,6 +1,6 @@
+import { log } from "../common/log";
 import { parseMarker } from "../common/marker";
 import type { Settings } from "../common/types";
-import { log } from "../common/log";
 import { query } from "./selectors";
 import { conversationRootEl, lastAssistantMessage, toolCallIndicatorVisible } from "./transcript";
 
@@ -10,16 +10,15 @@ export interface StreamCallbacks {
   onStuck: () => void;
 }
 
-type WatchState = "idle" | "streaming" | "settling";
+type WatchState = "idle" | "waiting" | "streaming" | "settling";
 
 const TICK_MS = 800;
 const MARKER_FAST_PATH_MS = 1200;
 
 /**
- * Streaming detection composed from three signals, because each alone lies:
- * the stop button (flickers during MCP tool calls), mutation quiescence (pauses during
- * long tool calls), and — strongest for our protocol — a parseable status marker in the
- * settled text.
+ * Streaming detection composed from independent signals: an explicit expectation after
+ * this extension sends, the stop button, assistant-turn mutations, and settled marker
+ * text. No single ChatGPT DOM affordance is trusted as the only source of truth.
  */
 export class StreamWatcher {
   private state: WatchState = "idle";
@@ -27,6 +26,9 @@ export class StreamWatcher {
   private settleStartedAt = 0;
   private streamStartedAt = 0;
   private stuckReported = false;
+  private replyObserved = false;
+  private baselineElement: HTMLElement | null = null;
+  private baselineText = "";
   private timer: ReturnType<typeof setInterval> | undefined;
   private observer: MutationObserver | undefined;
 
@@ -53,7 +55,25 @@ export class StreamWatcher {
     this.timer = undefined;
     this.observer?.disconnect();
     this.observer = undefined;
-    this.state = "idle";
+    this.reset();
+  }
+
+  /** Arm before clicking Send so a missing stop button cannot strand the reply lifecycle. */
+  expectReply(): void {
+    const message = lastAssistantMessage();
+    this.baselineElement = message?.el ?? null;
+    this.baselineText = message?.text ?? "";
+    this.state = "waiting";
+    this.streamStartedAt = Date.now();
+    this.lastMutationAt = this.streamStartedAt;
+    this.settleStartedAt = 0;
+    this.stuckReported = false;
+    this.replyObserved = false;
+  }
+
+  /** Sending failed, so the armed reply must not consume a later unrelated assistant turn. */
+  cancelExpectedReply(): void {
+    this.reset();
   }
 
   isStreaming(): boolean {
@@ -66,29 +86,23 @@ export class StreamWatcher {
 
     switch (this.state) {
       case "idle": {
-        if (stopVisible) {
-          this.state = "streaming";
-          this.streamStartedAt = now;
-          this.stuckReported = false;
-          this.callbacks.onStart();
+        if (stopVisible) this.observeReplyStart(now, true);
+        break;
+      }
+      case "waiting": {
+        this.checkStuck(now);
+        if (stopVisible || this.assistantTurnChanged()) {
+          this.observeReplyStart(now, stopVisible);
         }
         break;
       }
       case "streaming": {
-        if (
-          !this.stuckReported &&
-          now - this.streamStartedAt > this.settings.maxStreamMinutes * 60_000
-        ) {
-          this.stuckReported = true;
-          this.callbacks.onStuck();
-        }
-        if (!stopVisible) {
-          this.state = "settling";
-          this.settleStartedAt = now;
-        }
+        this.checkStuck(now);
+        if (!stopVisible) this.enterSettling(now);
         break;
       }
       case "settling": {
+        this.checkStuck(now);
         if (stopVisible) {
           this.state = "streaming";
           break;
@@ -104,13 +118,62 @@ export class StreamWatcher {
           quietFor > MARKER_FAST_PATH_MS && message !== null && parseMarker(message.text) !== null;
 
         if (markerReady || quietFor > threshold) {
-          this.state = "idle";
           const text = message?.text ?? "";
           log.debug(`reply complete (${markerReady ? "marker fast-path" : "quiescence"})`);
+          this.reset();
           this.callbacks.onComplete(text);
         }
         break;
       }
     }
+  }
+
+  private assistantTurnChanged(): boolean {
+    const message = lastAssistantMessage();
+    if (!message) return false;
+    if (!this.baselineElement) return true;
+    return message.el !== this.baselineElement || message.text !== this.baselineText;
+  }
+
+  private observeReplyStart(now: number, stopVisible: boolean): void {
+    if (!this.replyObserved) {
+      this.replyObserved = true;
+      if (this.streamStartedAt === 0) this.streamStartedAt = now;
+      this.stuckReported = false;
+      this.callbacks.onStart();
+    }
+    if (stopVisible) {
+      this.state = "streaming";
+      return;
+    }
+    this.enterSettling(now);
+  }
+
+  private enterSettling(now: number): void {
+    this.state = "settling";
+    this.settleStartedAt = now;
+    this.lastMutationAt = now;
+  }
+
+  private checkStuck(now: number): void {
+    if (
+      !this.stuckReported &&
+      this.streamStartedAt > 0 &&
+      now - this.streamStartedAt > this.settings.maxStreamMinutes * 60_000
+    ) {
+      this.stuckReported = true;
+      this.callbacks.onStuck();
+    }
+  }
+
+  private reset(): void {
+    this.state = "idle";
+    this.lastMutationAt = 0;
+    this.settleStartedAt = 0;
+    this.streamStartedAt = 0;
+    this.stuckReported = false;
+    this.replyObserved = false;
+    this.baselineElement = null;
+    this.baselineText = "";
   }
 }
