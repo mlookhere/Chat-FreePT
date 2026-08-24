@@ -60,6 +60,8 @@ type UserEvent = Extract<
       | "USER_REPLY";
   }
 >;
+type StartEvent = Extract<UserEvent, { type: "USER_START" }>;
+type UserReplyEvent = Extract<UserEvent, { type: "USER_REPLY" }>;
 type SendEvent = Extract<
   MachineEvent,
   { type: "INSERT_OK" | "INSERT_FAIL" | "SEND_OK" | "SEND_FAIL" }
@@ -170,82 +172,100 @@ function fail(ctx: ReduceContext, code: ErrorCode, message: string): void {
 }
 
 function reduceUserEvent(ctx: ReduceContext, event: UserEvent): boolean {
-  const state = ctx.state;
   switch (event.type) {
-    case "USER_START": {
-      if (state.status !== "idle" && state.phase !== "stopped" && state.phase !== "complete") {
-        return false;
-      }
-      state.phase = "planning";
-      state.status = "inserting";
-      state.idea = event.idea;
-      state.repoMode = event.repoMode;
-      state.repoName = event.repoName;
-      state.autoSends = 0;
-      state.nudges = 0;
-      state.repliesSinceContract = 0;
-      state.startedAt = ctx.now;
-      delete state.errorCode;
-      delete state.pauseReason;
-      note(ctx, "info", "Planning started");
-      ctx.effects.push({ do: "insertAndSend", kind: "plan" }, { do: "badge", text: "RUN" });
-      return true;
-    }
+    case "USER_START":
+      return startRun(ctx, event);
     case "USER_START_DEVELOPMENT":
-      if (state.phase !== "plan_ready") return false;
-      state.phase = "developing";
-      state.status = "inserting";
-      state.autoSends = 0;
-      state.nudges = 0;
-      note(ctx, "info", "Development started");
-      ctx.effects.push({ do: "insertAndSend", kind: "develop" }, { do: "badge", text: "RUN" });
-      return true;
+      return startDevelopment(ctx);
     case "USER_PAUSE":
-      if (state.status === "paused") return false;
-      state.status = "paused";
-      state.pauseReason = "Paused by you";
-      note(ctx, "info", "Paused");
-      ctx.effects.push({ do: "badge", text: "II" });
-      return true;
+      return pauseRun(ctx);
     case "USER_RESUME":
-      if (
-        state.status !== "paused" &&
-        state.status !== "error" &&
-        state.status !== "awaiting_user"
-      ) {
-        return false;
-      }
-      state.status = "streaming";
-      delete state.pauseReason;
-      delete state.errorCode;
-      note(ctx, "info", "Resumed — re-checking conversation state");
-      ctx.effects.push({ do: "reconcile" }, { do: "badge", text: "RUN" });
-      return true;
+      return resumeRun(ctx);
     case "USER_STOP":
-      state.phase = "stopped";
-      state.status = "idle";
-      note(ctx, "info", "Stopped");
-      ctx.effects.push({ do: "badge", text: "" });
-      return true;
+      return stopRun(ctx);
     case "USER_REPLY":
-      if (
-        state.status !== "awaiting_user" &&
-        state.status !== "paused" &&
-        state.status !== "error"
-      ) {
-        return false;
-      }
-      state.status = "inserting";
-      state.nudges = 0;
-      delete state.pauseReason;
-      delete state.errorCode;
-      note(ctx, "send", "Sending your reply");
-      ctx.effects.push(
-        { do: "insertAndSend", kind: "user_text", text: event.text },
-        { do: "badge", text: "RUN" },
-      );
-      return true;
+      return sendUserReply(ctx, event);
   }
+}
+
+function startRun(ctx: ReduceContext, event: StartEvent): boolean {
+  const state = ctx.state;
+  if (state.status !== "idle" && state.phase !== "stopped" && state.phase !== "complete") {
+    return false;
+  }
+  state.phase = "planning";
+  state.status = "inserting";
+  state.idea = event.idea;
+  state.repoMode = event.repoMode;
+  state.repoName = event.repoName;
+  state.autoSends = 0;
+  state.nudges = 0;
+  state.repliesSinceContract = 0;
+  state.startedAt = ctx.now;
+  delete state.errorCode;
+  delete state.pauseReason;
+  note(ctx, "info", "Planning started");
+  ctx.effects.push({ do: "insertAndSend", kind: "plan" }, { do: "badge", text: "RUN" });
+  return true;
+}
+
+function startDevelopment(ctx: ReduceContext): boolean {
+  const state = ctx.state;
+  if (state.phase !== "plan_ready") return false;
+  state.phase = "developing";
+  state.status = "inserting";
+  state.autoSends = 0;
+  state.nudges = 0;
+  note(ctx, "info", "Development started");
+  ctx.effects.push({ do: "insertAndSend", kind: "develop" }, { do: "badge", text: "RUN" });
+  return true;
+}
+
+function pauseRun(ctx: ReduceContext): boolean {
+  if (ctx.state.status === "paused") return false;
+  ctx.state.status = "paused";
+  ctx.state.pauseReason = "Paused by you";
+  note(ctx, "info", "Paused");
+  ctx.effects.push({ do: "badge", text: "II" });
+  return true;
+}
+
+function resumeRun(ctx: ReduceContext): boolean {
+  const state = ctx.state;
+  if (state.status !== "paused" && state.status !== "error" && state.status !== "awaiting_user") {
+    return false;
+  }
+  state.status = "streaming";
+  delete state.pauseReason;
+  delete state.errorCode;
+  note(ctx, "info", "Resumed — re-checking conversation state");
+  ctx.effects.push({ do: "reconcile" }, { do: "badge", text: "RUN" });
+  return true;
+}
+
+function stopRun(ctx: ReduceContext): boolean {
+  ctx.state.phase = "stopped";
+  ctx.state.status = "idle";
+  note(ctx, "info", "Stopped");
+  ctx.effects.push({ do: "badge", text: "" });
+  return true;
+}
+
+function sendUserReply(ctx: ReduceContext, event: UserReplyEvent): boolean {
+  const state = ctx.state;
+  if (state.status !== "awaiting_user" && state.status !== "paused" && state.status !== "error") {
+    return false;
+  }
+  state.status = "inserting";
+  state.nudges = 0;
+  delete state.pauseReason;
+  delete state.errorCode;
+  note(ctx, "send", "Sending your reply");
+  ctx.effects.push(
+    { do: "insertAndSend", kind: "user_text", text: event.text },
+    { do: "badge", text: "RUN" },
+  );
+  return true;
 }
 
 function reduceSendEvent(ctx: ReduceContext, event: SendEvent): boolean {
@@ -409,7 +429,11 @@ function handleContinue(ctx: ReduceContext): void {
     return;
   }
   if (state.autoSends >= ctx.settings.autoContinueCap) {
-    fail(ctx, "cap-reached", `Auto-continue cap (${ctx.settings.autoContinueCap}) reached for this phase.`);
+    fail(
+      ctx,
+      "cap-reached",
+      `Auto-continue cap (${ctx.settings.autoContinueCap}) reached for this phase.`,
+    );
     return;
   }
   state.status = "cooldown";
