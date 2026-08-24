@@ -12,7 +12,9 @@ export type TargetId =
   | "userMessage"
   | "conversationRoot"
   | "regenerateButton"
-  | "loginButton";
+  | "loginButton"
+  | "pageAlert"
+  | "toolIndicator";
 
 export interface Candidate {
   css: string;
@@ -85,6 +87,14 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: "button, a", textRe: /^log in$/i },
     ],
   },
+  pageAlert: {
+    required: false,
+    candidates: [{ css: '[role="alert"], [class*="toast"]' }],
+  },
+  toolIndicator: {
+    required: false,
+    candidates: [{ css: '[data-testid*="tool"]' }],
+  },
 };
 
 function matches(candidate: Candidate, root: ParentNode): Element[] {
@@ -118,6 +128,15 @@ export function resolve(id: TargetId, root: ParentNode = document): Resolution |
 
 export function query(id: TargetId, root: ParentNode = document): Element | null {
   return resolve(id, root)?.element ?? null;
+}
+
+/** All matches from the first viable candidate, preserving registry fallback order. */
+export function queryAll(id: TargetId, root: ParentNode = document): Element[] {
+  for (const candidate of REGISTRY[id].candidates) {
+    const found = matches(candidate, root);
+    if (found.length > 0) return found;
+  }
+  return [];
 }
 
 /** Last match wins — used for "the newest assistant message". */

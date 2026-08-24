@@ -1,5 +1,5 @@
 import type { PageSignal } from "../common/types";
-import { query } from "./selectors";
+import { query, queryAll } from "./selectors";
 
 const RATE_LIMIT_RE =
   /you(?:'|’)?ve (?:hit|reached) (?:your|the) (?:limit|cap)|too many (?:requests|messages)|reached (?:your|the) message (?:limit|cap)|try again (?:later|after)|usage cap/i;
@@ -7,8 +7,9 @@ const CONVERSATION_FULL_RE =
   /maximum (?:conversation )?length|conversation is too long|start a new chat to continue/i;
 
 function alertTexts(): string[] {
-  const nodes = document.querySelectorAll('[role="alert"], [class*="toast"]');
-  return Array.from(nodes, (n) => (n as HTMLElement).innerText ?? "").filter(Boolean);
+  return queryAll("pageAlert")
+    .map((node) => (node as HTMLElement).innerText ?? node.textContent ?? "")
+    .filter(Boolean);
 }
 
 /**

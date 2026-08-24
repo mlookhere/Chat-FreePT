@@ -29,7 +29,7 @@ export function lastMessageRole(): "assistant" | "user" | null {
 export function toolCallIndicatorVisible(): boolean {
   const turn = queryLast("assistantMessage") as HTMLElement | null;
   if (!turn) return false;
-  if (turn.querySelector('[data-testid*="tool"]')) return true;
+  if (query("toolIndicator", turn)) return true;
   const probe = turn.parentElement ?? turn;
   const text = (probe.innerText ?? "").slice(0, 400);
   return /\b(Working|Running|Using|Calling|Searching|Reading|Talking to|Connecting)\b(\.\.\.|…)?/.test(
