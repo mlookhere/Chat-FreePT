@@ -124,7 +124,9 @@ export class StreamWatcher {
 
     const quietSince = Math.max(this.lastMutationAt, this.settleStartedAt);
     const quietFor = now - quietSince;
-    const threshold = toolCallIndicatorVisible() ? this.settings.toolQuietMs : this.settings.quietMs;
+    const threshold = toolCallIndicatorVisible()
+      ? this.settings.toolQuietMs
+      : this.settings.quietMs;
     const message = lastAssistantMessage();
     const markerReady =
       quietFor > MARKER_FAST_PATH_MS && message !== null && parseMarker(message.text) !== null;
