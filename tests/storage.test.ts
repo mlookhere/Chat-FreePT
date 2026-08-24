@@ -80,3 +80,34 @@ describe("tab lock", () => {
     expect(await storage.acquireTabLock("c1", "tab-c")).toBe(true);
   });
 });
+
+describe("conversation ownership", () => {
+  it("moves the run and transfers the driver lock to the permanent id", async () => {
+    const state = newRunState("pending:abc", 1);
+    await storage.saveRun(state);
+    await storage.acquireTabLock("pending:abc", "tab-a");
+
+    const migrated = await storage.adoptConversationOwnership(state, "real-id", "tab-a");
+
+    expect(migrated?.conversationId).toBe("real-id");
+    expect(await storage.loadRun("pending:abc")).toBeNull();
+    expect(await storage.loadRun("real-id")).toEqual(migrated);
+    expect(await storage.acquireTabLock("pending:abc", "tab-b")).toBe(true);
+    expect(await storage.acquireTabLock("real-id", "tab-b")).toBe(false);
+  });
+
+  it("does not migrate when another tab owns the permanent id", async () => {
+    const state = newRunState("pending:abc", 1);
+    await storage.saveRun(state);
+    await storage.acquireTabLock("pending:abc", "tab-a");
+    await storage.acquireTabLock("real-id", "tab-b");
+
+    const migrated = await storage.adoptConversationOwnership(state, "real-id", "tab-a");
+
+    expect(migrated).toBeNull();
+    expect(await storage.loadRun("pending:abc")).toEqual(state);
+    expect(await storage.loadRun("real-id")).toBeNull();
+    expect(await storage.acquireTabLock("pending:abc", "tab-c")).toBe(false);
+    expect(await storage.acquireTabLock("real-id", "tab-c")).toBe(false);
+  });
+});
