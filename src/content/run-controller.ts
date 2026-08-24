@@ -197,8 +197,10 @@ export class RunController {
     }
     this.dispatch({ type: "INSERT_OK" });
 
+    this.watcher.expectReply();
     const sent = await clickSend(() => this.watcher.isStreaming());
     if (!sent.ok) {
+      this.watcher.cancelExpectedReply();
       this.dispatch({ type: "SEND_FAIL", detail: sent.error ?? "unknown" });
       return;
     }
