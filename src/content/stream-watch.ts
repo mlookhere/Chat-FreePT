@@ -83,49 +83,59 @@ export class StreamWatcher {
   private tick(): void {
     const now = Date.now();
     const stopVisible = this.isStreaming();
-
     switch (this.state) {
-      case "idle": {
-        if (stopVisible) this.observeReplyStart(now, true);
+      case "idle":
+        this.tickIdle(now, stopVisible);
         break;
-      }
-      case "waiting": {
-        this.checkStuck(now);
-        if (stopVisible || this.assistantTurnChanged()) {
-          this.observeReplyStart(now, stopVisible);
-        }
+      case "waiting":
+        this.tickWaiting(now, stopVisible);
         break;
-      }
-      case "streaming": {
-        this.checkStuck(now);
-        if (!stopVisible) this.enterSettling(now);
+      case "streaming":
+        this.tickStreaming(now, stopVisible);
         break;
-      }
-      case "settling": {
-        this.checkStuck(now);
-        if (stopVisible) {
-          this.state = "streaming";
-          break;
-        }
-        const quietSince = Math.max(this.lastMutationAt, this.settleStartedAt);
-        const quietFor = now - quietSince;
-        const threshold = toolCallIndicatorVisible()
-          ? this.settings.toolQuietMs
-          : this.settings.quietMs;
-
-        const message = lastAssistantMessage();
-        const markerReady =
-          quietFor > MARKER_FAST_PATH_MS && message !== null && parseMarker(message.text) !== null;
-
-        if (markerReady || quietFor > threshold) {
-          const text = message?.text ?? "";
-          log.debug(`reply complete (${markerReady ? "marker fast-path" : "quiescence"})`);
-          this.reset();
-          this.callbacks.onComplete(text);
-        }
+      case "settling":
+        this.tickSettling(now, stopVisible);
         break;
-      }
     }
+  }
+
+  private tickIdle(now: number, stopVisible: boolean): void {
+    if (stopVisible) this.observeReplyStart(now, true);
+  }
+
+  private tickWaiting(now: number, stopVisible: boolean): void {
+    this.checkStuck(now);
+    if (stopVisible || this.assistantTurnChanged()) {
+      this.observeReplyStart(now, stopVisible);
+    }
+  }
+
+  private tickStreaming(now: number, stopVisible: boolean): void {
+    this.checkStuck(now);
+    if (!stopVisible) this.enterSettling(now);
+  }
+
+  private tickSettling(now: number, stopVisible: boolean): void {
+    this.checkStuck(now);
+    if (stopVisible) {
+      this.state = "streaming";
+      return;
+    }
+
+    const quietSince = Math.max(this.lastMutationAt, this.settleStartedAt);
+    const quietFor = now - quietSince;
+    const threshold = toolCallIndicatorVisible() ? this.settings.toolQuietMs : this.settings.quietMs;
+    const message = lastAssistantMessage();
+    const markerReady =
+      quietFor > MARKER_FAST_PATH_MS && message !== null && parseMarker(message.text) !== null;
+
+    if (markerReady || quietFor > threshold) this.complete(message?.text ?? "", markerReady);
+  }
+
+  private complete(text: string, markerReady: boolean): void {
+    log.debug(`reply complete (${markerReady ? "marker fast-path" : "quiescence"})`);
+    this.reset();
+    this.callbacks.onComplete(text);
   }
 
   private assistantTurnChanged(): boolean {
