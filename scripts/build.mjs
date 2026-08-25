@@ -1,9 +1,10 @@
 import { build } from "esbuild";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, rm } from "node:fs/promises";
 import { writeIcons } from "./gen-icons.mjs";
 
 const outdir = "dist";
 
+await rm(outdir, { recursive: true, force: true });
 await mkdir(`${outdir}/icons`, { recursive: true });
 
 await build({

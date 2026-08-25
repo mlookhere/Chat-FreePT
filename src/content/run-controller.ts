@@ -8,7 +8,7 @@ import {
   NUDGE_PROMPT,
 } from "../common/prompts";
 import type { Effect, MachineEvent } from "../common/state-machine";
-import { isActive, reduce } from "../common/state-machine";
+import { cooldownRemainingMs, isActive, reduce } from "../common/state-machine";
 import { saveRun } from "../common/storage";
 import type { BgRequest, RunState, Settings } from "../common/types";
 import { clickSend, composerIsEmpty, insertPrompt } from "./composer";
@@ -52,12 +52,13 @@ export class RunController {
     );
     this.watcher.start();
     this.signalTimer = setInterval(() => this.pollSignals(), SIGNAL_POLL_MS);
+    this.restoreCooldown();
   }
 
   dispose(): void {
     this.disposed = true;
     this.watcher.stop();
-    if (this.cooldownTimer !== undefined) clearTimeout(this.cooldownTimer);
+    this.clearCooldownTimer();
     if (this.signalTimer !== undefined) clearInterval(this.signalTimer);
   }
 
@@ -69,9 +70,13 @@ export class RunController {
 
   dispatch(event: MachineEvent): void {
     if (this.disposed) return;
+    const previousStatus = this.state.status;
     const { state, effects } = reduce(this.state, event, this.settings);
     if (state === this.state) return;
     this.state = state;
+    if (previousStatus === "cooldown" && state.status !== "cooldown") {
+      this.clearCooldownTimer();
+    }
     void saveRun(state).catch((err) => log.warn("state save failed", err));
     this.onChange(state);
     for (const effect of effects) void this.execute(effect);
@@ -79,6 +84,10 @@ export class RunController {
 
   /** Re-derive the machine's position from the live DOM (resume, reload, manual resume). */
   reconcile(): void {
+    if (this.state.status === "cooldown") {
+      this.restoreCooldown();
+      return;
+    }
     if (this.watcher.isStreaming()) {
       this.dispatch({ type: "STREAM_STARTED" });
       return;
@@ -112,11 +121,7 @@ export class RunController {
         break;
       }
       case "startCooldown": {
-        if (this.cooldownTimer !== undefined) clearTimeout(this.cooldownTimer);
-        this.cooldownTimer = setTimeout(
-          () => this.dispatch({ type: "COOLDOWN_ELAPSED" }),
-          effect.ms,
-        );
+        this.scheduleCooldown(effect.ms);
         break;
       }
       case "notify": {
@@ -137,6 +142,27 @@ export class RunController {
         break;
       }
     }
+  }
+
+  private restoreCooldown(): void {
+    if (this.state.status !== "cooldown" || this.cooldownTimer !== undefined) return;
+    this.scheduleCooldown(cooldownRemainingMs(this.state));
+  }
+
+  private scheduleCooldown(ms: number): void {
+    if (this.cooldownTimer !== undefined || this.disposed) return;
+    this.cooldownTimer = setTimeout(
+      () => {
+        this.cooldownTimer = undefined;
+        this.dispatch({ type: "COOLDOWN_ELAPSED" });
+      },
+      Math.max(0, ms),
+    );
+  }
+
+  private clearCooldownTimer(): void {
+    if (this.cooldownTimer !== undefined) clearTimeout(this.cooldownTimer);
+    this.cooldownTimer = undefined;
   }
 
   private buildPrompt(kind: string, text?: string): string {
@@ -164,6 +190,7 @@ export class RunController {
   }
 
   private async insertAndSend(kind: string, text?: string): Promise<void> {
+    if (this.disposed) return;
     const health = healthCheck();
     if (health.missing.length > 0) {
       this.dispatch({
@@ -190,15 +217,22 @@ export class RunController {
     }
 
     const prompt = this.buildPrompt(kind, text);
-    const inserted = await insertPrompt(prompt);
+    const inserted = await insertPrompt(prompt, () => this.disposed);
+    if (this.disposed) return;
     if (!inserted.ok) {
       this.dispatch({ type: "INSERT_FAIL", detail: inserted.error ?? "unknown" });
       return;
     }
     this.dispatch({ type: "INSERT_OK" });
 
-    const sent = await clickSend(() => this.watcher.isStreaming());
+    this.watcher.expectReply();
+    const sent = await clickSend(
+      () => this.watcher.isStreaming(),
+      () => this.disposed,
+    );
+    if (this.disposed) return;
     if (!sent.ok) {
+      this.watcher.cancelExpectedReply();
       this.dispatch({ type: "SEND_FAIL", detail: sent.error ?? "unknown" });
       return;
     }

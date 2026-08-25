@@ -1,17 +1,16 @@
 import type { RunState, Settings } from "./types";
-import { DEFAULT_SETTINGS } from "./types";
+import { normalizeSettings } from "./settings";
 
 const SETTINGS_KEY = "cfpt:settings";
 const RUN_PREFIX = "cfpt:run:";
 
 export async function loadSettings(): Promise<Settings> {
   const found = await chrome.storage.sync.get(SETTINGS_KEY);
-  const stored = found[SETTINGS_KEY] as Partial<Settings> | undefined;
-  return { ...DEFAULT_SETTINGS, ...stored };
+  return normalizeSettings(found[SETTINGS_KEY]);
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
-  await chrome.storage.sync.set({ [SETTINGS_KEY]: settings });
+  await chrome.storage.sync.set({ [SETTINGS_KEY]: normalizeSettings(settings) });
 }
 
 export function runKey(conversationId: string): string {
@@ -55,10 +54,14 @@ export async function acquireTabLock(conversationId: string, nonce: string): Pro
   return true;
 }
 
-export async function heartbeatTabLock(conversationId: string, nonce: string): Promise<void> {
-  await chrome.storage.local.set({
-    [lockKey(conversationId)]: { nonce, at: Date.now() } satisfies TabLock,
-  });
+/** Refresh only a lock this tab still owns; never overwrite a newer owner after suspension. */
+export async function heartbeatTabLock(conversationId: string, nonce: string): Promise<boolean> {
+  const key = lockKey(conversationId);
+  const found = await chrome.storage.local.get(key);
+  const lock = found[key] as TabLock | undefined;
+  if (!lock || lock.nonce !== nonce) return false;
+  await chrome.storage.local.set({ [key]: { nonce, at: Date.now() } satisfies TabLock });
+  return true;
 }
 
 export async function releaseTabLock(conversationId: string, nonce: string): Promise<void> {
@@ -78,4 +81,32 @@ export async function migrateRunKey(state: RunState, newConversationId: string):
   await chrome.storage.local.set({ [runKey(newConversationId)]: next });
   if (old !== newConversationId) await chrome.storage.local.remove(runKey(old));
   return next;
+}
+
+/**
+ * Move a pending run to its permanent conversation id without creating a second driver.
+ * The caller already owns the old-id lock and must pause its old-id heartbeat while this
+ * transfer runs.
+ */
+export async function adoptConversationOwnership(
+  state: RunState,
+  newConversationId: string,
+  nonce: string,
+): Promise<RunState | null> {
+  const oldConversationId = state.conversationId;
+  if (oldConversationId === newConversationId) return state;
+
+  const acquired = await acquireTabLock(newConversationId, nonce);
+  if (!acquired) return null;
+
+  let migrated: RunState;
+  try {
+    migrated = await migrateRunKey(state, newConversationId);
+  } catch (error) {
+    await releaseTabLock(newConversationId, nonce);
+    throw error;
+  }
+
+  await releaseTabLock(oldConversationId, nonce);
+  return migrated;
 }

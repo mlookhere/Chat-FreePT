@@ -3,12 +3,14 @@ import { buildHandoffPrompt } from "../common/prompts";
 import { isActive, newRunState } from "../common/state-machine";
 import {
   acquireTabLock,
+  adoptConversationOwnership,
   heartbeatTabLock,
   loadRun,
   loadSettings,
-  migrateRunKey,
   releaseTabLock,
+  saveRun,
 } from "../common/storage";
+import type { RunState, Settings } from "../common/types";
 import type { ContentRequest } from "../common/types";
 import { conversationIdFromUrl, watchNavigation } from "./navigation";
 import { RunController } from "./run-controller";
@@ -16,38 +18,46 @@ import { require_ } from "./selectors";
 import { Panel } from "./ui/panel";
 
 const HEARTBEAT_MS = 5000;
+const TAKEOVER_RETRY_MS = 5000;
 const tabNonce = crypto.randomUUID();
 
 let panel: Panel | null = null;
 let controller: RunController | null = null;
 let currentConvId = "";
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+let takeoverTimer: ReturnType<typeof setTimeout> | undefined;
 
 function conversationKeyFromLocation(): string {
   return conversationIdFromUrl(location.href) ?? `pending:${crypto.randomUUID()}`;
 }
 
-async function initConversation(convId: string): Promise<void> {
-  controller?.dispose();
-  controller = null;
+function stopHeartbeat(): void {
   if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
-  currentConvId = convId;
+  heartbeatTimer = undefined;
+}
 
-  const settings = await loadSettings();
-  const state = (await loadRun(convId)) ?? newRunState(convId, Date.now());
+function stopTakeoverRetry(): void {
+  if (takeoverTimer !== undefined) clearTimeout(takeoverTimer);
+  takeoverTimer = undefined;
+}
 
-  const locked = await acquireTabLock(convId, tabNonce);
-  if (!locked) {
-    log.warn("another tab is driving this conversation; staying passive");
-    panel?.render(state);
-    return;
-  }
+function startHeartbeat(): void {
+  stopHeartbeat();
   heartbeatTimer = setInterval(() => {
-    void heartbeatTabLock(currentConvId, tabNonce);
+    const conversationId = currentConvId;
+    void heartbeatTabLock(conversationId, tabNonce)
+      .then((owned) => {
+        if (!owned) loseOwnership(conversationId);
+      })
+      .catch((error) => log.warn("tab lock heartbeat failed", error));
   }, HEARTBEAT_MS);
+}
 
+function startController(state: RunState, settings: Settings): void {
+  stopTakeoverRetry();
+  startHeartbeat();
   const ctl = new RunController(state, settings, {
-    onChange: (s) => panel?.render(s),
+    onChange: (next) => panel?.render(next),
     onShowModal: () => {
       if (controller) panel?.showCompletionModal(controller.state);
     },
@@ -55,24 +65,113 @@ async function initConversation(convId: string): Promise<void> {
   controller = ctl;
   panel?.render(state);
 
-  // Picking up a run mid-flight after a reload: re-derive position from the live DOM.
   if (isActive(state)) {
     log.info("resuming active run", state.phase, state.status);
-    setTimeout(() => ctl.reconcile(), 2000);
+    setTimeout(() => {
+      if (controller === ctl) ctl.reconcile();
+    }, 2000);
   }
 }
 
-function onNavigate(href: string): void {
+function enterPassive(state: RunState): void {
+  controller?.dispose();
+  controller = null;
+  stopHeartbeat();
+  panel?.render(state, true);
+  scheduleTakeover(state.conversationId);
+}
+
+function scheduleTakeover(conversationId: string): void {
+  stopTakeoverRetry();
+  takeoverTimer = setTimeout(() => void tryTakeover(conversationId), TAKEOVER_RETRY_MS);
+}
+
+async function tryTakeover(conversationId: string): Promise<void> {
+  takeoverTimer = undefined;
+  if (controller || conversationId !== currentConvId) return;
+
+  let acquired = false;
+  try {
+    acquired = await acquireTabLock(conversationId, tabNonce);
+    if (!acquired) {
+      scheduleTakeover(conversationId);
+      return;
+    }
+
+    const [settings, stored] = await Promise.all([loadSettings(), loadRun(conversationId)]);
+    if (controller || conversationId !== currentConvId) {
+      await releaseTabLock(conversationId, tabNonce);
+      return;
+    }
+
+    const state = stored ?? newRunState(conversationId, Date.now());
+    startController(state, settings);
+    log.info("took over conversation after previous tab became inactive");
+  } catch (error) {
+    if (acquired) await releaseTabLock(conversationId, tabNonce);
+    log.warn("conversation ownership retry failed", error);
+    if (!controller && conversationId === currentConvId) scheduleTakeover(conversationId);
+  }
+}
+
+function loseOwnership(conversationId: string): void {
+  if (!controller || conversationId !== currentConvId) return;
+  const state = controller.state;
+  log.warn("conversation ownership moved to another tab; becoming passive");
+  enterPassive(state);
+}
+
+async function initConversation(convId: string): Promise<void> {
+  controller?.dispose();
+  controller = null;
+  stopHeartbeat();
+  stopTakeoverRetry();
+  currentConvId = convId;
+
+  const settings = await loadSettings();
+  const state = (await loadRun(convId)) ?? newRunState(convId, Date.now());
+  const locked = await acquireTabLock(convId, tabNonce);
+  if (!locked) {
+    log.warn("another tab is driving this conversation; staying passive");
+    enterPassive(state);
+    return;
+  }
+
+  startController(state, settings);
+}
+
+async function onNavigate(href: string): Promise<void> {
   const urlConv = conversationIdFromUrl(href);
 
-  // A brand-new chat just got its permanent id — adopt it, don't restart.
   if (urlConv && currentConvId.startsWith("pending:") && controller) {
     const pendingId = currentConvId;
+    const ctl = controller;
+    stopHeartbeat();
+
+    let migrated;
+    try {
+      migrated = await adoptConversationOwnership(ctl.state, urlConv, tabNonce);
+    } catch (error) {
+      log.warn("failed to adopt permanent conversation id", error);
+      startHeartbeat();
+      return;
+    }
+
+    if (!migrated) {
+      ctl.dispose();
+      controller = null;
+      await releaseTabLock(pendingId, tabNonce);
+      currentConvId = urlConv;
+      const state = (await loadRun(urlConv)) ?? newRunState(urlConv, Date.now());
+      log.warn("another tab owns the permanent conversation id; staying passive");
+      enterPassive(state);
+      return;
+    }
+
     currentConvId = urlConv;
-    controller.adoptConversationId(urlConv);
-    void migrateRunKey(controller.state, urlConv);
-    void releaseTabLock(pendingId, tabNonce);
-    void acquireTabLock(urlConv, tabNonce);
+    ctl.state = migrated;
+    panel?.render(migrated);
+    startHeartbeat();
     log.info("adopted conversation id", urlConv);
     return;
   }
@@ -80,12 +179,12 @@ function onNavigate(href: string): void {
   if (urlConv === currentConvId) return;
   if (!urlConv && currentConvId.startsWith("pending:")) return;
 
-  // Real conversation switch: pause anything active, then re-init for the new one.
+  stopTakeoverRetry();
   if (controller && isActive(controller.state)) {
     controller.dispatch({ type: "USER_PAUSE" });
   }
-  void releaseTabLock(currentConvId, tabNonce);
-  void initConversation(urlConv ?? `pending:${crypto.randomUUID()}`);
+  await releaseTabLock(currentConvId, tabNonce);
+  await initConversation(urlConv ?? `pending:${crypto.randomUUID()}`);
 }
 
 async function boot(): Promise<void> {
@@ -102,6 +201,7 @@ async function boot(): Promise<void> {
       if (!controller) return;
       const fresh = newRunState(currentConvId, Date.now());
       controller.state = fresh;
+      void saveRun(fresh).catch((err) => log.warn("state save failed", err));
       panel?.render(fresh);
     },
     getHandoffPrompt: () => (controller ? buildHandoffPrompt(controller.state) : ""),
@@ -112,10 +212,12 @@ async function boot(): Promise<void> {
   });
 
   window.addEventListener("pagehide", () => {
+    stopTakeoverRetry();
+    stopHeartbeat();
     void releaseTabLock(currentConvId, tabNonce);
   });
 
-  watchNavigation(onNavigate);
+  watchNavigation((href) => void onNavigate(href));
   await initConversation(conversationKeyFromLocation());
   log.info("Chat FreePT ready");
 }

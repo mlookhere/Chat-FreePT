@@ -17,11 +17,92 @@ describe("settings", () => {
     expect(await storage.loadSettings()).toEqual(DEFAULT_SETTINGS);
   });
 
-  it("merges stored values over defaults", async () => {
-    await storage.saveSettings({ ...DEFAULT_SETTINGS, autoContinueCap: 7 });
-    const settings = await storage.loadSettings();
-    expect(settings.autoContinueCap).toBe(7);
-    expect(settings.quietMs).toBe(DEFAULT_SETTINGS.quietMs);
+  it.each([
+    {
+      name: "malformed values",
+      stored: {
+        v: 99,
+        continueMessage: "   ",
+        autoContinueCap: -10,
+        sendDelayMs: Number.POSITIVE_INFINITY,
+        quietMs: "3000",
+        toolQuietMs: 999_999,
+        maxStreamMinutes: 0,
+        contractRefreshEvery: 1_000,
+        notificationsEnabled: "yes",
+        templateRepo: null,
+        unknownFutureField: "ignored",
+      },
+      expected: {
+        ...DEFAULT_SETTINGS,
+        autoContinueCap: 1,
+        toolQuietMs: 120_000,
+        maxStreamMinutes: 1,
+        contractRefreshEvery: 100,
+      },
+    },
+    {
+      name: "partial legacy values",
+      stored: {
+        v: 0,
+        continueMessage: "  keep going  ",
+        autoContinueCap: 7,
+        notificationsEnabled: false,
+        obsoleteSetting: true,
+      },
+      expected: {
+        ...DEFAULT_SETTINGS,
+        continueMessage: "keep going",
+        autoContinueCap: 7,
+        notificationsEnabled: false,
+      },
+    },
+    {
+      name: "valid values",
+      stored: {
+        v: 1,
+        continueMessage: "  next  ",
+        autoContinueCap: 500,
+        sendDelayMs: 2_000,
+        quietMs: 60_000,
+        toolQuietMs: 120_000,
+        maxStreamMinutes: 180,
+        contractRefreshEvery: 100,
+        notificationsEnabled: false,
+        templateRepo: "  owner/template  ",
+      },
+      expected: {
+        v: 1,
+        continueMessage: "next",
+        autoContinueCap: 500,
+        sendDelayMs: 2_000,
+        quietMs: 60_000,
+        toolQuietMs: 120_000,
+        maxStreamMinutes: 180,
+        contractRefreshEvery: 100,
+        notificationsEnabled: false,
+        templateRepo: "owner/template",
+      },
+    },
+  ])("normalizes $name loaded from sync storage", async ({ stored, expected }) => {
+    stores.sync["cfpt:settings"] = stored;
+    expect(await storage.loadSettings()).toEqual(expected);
+  });
+
+  it("normalizes settings before writing sync storage", async () => {
+    await storage.saveSettings({
+      ...DEFAULT_SETTINGS,
+      autoContinueCap: 999,
+      sendDelayMs: 1,
+      templateRepo: "  owner/template  ",
+    });
+
+    expect(stores.sync["cfpt:settings"]).toEqual({
+      ...DEFAULT_SETTINGS,
+      autoContinueCap: 500,
+      sendDelayMs: 2_000,
+      templateRepo: "owner/template",
+    });
   });
 });
 
@@ -72,11 +153,59 @@ describe("tab lock", () => {
     expect(await storage.acquireTabLock("c1", "tab-b")).toBe(true);
   });
 
+  it("heartbeats only a lock owned by the same tab", async () => {
+    await storage.acquireTabLock("c1", "tab-a");
+    expect(await storage.heartbeatTabLock("c1", "tab-a")).toBe(true);
+    expect(await storage.heartbeatTabLock("c1", "tab-b")).toBe(false);
+  });
+
+  it("does not let a suspended old owner overwrite a newer owner", async () => {
+    await storage.acquireTabLock("c1", "tab-a");
+    const key = "cfpt:lock:c1";
+    const lock = stores.local[key] as { nonce: string; at: number };
+    stores.local[key] = { ...lock, at: Date.now() - 60_000 };
+
+    expect(await storage.acquireTabLock("c1", "tab-b")).toBe(true);
+    expect(await storage.heartbeatTabLock("c1", "tab-a")).toBe(false);
+    expect(await storage.acquireTabLock("c1", "tab-c")).toBe(false);
+  });
+
   it("release only removes its own lock", async () => {
     await storage.acquireTabLock("c1", "tab-a");
     await storage.releaseTabLock("c1", "tab-b");
     expect(await storage.acquireTabLock("c1", "tab-c")).toBe(false);
     await storage.releaseTabLock("c1", "tab-a");
     expect(await storage.acquireTabLock("c1", "tab-c")).toBe(true);
+  });
+});
+
+describe("conversation ownership", () => {
+  it("moves the run and transfers the driver lock to the permanent id", async () => {
+    const state = newRunState("pending:abc", 1);
+    await storage.saveRun(state);
+    await storage.acquireTabLock("pending:abc", "tab-a");
+
+    const migrated = await storage.adoptConversationOwnership(state, "real-id", "tab-a");
+
+    expect(migrated?.conversationId).toBe("real-id");
+    expect(await storage.loadRun("pending:abc")).toBeNull();
+    expect(await storage.loadRun("real-id")).toEqual(migrated);
+    expect(await storage.acquireTabLock("pending:abc", "tab-b")).toBe(true);
+    expect(await storage.acquireTabLock("real-id", "tab-b")).toBe(false);
+  });
+
+  it("does not migrate when another tab owns the permanent id", async () => {
+    const state = newRunState("pending:abc", 1);
+    await storage.saveRun(state);
+    await storage.acquireTabLock("pending:abc", "tab-a");
+    await storage.acquireTabLock("real-id", "tab-b");
+
+    const migrated = await storage.adoptConversationOwnership(state, "real-id", "tab-a");
+
+    expect(migrated).toBeNull();
+    expect(await storage.loadRun("pending:abc")).toEqual(state);
+    expect(await storage.loadRun("real-id")).toBeNull();
+    expect(await storage.acquireTabLock("pending:abc", "tab-c")).toBe(false);
+    expect(await storage.acquireTabLock("real-id", "tab-c")).toBe(false);
   });
 });

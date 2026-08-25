@@ -7,6 +7,8 @@ export interface InsertResult {
   error?: string;
 }
 
+const NEVER_CANCEL = (): boolean => false;
+
 function normalized(text: string | null | undefined): string {
   return (text ?? "").replace(/\s+/g, "");
 }
@@ -105,21 +107,30 @@ const STRATEGIES: [string, (el: HTMLElement, text: string) => boolean][] = [
   ["dom", domInsert],
 ];
 
-export async function insertPrompt(text: string): Promise<InsertResult> {
+export async function insertPrompt(
+  text: string,
+  isCancelled: () => boolean = NEVER_CANCEL,
+): Promise<InsertResult> {
+  if (isCancelled()) return { ok: false, error: "insert cancelled" };
+
   let el: HTMLElement;
   try {
     el = (await require_("composer", 8000)) as HTMLElement;
   } catch {
     return { ok: false, error: "composer not found" };
   }
+  if (isCancelled()) return { ok: false, error: "insert cancelled" };
 
   const want = normalized(text).length;
   for (const [name, strategy] of STRATEGIES) {
+    if (isCancelled()) return { ok: false, error: "insert cancelled" };
     focusComposer(el);
     clearComposer(el);
     await nextFrame();
+    if (isCancelled()) return { ok: false, error: "insert cancelled" };
     if (!strategy(el, text)) continue;
     await nextFrame();
+    if (isCancelled()) return { ok: false, error: "insert cancelled" };
     const got = normalized(el.textContent).length;
     if (got >= Math.floor(want * 0.98)) {
       log.debug(`insertPrompt ok via ${name} (${got}/${want} chars)`);
@@ -137,10 +148,19 @@ function sendButtonReady(): HTMLButtonElement | null {
   return btn;
 }
 
-function waitFor<T>(probe: () => T | null, timeoutMs: number, pollMs = 150): Promise<T | null> {
+function waitFor<T>(
+  probe: () => T | null,
+  timeoutMs: number,
+  pollMs = 150,
+  isCancelled: () => boolean = NEVER_CANCEL,
+): Promise<T | null> {
   return new Promise((resolve) => {
     const started = Date.now();
     const attempt = (): void => {
+      if (isCancelled()) {
+        resolve(null);
+        return;
+      }
       const value = probe();
       if (value !== null) {
         resolve(value);
@@ -165,12 +185,23 @@ export interface SendResult {
  * Click send and confirm the message actually left the composer. A model-picker popover
  * or upload menu can silently swallow the click, so one Escape-and-retry is built in.
  */
-export async function clickSend(isStreaming: () => boolean): Promise<SendResult> {
+export async function clickSend(
+  isStreaming: () => boolean,
+  isCancelled: () => boolean = NEVER_CANCEL,
+): Promise<SendResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const btn = await waitFor(sendButtonReady, 8000);
+    if (isCancelled()) return { ok: false, error: "send cancelled" };
+    const btn = await waitFor(sendButtonReady, 8000, 150, isCancelled);
+    if (isCancelled()) return { ok: false, error: "send cancelled" };
     if (!btn) return { ok: false, error: "send button never became ready" };
     btn.click();
-    const confirmed = await waitFor(() => (composerIsEmpty() || isStreaming() ? true : null), 5000);
+    const confirmed = await waitFor(
+      () => (composerIsEmpty() || isStreaming() ? true : null),
+      5000,
+      150,
+      isCancelled,
+    );
+    if (isCancelled()) return { ok: false, error: "send cancelled" };
     if (confirmed) return { ok: true };
     log.warn("send click did not take; escaping popovers and retrying once");
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
