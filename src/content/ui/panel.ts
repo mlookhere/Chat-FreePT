@@ -1,4 +1,4 @@
-import type { MachineEvent } from "../../common/state-machine";
+import { autoContinueEnabled, type MachineEvent } from "../../common/state-machine";
 import type { RunState } from "../../common/types";
 import { healthCheck, query } from "../selectors";
 import { PANEL_CSS } from "./styles";
@@ -45,6 +45,10 @@ function normalizeOnboarding(value: unknown): OnboardingState {
     launcherTipSuppressed: candidate.launcherTipSuppressed === true,
     setupShown: candidate.setupShown === true,
   };
+}
+
+function canQueueNext(state: RunState): boolean {
+  return state.phase === "planning" || state.phase === "developing";
 }
 
 /**
@@ -176,7 +180,7 @@ export class Panel {
     const status = passive ? "Active in another tab" : (STATUS_LABEL[state.status] ?? state.status);
     this.launcher.title = `Chat FreePT · ${phaseLabel(state.phase)} · ${status}`;
 
-    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${passive}`;
+    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${autoContinueEnabled(state)}|${state.queuedUserText ?? ""}|${passive}`;
     if (viewKey !== this.lastViewKey) {
       this.lastViewKey = viewKey;
       this.stopArmed = false;
@@ -295,28 +299,64 @@ export class Panel {
         : "";
 
     if (passive) return warn + this.passiveHtml(state);
+    const controls = this.automationControlsHtml(state);
 
     switch (state.status) {
       case "idle":
-        return warn + this.ideaFormHtml(state);
+        return warn + controls + this.ideaFormHtml(state);
       case "inserting":
       case "sending":
       case "streaming":
       case "cooldown":
-        return warn + this.runningHtml(state);
+        return warn + controls + this.runningHtml(state);
       case "awaiting_user":
         return (
           warn +
+          controls +
           (state.phase === "plan_ready" ? this.planReadyHtml(state) : this.needsInputHtml(state))
         );
       case "paused":
       case "error":
-        return warn + this.pausedHtml(state);
+        return warn + controls + this.pausedHtml(state);
       case "complete":
-        return warn + this.completeHtml(state);
+        return warn + controls + this.completeHtml(state);
       default:
-        return warn;
+        return warn + controls;
     }
+  }
+
+  private automationControlsHtml(state: RunState): string {
+    const enabled = autoContinueEnabled(state);
+    const queued = state.queuedUserText?.trim() ?? "";
+    const queueControls = canQueueNext(state)
+      ? `
+        <div class="cfpt-field">
+          ${
+            queued
+              ? `<p class="cfpt-note"><strong>Queued next:</strong> ${esc(queued)}</p>
+                 <button class="cfpt-btn" type="button" data-action="showqueue">Edit queued message</button>
+                 <button class="cfpt-btn" type="button" data-action="clearqueue">Clear queued message</button>`
+              : `<button class="cfpt-btn" type="button" data-action="showqueue">Queue next message</button>`
+          }
+          <div class="cfpt-field cfpt-hidden" data-ref="queue-editor">
+            <label>Next user message</label>
+            <textarea data-ref="queue-next" rows="3" placeholder="Send this instead of the next automatic continue…">${esc(queued)}</textarea>
+            <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="savequeue">Save queued message</button>
+            <button class="cfpt-btn" type="button" data-action="hidequeue">Cancel</button>
+          </div>
+        </div>`
+      : "";
+
+    return `
+      <div class="cfpt-field">
+        <label class="cfpt-check-row">
+          <input type="checkbox" data-action="auto-continue" ${enabled ? "checked" : ""} />
+          <span><strong>Auto-continue</strong></span>
+        </label>
+        <p class="cfpt-note">When off, Chat FreePT waits instead of sending its next automatic continue. A queued user message still sends once.</p>
+        ${queueControls}
+      </div>
+    `;
   }
 
   private passiveHtml(state: RunState): string {
@@ -389,14 +429,19 @@ export class Panel {
   }
 
   private needsInputHtml(state: RunState): string {
+    const autoPaused = state.pauseReason === "Auto-continue is off.";
     return `
-      <h3>ChatGPT needs your input</h3>
+      <h3>${autoPaused ? "Auto-continue is off" : "ChatGPT needs your input"}</h3>
       <p class="cfpt-note">${esc(state.pauseReason ?? "See the conversation for the question.")}</p>
-      <div class="cfpt-field">
-        <textarea data-ref="reply" rows="3" placeholder="Type your answer…"></textarea>
-      </div>
-      <button class="cfpt-btn cfpt-btn-primary" data-action="reply">Send reply</button>
-      <button class="cfpt-btn" data-action="resume">I answered in the chat — resume</button>
+      ${
+        autoPaused
+          ? ""
+          : `<div class="cfpt-field">
+               <textarea data-ref="reply" rows="3" placeholder="Type your answer…"></textarea>
+             </div>
+             <button class="cfpt-btn cfpt-btn-primary" data-action="reply">Send reply</button>
+             <button class="cfpt-btn" data-action="resume">I answered in the chat — resume</button>`
+      }
       <button class="cfpt-btn cfpt-btn-danger" data-action="stop">Stop</button>
     `;
   }
@@ -482,6 +527,24 @@ export class Panel {
       case "copyhandoff":
         this.copyHandoff(target);
         break;
+      case "auto-continue":
+        this.hooks.onEvent({
+          type: "USER_SET_AUTO_CONTINUE",
+          enabled: (target as HTMLInputElement).checked,
+        });
+        break;
+      case "showqueue":
+        this.showQueueEditor();
+        break;
+      case "hidequeue":
+        this.hideQueueEditor();
+        break;
+      case "savequeue":
+        this.saveQueuedMessage();
+        break;
+      case "clearqueue":
+        this.hooks.onEvent({ type: "USER_CLEAR_QUEUE" });
+        break;
       case "tip-continue":
         void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
         break;
@@ -506,6 +569,22 @@ export class Panel {
     const text = this.refValue("reply");
     if (!text.trim()) return;
     this.hooks.onEvent({ type: "USER_REPLY", text });
+  }
+
+  private showQueueEditor(): void {
+    const editor = this.panelEl.querySelector<HTMLElement>('[data-ref="queue-editor"]');
+    editor?.classList.remove("cfpt-hidden");
+    this.panelEl.querySelector<HTMLTextAreaElement>('[data-ref="queue-next"]')?.focus();
+  }
+
+  private hideQueueEditor(): void {
+    this.panelEl.querySelector<HTMLElement>('[data-ref="queue-editor"]')?.classList.add("cfpt-hidden");
+  }
+
+  private saveQueuedMessage(): void {
+    const text = this.refValue("queue-next").trim();
+    if (!text) return;
+    this.hooks.onEvent({ type: "USER_QUEUE_NEXT", text });
   }
 
   private stopRun(target: HTMLElement): void {
