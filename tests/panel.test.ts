@@ -27,7 +27,6 @@ function fixture(): void {
 function makePanel(): Panel {
   const hooks: PanelHooks = {
     onEvent: vi.fn(),
-    onNewProject: vi.fn(),
     getHandoffPrompt: vi.fn(() => "handoff"),
   };
   const panel = new Panel(hooks);
@@ -117,7 +116,6 @@ describe("composer airplane launcher", () => {
       status: "complete" as const,
       repo: "owner/project",
     };
-
     panel.render(complete);
     panel.showCompletionModal(complete);
 
