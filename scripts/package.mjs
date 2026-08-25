@@ -31,4 +31,6 @@ if (has("zip")) {
 
 const archive = await stat(target);
 if (archive.size === 0) throw new Error("packaged extension archive is empty");
-console.info(`packaged Chat FreePT ${verified.version}: ${verified.files.length} files -> ${target}`);
+console.info(
+  `packaged Chat FreePT ${verified.version}: ${verified.files.length} files -> ${target}`,
+);
