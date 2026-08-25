@@ -121,7 +121,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("RunController orchestration", () => {
+describe("RunController sends and continuation controls", () => {
   it("drives a plan prompt through insert and confirmed send", async () => {
     const controller = makeController();
 
@@ -163,6 +163,73 @@ describe("RunController orchestration", () => {
     controller.dispose();
   });
 
+  it("cancels a pending automatic continuation when auto-continue is turned off", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(15_000);
+    const controller = makeController(streamingState());
+
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    expect(controller.state.status).toBe("cooldown");
+
+    controller.dispatch({ type: "USER_SET_AUTO_CONTINUE", enabled: false });
+    expect(controller.state.status).toBe("awaiting_user");
+    expect(controller.state.cooldownUntil).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushAsync();
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it("sends queued user text once while auto-continue is disabled", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(17_000);
+    const controller = makeController(streamingState());
+
+    controller.dispatch({ type: "USER_SET_AUTO_CONTINUE", enabled: false });
+    controller.dispatch({ type: "USER_QUEUE_NEXT", text: "Run the accessibility audit next." });
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    expect(controller.state.status).toBe("cooldown");
+
+    await vi.advanceTimersByTimeAsync(100);
+    await flushAsync();
+
+    expect(String(mocks.insertPrompt.mock.calls[0]?.[0])).toContain(
+      "Run the accessibility audit next.",
+    );
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.autoSends).toBe(0);
+    expect(controller.state.queuedUserText).toBeUndefined();
+    expect(controller.state.status).toBe("streaming");
+    controller.dispose();
+  });
+});
+
+describe("RunController queued draft safety", () => {
+  it("does not overwrite a draft that appeared after a message was queued", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(18_000);
+    mocks.composerIsEmpty.mockReturnValue(false);
+    const controller = makeController(streamingState());
+
+    controller.dispatch({ type: "USER_QUEUE_NEXT", text: "Run the queued check." });
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    expect(controller.state.status).toBe("cooldown");
+
+    await vi.advanceTimersByTimeAsync(15_100);
+    await flushAsync();
+
+    expect(mocks.composerIsEmpty).toHaveBeenCalledTimes(4);
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    expect(controller.state.status).toBe("error");
+    expect(controller.state.errorCode).toBe("composer-insert-failed");
+    controller.dispose();
+  });
+});
+
+describe("RunController recovery and disposal", () => {
   it("accepts a user reply after NEEDS_INPUT and re-enters streaming", async () => {
     const controller = makeController(streamingState());
 

@@ -7,7 +7,7 @@ import {
   buildUserReply,
   NUDGE_PROMPT,
 } from "../common/prompts";
-import type { Effect, MachineEvent } from "../common/state-machine";
+import type { Effect, MachineEvent, PromptKind } from "../common/state-machine";
 import { cooldownRemainingMs, isActive, reduce } from "../common/state-machine";
 import { saveRun } from "../common/storage";
 import type { BgRequest, RunState, Settings } from "../common/types";
@@ -165,7 +165,7 @@ export class RunController {
     this.cooldownTimer = undefined;
   }
 
-  private buildPrompt(kind: string, text?: string): string {
+  private buildPrompt(kind: PromptKind, text?: string): string {
     switch (kind) {
       case "plan":
         return buildPlanPrompt({
@@ -183,13 +183,12 @@ export class RunController {
       case "nudge":
         return NUDGE_PROMPT;
       case "user_text":
+      case "queued_user_text":
         return buildUserReply(text ?? "");
-      default:
-        throw new Error(`unknown prompt kind: ${kind}`);
     }
   }
 
-  private async insertAndSend(kind: string, text?: string): Promise<void> {
+  private async insertAndSend(kind: PromptKind, text?: string): Promise<void> {
     if (this.disposed) return;
     const health = healthCheck();
     if (health.missing.length > 0) {
@@ -200,10 +199,10 @@ export class RunController {
       return;
     }
 
-    // An automated send must never eat a draft the user is typing. Wait briefly for the
-    // composer to clear; a user-initiated send replaces the draft deliberately.
-    const automated = kind !== "plan" && kind !== "develop" && kind !== "user_text";
-    if (automated) {
+    // A delayed/automatic send must never eat a draft the user is typing. Immediate user
+    // replies deliberately replace the composer; queued user text is delayed and must wait.
+    const delayed = kind !== "plan" && kind !== "develop" && kind !== "user_text";
+    if (delayed) {
       let busyChecks = 0;
       while (!composerIsEmpty()) {
         busyChecks += 1;
