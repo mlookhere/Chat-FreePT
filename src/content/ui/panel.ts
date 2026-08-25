@@ -148,10 +148,7 @@ export class Panel {
 
     this.shadow.addEventListener("click", (event) => this.onClick(event));
     this.setupBackdropEl.addEventListener("keydown", (event) => {
-      if (
-        event.key === "Escape" &&
-        !this.setupBackdropEl.classList.contains("cfpt-hidden")
-      ) {
+      if (event.key === "Escape" && !this.setupBackdropEl.classList.contains("cfpt-hidden")) {
         void this.acknowledgeSetup();
       }
     });
@@ -167,10 +164,7 @@ export class Panel {
     this.panelEl.classList.toggle("cfpt-hidden", !show);
     this.host.dataset["expanded"] = String(show);
     this.launcher.setAttribute("aria-expanded", String(show));
-    this.launcher.setAttribute(
-      "aria-label",
-      show ? "Close Chat FreePT" : "Open Chat FreePT",
-    );
+    this.launcher.setAttribute("aria-label", show ? "Close Chat FreePT" : "Open Chat FreePT");
   }
 
   render(state: RunState, passive = false): void {
@@ -179,9 +173,7 @@ export class Panel {
     this.host.dataset["status"] = state.status;
     this.host.dataset["phase"] = state.phase;
     this.launcher.dataset["state"] = visualState;
-    const status = passive
-      ? "Active in another tab"
-      : (STATUS_LABEL[state.status] ?? state.status);
+    const status = passive ? "Active in another tab" : (STATUS_LABEL[state.status] ?? state.status);
     this.launcher.title = `Chat FreePT · ${phaseLabel(state.phase)} · ${status}`;
 
     const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${passive}`;
