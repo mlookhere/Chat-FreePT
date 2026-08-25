@@ -29,13 +29,7 @@ export type MachineEvent =
   | { type: "PAGE_SIGNAL"; signal: PageSignal };
 
 export type PromptKind =
-  | "plan"
-  | "develop"
-  | "continue"
-  | "contract_refresh"
-  | "nudge"
-  | "user_text"
-  | "queued_user_text";
+  "plan" | "develop" | "continue" | "contract_refresh" | "nudge" | "user_text" | "queued_user_text";
 
 export type Effect =
   | { do: "insertAndSend"; kind: PromptKind; text?: string }
@@ -300,7 +294,8 @@ function sendUserReply(ctx: ReduceContext, event: UserReplyEvent): boolean {
 
 function setAutoContinue(ctx: ReduceContext, enabled: boolean): boolean {
   const state = ctx.state;
-  if (autoContinueEnabled(state) === enabled && state.autoContinueEnabled !== undefined) return false;
+  if (autoContinueEnabled(state) === enabled && state.autoContinueEnabled !== undefined)
+    return false;
   state.autoContinueEnabled = enabled;
   note(ctx, "info", `Auto-continue ${enabled ? "enabled" : "disabled"}`);
 
