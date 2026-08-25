@@ -206,9 +206,11 @@ export class Panel {
         <label>Repo name (optional for new; owner/name for existing)</label>
         <input type="text" data-ref="reponame" value="${esc(state.repoName)}" placeholder="e.g. my-idea or owner/my-repo"/>
       </div>
-      <p class="cfpt-note">Requires a ChatGPT GitHub MCP connector with write access
-      (Developer Mode). ChatGPT does all GitHub work itself — this extension never touches
-      your repos.</p>
+      <p class="cfpt-note">New private repos generally need GitHub's official remote MCP in
+      ChatGPT Developer Mode because repository and label creation are required. Existing
+      repos can use any GitHub toolset that passes the mode-aware preflight. Chat FreePT
+      never receives your GitHub credentials. <a class="cfpt-link" href="https://chatgpt.com/plugins"
+      target="_blank" rel="noreferrer noopener">Open ChatGPT Plugins</a>.</p>
       <button class="cfpt-btn cfpt-btn-primary" data-action="start">Start planning</button>
     `;
   }
