@@ -3,7 +3,7 @@ import { healthCheck, query, queryAll, queryLast, resolve } from "../src/content
 
 /**
  * Synthetic fixture shaped from the current chatgpt.com DOM capture: the thread owns
- * section turns, the composer is unified, and Chat FreePT mounts in the prompt header.
+ * section turns, the composer is unified, and Chat FreePT mounts in the composer surface.
  */
 const CHATGPT_FIXTURE = `
   <main id="main">
@@ -54,6 +54,7 @@ describe("selector registry", () => {
   it("resolves primary candidates on the captured ChatGPT structure", () => {
     expect(resolve("composer")?.candidateIndex).toBe(0);
     expect(resolve("composerHeader")?.candidateIndex).toBe(0);
+    expect(resolve("composerSurface")?.candidateIndex).toBe(0);
     expect(resolve("sendButton")?.candidateIndex).toBe(0);
     expect(resolve("conversationRoot")?.candidateIndex).toBe(0);
     expect(resolve("assistantMessage")?.candidateIndex).toBe(0);
@@ -85,12 +86,22 @@ describe("selector registry", () => {
     expect(healthCheck().missing).toEqual([]);
   });
 
-  it("falls back down the composer and composer-header candidate lists", () => {
+  it("falls back down the composer, header, and surface candidate lists", () => {
     document.getElementById("prompt-textarea")?.removeAttribute("id");
     document.getElementById("thread-bottom")?.removeAttribute("id");
 
     expect(resolve("composer")?.candidateIndex).toBeGreaterThan(0);
     expect(resolve("composerHeader")?.candidateIndex).toBeGreaterThan(0);
+    expect(resolve("composerSurface")?.candidateIndex).toBeGreaterThan(0);
+  });
+
+  it("falls back to the unified form when the composer-surface attribute disappears", () => {
+    document
+      .querySelector('[data-composer-surface="true"]')
+      ?.removeAttribute("data-composer-surface");
+    const surface = resolve("composerSurface");
+    expect(surface?.element.tagName).toBe("FORM");
+    expect(surface?.candidateIndex).toBe(3);
   });
 
   it("filters text-matched Send candidates", () => {
@@ -118,6 +129,7 @@ describe("selector registry", () => {
     expect(report.missing).toContain("composer");
     expect(report.missing).not.toContain("sendButton");
     expect(report.missing).not.toContain("composerHeader");
+    expect(report.missing).not.toContain("composerSurface");
   });
 
   it("healthCheck reports degradation when the primary composer drifts", () => {
