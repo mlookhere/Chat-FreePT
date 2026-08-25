@@ -2,31 +2,47 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { healthCheck, query, queryAll, queryLast, resolve } from "../src/content/selectors";
 
 /**
- * Synthetic fixture reflecting chatgpt.com's known structure (composer, send button,
- * message turns). Refresh against the live site when selectors drift — the registry's
- * candidate order encodes today's DOM first.
+ * Synthetic fixture shaped from the current chatgpt.com DOM capture: the thread owns
+ * section turns, the composer is unified, and Chat FreePT mounts in the prompt header.
  */
 const CHATGPT_FIXTURE = `
-  <main>
-    <div role="presentation">
-      <article data-testid="conversation-turn-1">
-        <div data-message-author-role="user" data-message-id="u1">build me a thing</div>
-      </article>
-      <article data-testid="conversation-turn-2">
-        <div data-message-author-role="assistant" data-message-id="a1">
-          <div class="markdown">working on it</div>
-        </div>
-      </article>
-      <article data-testid="conversation-turn-3">
-        <div data-message-author-role="assistant" data-message-id="a2">
-          <div class="markdown">done<pre><code>CHATFREEPT_STATUS: CONTINUE</code></pre></div>
-        </div>
-      </article>
+  <main id="main">
+    <div id="thread">
+      <div data-turn-id-container="request-user-1">
+        <section data-testid="conversation-turn-1" data-turn="user">
+          <div class="user-turn">
+            <div data-message-author-role="user" data-message-id="u1">build me a thing</div>
+          </div>
+        </section>
+      </div>
+      <div data-turn-id-container="request-assistant-1">
+        <section data-testid="conversation-turn-2" data-turn="assistant">
+          <div class="agent-turn">
+            <div data-message-author-role="assistant" data-message-id="a1">
+              <div class="markdown">working on it</div>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div data-turn-id-container="request-assistant-2">
+        <section data-testid="conversation-turn-3" data-turn="assistant">
+          <div class="agent-turn">
+            <div data-message-author-role="assistant" data-message-id="a2">
+              <div class="markdown">done<pre><code>CHATFREEPT_STATUS: CONTINUE</code></pre></div>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div id="thread-bottom">
+        <div data-prompt-textarea-header></div>
+        <form data-type="unified-composer">
+          <div data-composer-surface="true">
+            <div id="prompt-textarea" class="ProseMirror" contenteditable="true"><p></p></div>
+            <button data-testid="send-button" aria-label="Send prompt"></button>
+          </div>
+        </form>
+      </div>
     </div>
-    <form>
-      <div id="prompt-textarea" class="ProseMirror" contenteditable="true"><p></p></div>
-      <button id="composer-submit-button" data-testid="send-button" aria-label="Send prompt"></button>
-    </form>
   </main>
 `;
 
@@ -35,8 +51,9 @@ beforeEach(() => {
 });
 
 describe("selector registry", () => {
-  it("resolves the primary candidates on the reference fixture", () => {
+  it("resolves primary candidates on the captured ChatGPT structure", () => {
     expect(resolve("composer")?.candidateIndex).toBe(0);
+    expect(resolve("composerHeader")?.candidateIndex).toBe(0);
     expect(resolve("sendButton")?.candidateIndex).toBe(0);
     expect(resolve("conversationRoot")?.candidateIndex).toBe(0);
     expect(resolve("assistantMessage")?.candidateIndex).toBe(0);
@@ -62,18 +79,24 @@ describe("selector registry", () => {
     expect(query("toolIndicator", turn)?.textContent).toBe("GitHub");
   });
 
-  it("falls back down the candidate list", () => {
-    document.getElementById("prompt-textarea")?.removeAttribute("id");
-    const res = resolve("composer");
-    expect(res).not.toBeNull();
-    expect(res?.candidateIndex).toBeGreaterThan(0);
+  it("does not treat an empty-composer Send button absence as unhealthy", () => {
+    document.querySelector('[data-testid="send-button"]')?.remove();
+    expect(query("sendButton")).toBeNull();
+    expect(healthCheck().missing).toEqual([]);
   });
 
-  it("filters text-matched candidates", () => {
-    document.body.innerHTML = `<main><form>
-      <div id="prompt-textarea" contenteditable="true"></div>
-      <button>Cancel</button><button>Send</button>
-    </form></main>`;
+  it("falls back down the composer and composer-header candidate lists", () => {
+    document.getElementById("prompt-textarea")?.removeAttribute("id");
+    document.getElementById("thread-bottom")?.removeAttribute("id");
+
+    expect(resolve("composer")?.candidateIndex).toBeGreaterThan(0);
+    expect(resolve("composerHeader")?.candidateIndex).toBeGreaterThan(0);
+  });
+
+  it("filters text-matched Send candidates", () => {
+    document.querySelector('[data-testid="send-button"]')?.remove();
+    const form = document.querySelector("form");
+    form?.insertAdjacentHTML("beforeend", "<button>Cancel</button><button>Send</button>");
     const res = resolve("sendButton");
     expect(res?.element.textContent).toBe("Send");
   });
@@ -86,19 +109,20 @@ describe("selector registry", () => {
     expect(query("stopButton")).not.toBeNull();
   });
 
-  it("healthCheck passes on the fixture and fails when required targets vanish", () => {
+  it("healthCheck fails only when an automation-required target vanishes", () => {
     expect(healthCheck().missing).toEqual([]);
 
     document.getElementById("prompt-textarea")?.remove();
-    document.querySelectorAll("button").forEach((b) => b.remove());
+    document.querySelectorAll('[contenteditable="true"]').forEach((el) => el.remove());
     const report = healthCheck();
     expect(report.missing).toContain("composer");
-    expect(report.missing).toContain("sendButton");
+    expect(report.missing).not.toContain("sendButton");
+    expect(report.missing).not.toContain("composerHeader");
   });
 
-  it("healthCheck reports degradation when primaries drift", () => {
+  it("healthCheck reports degradation when the primary composer drifts", () => {
     document.getElementById("prompt-textarea")?.removeAttribute("id");
     const report = healthCheck();
-    expect(report.degraded.some((d) => d.id === "composer")).toBe(true);
+    expect(report.degraded.some((item) => item.id === "composer")).toBe(true);
   });
 });
