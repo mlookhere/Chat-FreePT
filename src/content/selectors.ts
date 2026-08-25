@@ -343,7 +343,7 @@ function controlNearText(pattern: RegExp, selector: string): HTMLElement | null 
 function textElement(
   pattern: RegExp,
   root: ParentNode = document,
-  css = "button, a, label, h1, h2, h3, h4, span, div, p",
+  css = "button, a, label, h1, h2, h3, h4, strong, span, div, p",
 ): Element | null {
   let nodes: Element[];
   try {
