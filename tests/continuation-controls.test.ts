@@ -78,7 +78,11 @@ describe("queued continuation input and stop reset", () => {
   it("sends a queued user message before continue even when auto-continue is off", () => {
     let state = streamingRun();
     state = reduce(state, { type: "USER_SET_AUTO_CONTINUE", enabled: false }, settings).state;
-    state = reduce(state, { type: "USER_QUEUE_NEXT", text: "  Run the audit first.  " }, settings).state;
+    state = reduce(
+      state,
+      { type: "USER_QUEUE_NEXT", text: "  Run the audit first.  " },
+      settings,
+    ).state;
     state = { ...state, autoSends: settings.autoContinueCap };
 
     state = reduce(
