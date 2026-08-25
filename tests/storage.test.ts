@@ -17,11 +17,92 @@ describe("settings", () => {
     expect(await storage.loadSettings()).toEqual(DEFAULT_SETTINGS);
   });
 
-  it("merges stored values over defaults", async () => {
-    await storage.saveSettings({ ...DEFAULT_SETTINGS, autoContinueCap: 7 });
-    const settings = await storage.loadSettings();
-    expect(settings.autoContinueCap).toBe(7);
-    expect(settings.quietMs).toBe(DEFAULT_SETTINGS.quietMs);
+  it.each([
+    {
+      name: "malformed values",
+      stored: {
+        v: 99,
+        continueMessage: "   ",
+        autoContinueCap: -10,
+        sendDelayMs: Number.POSITIVE_INFINITY,
+        quietMs: "3000",
+        toolQuietMs: 999_999,
+        maxStreamMinutes: 0,
+        contractRefreshEvery: 1_000,
+        notificationsEnabled: "yes",
+        templateRepo: null,
+        unknownFutureField: "ignored",
+      },
+      expected: {
+        ...DEFAULT_SETTINGS,
+        autoContinueCap: 1,
+        toolQuietMs: 120_000,
+        maxStreamMinutes: 1,
+        contractRefreshEvery: 100,
+      },
+    },
+    {
+      name: "partial legacy values",
+      stored: {
+        v: 0,
+        continueMessage: "  keep going  ",
+        autoContinueCap: 7,
+        notificationsEnabled: false,
+        obsoleteSetting: true,
+      },
+      expected: {
+        ...DEFAULT_SETTINGS,
+        continueMessage: "keep going",
+        autoContinueCap: 7,
+        notificationsEnabled: false,
+      },
+    },
+    {
+      name: "valid values",
+      stored: {
+        v: 1,
+        continueMessage: "  next  ",
+        autoContinueCap: 500,
+        sendDelayMs: 2_000,
+        quietMs: 60_000,
+        toolQuietMs: 120_000,
+        maxStreamMinutes: 180,
+        contractRefreshEvery: 100,
+        notificationsEnabled: false,
+        templateRepo: "  owner/template  ",
+      },
+      expected: {
+        v: 1,
+        continueMessage: "next",
+        autoContinueCap: 500,
+        sendDelayMs: 2_000,
+        quietMs: 60_000,
+        toolQuietMs: 120_000,
+        maxStreamMinutes: 180,
+        contractRefreshEvery: 100,
+        notificationsEnabled: false,
+        templateRepo: "owner/template",
+      },
+    },
+  ])("normalizes $name loaded from sync storage", async ({ stored, expected }) => {
+    stores.sync["cfpt:settings"] = stored;
+    expect(await storage.loadSettings()).toEqual(expected);
+  });
+
+  it("normalizes settings before writing sync storage", async () => {
+    await storage.saveSettings({
+      ...DEFAULT_SETTINGS,
+      autoContinueCap: 999,
+      sendDelayMs: 1,
+      templateRepo: "  owner/template  ",
+    });
+
+    expect(stores.sync["cfpt:settings"]).toEqual({
+      ...DEFAULT_SETTINGS,
+      autoContinueCap: 500,
+      sendDelayMs: 2_000,
+      templateRepo: "owner/template",
+    });
   });
 });
 
