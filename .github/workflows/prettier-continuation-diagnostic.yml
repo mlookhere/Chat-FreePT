@@ -5,21 +5,32 @@ on:
     branches: [work/40-continuation-controls]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format:
-    name: Capture formatted continuation files
+    name: Capture and apply formatted continuation files
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          fetch-depth: 0
       - name: Install locked Node toolchain
         run: npm ci --no-audit --no-fund
-      - name: Format continuation files with repository Prettier
-        run: npx prettier --write src/common/state-machine.ts src/content/ui/panel.ts tests/continuation-controls.test.ts
+      - name: Apply exact Prettier output to feature branch
+        run: |
+          git checkout -B work/40-continuation-controls origin/work/40-continuation-controls
+          npx prettier --write src/common/state-machine.ts src/content/ui/panel.ts tests/continuation-controls.test.ts
+          if git diff --quiet -- src/common/state-machine.ts src/content/ui/panel.ts tests/continuation-controls.test.ts; then
+            echo "Feature branch is already formatted."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/common/state-machine.ts src/content/ui/panel.ts tests/continuation-controls.test.ts
+          git commit -m "style: apply exact Prettier output"
+          git push origin HEAD:work/40-continuation-controls
       - name: Upload exact formatted files
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
