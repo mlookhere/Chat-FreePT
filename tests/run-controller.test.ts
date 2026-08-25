@@ -206,6 +206,29 @@ describe("RunController sends and continuation controls", () => {
   });
 });
 
+describe("RunController queued draft safety", () => {
+  it("does not overwrite a draft that appeared after a message was queued", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(18_000);
+    mocks.composerIsEmpty.mockReturnValue(false);
+    const controller = makeController(streamingState());
+
+    controller.dispatch({ type: "USER_QUEUE_NEXT", text: "Run the queued check." });
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    expect(controller.state.status).toBe("cooldown");
+
+    await vi.advanceTimersByTimeAsync(15_100);
+    await flushAsync();
+
+    expect(mocks.composerIsEmpty).toHaveBeenCalledTimes(4);
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    expect(controller.state.status).toBe("error");
+    expect(controller.state.errorCode).toBe("composer-insert-failed");
+    controller.dispose();
+  });
+});
+
 describe("RunController recovery and disposal", () => {
   it("accepts a user reply after NEEDS_INPUT and re-enters streaming", async () => {
     const controller = makeController(streamingState());
