@@ -238,9 +238,9 @@ describe("state machine", () => {
     expect(resumed.effects).toContainEqual({ do: "reconcile" });
   });
 
-  it("USER_STOP archives the run", () => {
+  it("USER_STOP resets the run", () => {
     const state = reduce(toStreaming(start()), { type: "USER_STOP" }, settings).state;
-    expect(state.phase).toBe("stopped");
+    expect(state.phase).toBe("idle");
     expect(state.status).toBe("idle");
   });
 
