@@ -29,7 +29,7 @@ URL: <most relevant link, optional>
 ${FENCE}
 
 Meanings:
-- CONTINUE — you have more work; I will reply "continue" automatically.
+- CONTINUE — you have more work; Chat FreePT may send my queued next message or its normal continue, depending on my controls.
 - NEEDS_INPUT — you are blocked on a decision, approval, or setup only I can do. Ask in the reply body, then use this status.
 - PLAN_READY — planning phase only: the master plan is complete and recorded in the repo.
 - COMPLETE — development phase only: every plan item is merged and CI on dev is green.
@@ -226,7 +226,7 @@ For each plan Issue, in order:
 ## Pacing
 
 Do a meaningful chunk of work per reply, but end the reply and emit CONTINUE rather than
-idling while CI runs; my "continue" messages are your clock ticks (they arrive roughly
+idling while CI runs; Chat FreePT follow-up messages are your clock ticks (they arrive roughly
 every {{DELAY_S}} seconds). While waiting on a run, reply CONTINUE with
 NOTE: waiting on <run or PR>.
 
@@ -310,7 +310,7 @@ export function buildUserReply(text: string): string {
 
 export function buildHandoffPrompt(state: RunState): string {
   return renderTemplate(HANDOFF_TEMPLATE, {
-    REPO: state.repo ?? state.repoName ?? "(see the plan conversation)",
+    REPO: state.repo || state.repoName || "(see the plan conversation)",
     PHASE: state.phase === "developing" ? "DEVELOPING" : "PLANNING",
     CI_CONTRACT: CI_CONTRACT_BLOCK,
     MARKER: MARKER_BLOCK,
