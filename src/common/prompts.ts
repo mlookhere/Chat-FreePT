@@ -37,22 +37,59 @@ Meanings:
 
 Never omit the block. Never put anything after it.`;
 
-export const MCP_PREFLIGHT_BLOCK = `## Step 0 — GitHub MCP preflight
+export const DEVELOPER_MODE_SETUP_BLOCK = `If a required capability is missing, read-only,
+or rejected by authorization, STOP and report the exact missing capability classes. Then
+tell me to configure GitHub's official remote MCP in ChatGPT:
 
-Before anything else, list the GitHub MCP tools available to you. You need write tools at
-least equivalent to: create_repository, create_branch, create_or_update_file / push_files,
-create_issue, update_issue, add_issue_comment, create_label, create_pull_request,
-merge_pull_request, and a way to read Actions check results and failing job logs.
+1. Settings → Security and login → Developer mode: turn it on.
+2. Open https://chatgpt.com/plugins, select +, and create a developer-mode app for
+   https://api.githubcopilot.com/mcp/ using OAuth.
+3. In this conversation, open the Plus menu, choose Developer mode, and select that GitHub
+   app for the conversation.
+4. Authorize repository and workflow write access needed for this project.
 
-If you have no GitHub MCP connector, or the tools are read-only, STOP: reply with setup
-instructions for me — enable ChatGPT Developer Mode (Settings → Apps & Connectors →
-Advanced → Developer mode) and add GitHub's remote MCP server
-(https://api.githubcopilot.com/mcp/) authorized for repositories and workflows — and end
-with status NEEDS_INPUT.
+Do not ask me to run shell commands or click GitHub controls. End with NEEDS_INPUT so I can
+finish only the ChatGPT/MCP setup and then resume.`;
 
-The workflow scope matters: you must be able to push files under .github/workflows/. If
-such a push is rejected for OAuth scope, report NEEDS_INPUT — never silently skip workflow
-files, because a repo with no CI checks reads exactly like a repo that passes them.`;
+const CORE_MCP_REQUIREMENTS = `Core capabilities required in both modes (tool names may
+differ; match capabilities semantically): read repositories/files/trees; create branches;
+create or update files on an explicit branch including .github/workflows/*; create/update
+Issues and comments; apply existing labels to Issues/PRs; create/update Pull Requests; merge
+Pull Requests; and read Actions/check results plus failing job/step logs.`;
+
+export function buildMcpPreflight(repoMode: "new" | "existing", repoName: string): string {
+  const modeRequirements =
+    repoMode === "new"
+      ? `This is NEW-REPOSITORY mode. In addition to the core capabilities, you MUST have a
+repository-creation capability (for example create_repository) and a repository-label
+creation capability (for example label_write with method=create, create_label, or an
+equivalent). A new repo has none of the CI-Pipline labels yet, so label creation is mandatory.`
+      : `This is EXISTING-REPOSITORY mode for ${repoName || "the repository I name"}. Do NOT
+require repository creation. First verify read/write access and list the CI-Pipline labels
+already present. Repository-label creation is required only for labels that are actually
+missing; if every required label already exists, lack of create_label/label_write is not a
+blocker.`;
+
+  return `## Step 0 — GitHub MCP preflight
+
+Before any repository mutation, inspect all GitHub-capable tools available in this
+conversation. Do not assume one connector or exact tool names; several ChatGPT apps can
+expose equivalent operations.
+
+${CORE_MCP_REQUIREMENTS}
+
+${modeRequirements}
+
+Repository default-branch mutation is NOT required. Do not block because there is no
+update-repository/default-branch tool; all Chat FreePT branch operations must name their
+base/head explicitly.
+
+The workflow scope matters: you must be able to write .github/workflows/*. If that write is
+rejected, or any required capability above is missing, never silently skip it: zero CI checks
+is not green.
+
+${DEVELOPER_MODE_SETUP_BLOCK}`;
+}
 
 export const CI_CONTRACT_BLOCK = `## Operating contract (CI-Pipline)
 
@@ -101,8 +138,13 @@ it with your GitHub tools):
    (e.g. actions/setup-node for Node projects) while keeping ./scripts/bootstrap --ci and
    ./ci/run <stage> as the entry points and keeping job names unchanged (they are
    referenced as required checks).
-5. Seed branches: create master and dev from the initial commit; set dev as the default
-   branch. Do NOT configure branch protection.
+5. Seed branches explicitly. For a new repo, discover the platform-created initial branch
+   after initialization (commonly main), then create master and dev from the fully seeded
+   commit on that branch. For an existing repo, inspect master/dev before creating or
+   modifying either. Do NOT require changing the repository default branch: every later
+   operation must name dev or master explicitly. If a safe default-branch mutation tool is
+   available you may set dev after both branches exist, but its absence is never a blocker.
+   Do NOT configure branch protection.
 6. Create the labels the plane expects (type:bug, type:feature, type:maintenance,
    type:release; state:ready, state:active, state:blocked, state:review,
    state:release-ready; risk:database, risk:security, risk:billing, risk:deployment,
@@ -240,7 +282,7 @@ export function buildPlanPrompt(input: PlanPromptInput): string {
       `tools); derive a short kebab-case name from the idea below. Initialize it with a README.`;
   }
   return renderTemplate(PLAN_TEMPLATE, {
-    MCP_PREFLIGHT: MCP_PREFLIGHT_BLOCK,
+    MCP_PREFLIGHT: buildMcpPreflight(input.repoMode, input.repoName),
     REPO_INSTRUCTIONS: repoInstructions,
     VENDOR_RECIPE: renderTemplate(VENDOR_RECIPE_TEMPLATE, { TEMPLATE_REPO: input.templateRepo }),
     IDEA: input.idea.trim(),

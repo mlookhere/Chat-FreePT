@@ -3,6 +3,7 @@ import {
   buildContinuePrompt,
   buildDevelopPrompt,
   buildHandoffPrompt,
+  buildMcpPreflight,
   buildPlanPrompt,
   buildUserReply,
   COMPACT_CONTRACT,
@@ -52,6 +53,28 @@ describe("plan prompt", () => {
     expect(buildPlanPrompt({ ...planInput, repoMode: "existing", repoName: "me/mine" })).toContain(
       "Use my existing repository me/mine",
     );
+  });
+
+  it("uses mode-aware GitHub capability requirements", () => {
+    const newRepo = buildMcpPreflight("new", "cookie-cli");
+    expect(newRepo).toContain("NEW-REPOSITORY mode");
+    expect(newRepo).toContain("repository-creation capability");
+    expect(newRepo).toContain("label_write");
+
+    const existing = buildMcpPreflight("existing", "me/mine");
+    expect(existing).toContain("EXISTING-REPOSITORY mode for me/mine");
+    expect(existing).toMatch(/Do NOT\s+require repository creation/);
+    expect(existing).toMatch(/only for labels that are actually\s+missing/);
+  });
+
+  it("uses current Developer Mode setup and does not require default-branch mutation", () => {
+    const prompt = buildPlanPrompt(planInput);
+    expect(prompt).toContain("Settings → Security and login → Developer mode");
+    expect(prompt).toContain("https://chatgpt.com/plugins");
+    expect(prompt).toContain("https://api.githubcopilot.com/mcp/");
+    expect(prompt).toContain("Repository default-branch mutation is NOT required");
+    expect(prompt).toContain("Do NOT require changing the repository default branch");
+    expect(prompt).not.toContain("set dev as the default branch");
   });
 
   it("does not itself parse as a status marker sent by the assistant", () => {
