@@ -135,6 +135,7 @@ describe("native composer launcher placement", () => {
     expect(PANEL_CSS).toContain(".cfpt-takeover-backdrop");
     expect(PANEL_CSS).toContain("backdrop-filter: blur(22px)");
     expect(PANEL_CSS).toContain('data-cfpt-host="launcher"');
+    expect(PANEL_CSS).toContain("z-index: 2147483646");
     expect(PANEL_CSS).not.toContain(".cfpt-dock");
   });
 });
