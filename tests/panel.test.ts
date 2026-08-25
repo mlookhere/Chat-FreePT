@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newRunState } from "../src/common/state-machine";
 import { Panel, type PanelHooks } from "../src/content/ui/panel";
+import { PANEL_CSS } from "../src/content/ui/styles";
+import { installChromeMock } from "./chrome-mock";
 
 const panels: Panel[] = [];
+let stores: ReturnType<typeof installChromeMock>;
 
 function fixture(): void {
   document.body.innerHTML = `
@@ -38,7 +41,12 @@ function host(): HTMLElement {
   return element;
 }
 
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 beforeEach(() => {
+  stores = installChromeMock();
   fixture();
 });
 
@@ -46,14 +54,23 @@ afterEach(() => {
   panels.splice(0).forEach((panel) => panel.dispose());
 });
 
-describe("embedded composer panel", () => {
-  it("mounts exactly once in the ChatGPT composer header", () => {
+describe("composer airplane launcher", () => {
+  it("mounts exactly once inside the ChatGPT composer surface", () => {
     makePanel();
+    const surface = document.querySelector('[data-composer-surface="true"]');
     const header = document.querySelector("[data-prompt-textarea-header]");
 
-    expect(header?.querySelector("#cfpt-root")).toBe(host());
+    expect(surface?.querySelector("#cfpt-root")).toBe(host());
+    expect(header?.querySelector("#cfpt-root")).toBeNull();
     expect(document.querySelectorAll("#cfpt-root")).toHaveLength(1);
     expect(host().dataset["cfptEmbedded"]).toBe("true");
+    expect(host().dataset["cfptLauncher"]).toBe("airplane");
+  });
+
+  it("uses a compact launcher instead of the old full-width dock", () => {
+    expect(PANEL_CSS).toContain(".cfpt-launcher");
+    expect(PANEL_CSS).toContain(".cfpt-airplane");
+    expect(PANEL_CSS).not.toContain(".cfpt-dock");
   });
 
   it("tracks toggle and rendered status on the light-DOM host", () => {
@@ -78,20 +95,21 @@ describe("embedded composer panel", () => {
     expect(host().dataset["status"]).toBe("awaiting_user");
   });
 
-  it("re-homes the same host when ChatGPT replaces the composer header", async () => {
+  it("re-homes the same host when ChatGPT replaces the composer surface", async () => {
     makePanel();
-    const first = document.querySelector("[data-prompt-textarea-header]");
+    const first = document.querySelector('[data-composer-surface="true"]');
     const replacement = document.createElement("div");
-    replacement.setAttribute("data-prompt-textarea-header", "");
+    replacement.setAttribute("data-composer-surface", "true");
+    replacement.innerHTML = '<div id="prompt-textarea" contenteditable="true"></div>';
     first?.replaceWith(replacement);
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
 
     expect(replacement.querySelector("#cfpt-root")).toBe(host());
     expect(document.querySelectorAll("#cfpt-root")).toHaveLength(1);
   });
 
-  it("expands the embedded controls for completion instead of creating an overlay", () => {
+  it("expands the composer controls for completion instead of creating a completion overlay", () => {
     const panel = makePanel();
     const complete = {
       ...newRunState("conversation-1", 1),
@@ -105,5 +123,75 @@ describe("embedded composer panel", () => {
 
     expect(host().dataset["expanded"]).toBe("true");
     expect(document.querySelector(".cfpt-modal-backdrop")).toBeNull();
+  });
+});
+
+describe("first-run onboarding", () => {
+  it("shows the launcher tip first, highlights the airplane, then shows setup", async () => {
+    const panel = makePanel();
+    await settle();
+
+    expect(host().dataset["onboarding"]).toBe("tip");
+    expect(host().dataset["highlighted"]).toBe("true");
+
+    await panel.acknowledgeLauncherTip(true);
+    expect(host().dataset["onboarding"]).toBe("setup");
+    expect(host().dataset["highlighted"]).toBe("false");
+    expect(stores.local["cfpt:onboarding:v1"]).toEqual({
+      launcherTipSuppressed: true,
+      setupShown: false,
+    });
+
+    await panel.acknowledgeSetup();
+    expect(host().dataset["onboarding"]).toBe("done");
+    expect(stores.local["cfpt:onboarding:v1"]).toEqual({
+      launcherTipSuppressed: true,
+      setupShown: true,
+    });
+  });
+
+  it("does not show either onboarding surface again after suppression and setup completion", async () => {
+    stores.local["cfpt:onboarding:v1"] = {
+      launcherTipSuppressed: true,
+      setupShown: true,
+    };
+
+    makePanel();
+    await settle();
+
+    expect(host().dataset["onboarding"]).toBe("done");
+    expect(host().dataset["highlighted"]).toBe("false");
+  });
+
+  it("shows the launcher tip again when the user did not check don't-show-again", async () => {
+    const panel = makePanel();
+    await settle();
+    await panel.acknowledgeLauncherTip(false);
+    await panel.acknowledgeSetup();
+    panel.dispose();
+
+    fixture();
+    makePanel();
+    await settle();
+
+    expect(stores.local["cfpt:onboarding:v1"]).toEqual({
+      launcherTipSuppressed: false,
+      setupShown: true,
+    });
+    expect(host().dataset["onboarding"]).toBe("tip");
+    expect(host().dataset["highlighted"]).toBe("true");
+  });
+
+  it("goes directly to the one-time setup dialog when only the launcher tip is suppressed", async () => {
+    stores.local["cfpt:onboarding:v1"] = {
+      launcherTipSuppressed: true,
+      setupShown: false,
+    };
+
+    makePanel();
+    await settle();
+
+    expect(host().dataset["onboarding"]).toBe("setup");
+    expect(host().dataset["highlighted"]).toBe("false");
   });
 });
