@@ -30,13 +30,7 @@ export type MachineEvent =
   | { type: "PAGE_SIGNAL"; signal: PageSignal };
 
 export type PromptKind =
-  | "plan"
-  | "develop"
-  | "continue"
-  | "contract_refresh"
-  | "nudge"
-  | "user_text"
-  | "queued_user_text";
+  "plan" | "develop" | "continue" | "contract_refresh" | "nudge" | "user_text" | "queued_user_text";
 
 export type Effect =
   | { do: "insertAndSend"; kind: PromptKind; text?: string }
