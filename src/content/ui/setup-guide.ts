@@ -23,6 +23,12 @@ interface StoredGuide {
   returnUrl: string;
 }
 
+interface GuideCopy {
+  title: string;
+  body: string;
+  actions: string;
+}
+
 const STORAGE_KEY = "cfpt:setup-guide:v1";
 const MCP_URL = "https://api.githubcopilot.com/mcp/";
 const PLUGINS_URL = "https://chatgpt.com/plugins";
@@ -112,6 +118,17 @@ const TARGETS: Partial<Record<SetupGuideStep, GuideTargetId>> = {
   "developer-menu": "conversationDeveloperMode",
   "github-app": "conversationGitHubMcp",
 };
+
+const EARLY_COPY_STEPS = new Set<SetupGuideStep>([
+  "security",
+  "developer",
+  "developer-toggle",
+  "plugins",
+  "plugin-add",
+  "plugin-name",
+  "plugin-server",
+  "plugin-auth",
+]);
 
 export class SetupGuide {
   private readonly host: HTMLDivElement;
@@ -218,7 +235,9 @@ export class SetupGuide {
 
   private currentTarget(): HTMLElement | null {
     if (this.step === "developer-menu") {
-      return queryGuideTarget("conversationDeveloperMode") ?? queryGuideTarget("conversationGitHubMcp");
+      return (
+        queryGuideTarget("conversationDeveloperMode") ?? queryGuideTarget("conversationGitHubMcp")
+      );
     }
     const id = TARGETS[this.step];
     return id ? queryGuideTarget(id) : null;
@@ -272,7 +291,10 @@ export class SetupGuide {
 
     const rect = target.getBoundingClientRect();
     const width = Math.min(340, window.innerWidth - 24);
-    const left = Math.min(Math.max(12, rect.left), Math.max(12, window.innerWidth - width - 12));
+    const left = Math.min(
+      Math.max(12, rect.left),
+      Math.max(12, window.innerWidth - width - 12),
+    );
     const roomBelow = window.innerHeight - rect.bottom;
     const top = roomBelow > 210 ? rect.bottom + 12 : Math.max(12, rect.top - 190);
     Object.assign(this.card.style, {
@@ -287,7 +309,9 @@ export class SetupGuide {
     if (this.lastScrolledStep === this.step) return;
     if (this.step !== "developer" && this.step !== "developer-toggle") return;
     this.lastScrolledStep = this.step;
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
   }
 
   private afterTargetClick(target: HTMLElement): void {
@@ -343,9 +367,11 @@ export class SetupGuide {
     if (action === "cancel") void this.cancel();
     else if (action === "developer-next") void this.setStep("developer-toggle");
     else if (action === "open-plugins") this.openPlugins();
-    else if (action === "fill-name") this.fillField("pluginNameInput", "GitHub MCP", "plugin-server");
-    else if (action === "fill-url") this.fillField("pluginServerInput", MCP_URL, "plugin-auth");
-    else if (action === "auth-next") void this.setStep("plugin-risk");
+    else if (action === "fill-name") {
+      this.fillField("pluginNameInput", "GitHub MCP", "plugin-server");
+    } else if (action === "fill-url") {
+      this.fillField("pluginServerInput", MCP_URL, "plugin-auth");
+    } else if (action === "auth-next") void this.setStep("plugin-risk");
     else if (action === "risk-next") this.advanceRisk();
     else if (action === "return-chat") this.returnToChat();
     else if (action === "finish") void this.finish();
@@ -389,11 +415,18 @@ export class SetupGuide {
   }
 }
 
-function guideCopy(step: SetupGuideStep, found: boolean): { title: string; body: string; actions: string } {
+function guideCopy(step: SetupGuideStep, found: boolean): GuideCopy {
   const wait = found ? "" : " I’m waiting for this ChatGPT control to appear.";
+  return EARLY_COPY_STEPS.has(step) ? guideCopyEarly(step, wait) : guideCopyLate(step, wait);
+}
+
+function guideCopyEarly(step: SetupGuideStep, wait: string): GuideCopy {
   switch (step) {
     case "security":
-      return copy("1 · Security and login", `Click the highlighted <b>Security and login</b> item.${wait}`);
+      return copy(
+        "1 · Security and login",
+        `Click the highlighted <b>Security and login</b> item.${wait}`,
+      );
     case "developer":
       return copy(
         "2 · Developer mode",
@@ -401,7 +434,10 @@ function guideCopy(step: SetupGuideStep, found: boolean): { title: string; body:
         primary("developer-next", "Show the switch"),
       );
     case "developer-toggle":
-      return copy("3 · Enable Developer mode", `Turn on the highlighted <b>Developer mode</b> switch. ChatGPT labels this Elevated Risk because it permits unverified connectors.${wait}`);
+      return copy(
+        "3 · Enable Developer mode",
+        `Turn on the highlighted <b>Developer mode</b> switch. ChatGPT labels this Elevated Risk because it permits unverified connectors.${wait}`,
+      );
     case "plugins":
       return copy(
         "4 · Open Plugins",
@@ -428,6 +464,13 @@ function guideCopy(step: SetupGuideStep, found: boolean): { title: string; body:
         `Set Authentication to <b>OAuth</b> in the highlighted control.${wait}`,
         primary("auth-next", "OAuth selected — next"),
       );
+    default:
+      return guideCopyLate(step, wait);
+  }
+}
+
+function guideCopyLate(step: SetupGuideStep, wait: string): GuideCopy {
+  switch (step) {
     case "plugin-risk":
       return copy(
         "9 · Risk acknowledgement",
@@ -443,22 +486,37 @@ function guideCopy(step: SetupGuideStep, found: boolean): { title: string; body:
         primary("return-chat", "Connected — return to chat"),
       );
     case "chat-plus":
-      return copy("12 · Add it to this chat", `Click the highlighted <b>+</b> beside the composer.${wait}`);
+      return copy(
+        "12 · Add it to this chat",
+        `Click the highlighted <b>+</b> beside the composer.${wait}`,
+      );
     case "developer-menu":
-      return copy("13 · Developer mode", `Choose the highlighted <b>Developer mode</b> entry. If GitHub MCP appears directly, choose it instead.${wait}`);
+      return copy(
+        "13 · Developer mode",
+        `Choose the highlighted <b>Developer mode</b> entry. If GitHub MCP appears directly, choose it instead.${wait}`,
+      );
     case "github-app":
-      return copy("14 · GitHub MCP", `Choose the highlighted <b>GitHub MCP</b> plugin for this conversation.${wait}`);
+      return copy(
+        "14 · GitHub MCP",
+        `Choose the highlighted <b>GitHub MCP</b> plugin for this conversation.${wait}`,
+      );
     case "done":
       return copy(
         "Setup complete",
         "Chat FreePT can now run its GitHub capability preflight in this conversation.",
         primary("finish", "Done"),
       );
+    default:
+      return copy("Setup", `Continue with the highlighted ChatGPT control.${wait}`);
   }
 }
 
-function copy(title: string, body: string, actions = ""): { title: string; body: string; actions: string } {
-  return { title, body, actions: actions ? `<div class="cfpt-guide-actions">${actions}</div>` : "" };
+function copy(title: string, body: string, actions = ""): GuideCopy {
+  return {
+    title,
+    body,
+    actions: actions ? `<div class="cfpt-guide-actions">${actions}</div>` : "",
+  };
 }
 
 function primary(action: string, label: string): string {
@@ -473,11 +531,15 @@ function isGuideStep(value: unknown): value is SetupGuideStep {
 
 function isControlEnabled(element: HTMLElement): boolean {
   if (element instanceof HTMLInputElement) return element.checked;
-  return element.getAttribute("aria-checked") === "true" || element.getAttribute("data-state") === "checked";
+  return (
+    element.getAttribute("aria-checked") === "true" ||
+    element.getAttribute("data-state") === "checked"
+  );
 }
 
 function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
-  const prototype = element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+  const prototype =
+    element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
   if (setter) setter.call(element, value);
   else element.value = value;
