@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   autoContinueEnabled,
+  isWaitingForManualContinue,
   newRunState,
   reduce,
   type Effect,
@@ -53,7 +54,23 @@ describe("auto-continue control", () => {
 
     expect(result.state.status).toBe("awaiting_user");
     expect(result.state.pauseReason).toBe("Auto-continue is off.");
+    expect(isWaitingForManualContinue(result.state)).toBe(true);
     expect(result.effects).not.toContainEqual({ do: "startCooldown", ms: 1000 });
+  });
+
+  it("derives manual continuation from machine state instead of pause copy", () => {
+    const waiting: RunState = {
+      ...streamingRun(),
+      phase: "developing",
+      status: "awaiting_user",
+      autoContinueEnabled: false,
+      lastMarker: marker("CONTINUE"),
+      pauseReason: "Localized or revised UI copy",
+    };
+    expect(isWaitingForManualContinue(waiting)).toBe(true);
+
+    const needsInput = { ...waiting, lastMarker: marker("NEEDS_INPUT") };
+    expect(isWaitingForManualContinue(needsInput)).toBe(false);
   });
 
   it("disabling a pending automatic cooldown stops it and re-enabling resumes it", () => {
@@ -75,7 +92,7 @@ describe("auto-continue control", () => {
   });
 });
 
-describe("queued continuation input and stop reset", () => {
+describe("queued continuation input and reset", () => {
   it("sends a queued user message before continue even when auto-continue is off", () => {
     let state = streamingRun();
     state = reduce(state, { type: "USER_SET_AUTO_CONTINUE", enabled: false }, settings).state;
@@ -173,6 +190,32 @@ describe("queued continuation input and stop reset", () => {
     expect(result.state.autoSends).toBe(0);
     expect(result.state.nudges).toBe(0);
     expect(result.state.repliesSinceContract).toBe(0);
+    expect(result.effects).toContainEqual({ do: "badge", text: "" });
+  });
+
+  it("NEW PROJECT uses the same clean reset while preserving the toggle", () => {
+    const dirty: RunState = {
+      ...streamingRun(),
+      phase: "complete",
+      status: "complete",
+      autoContinueEnabled: false,
+      queuedUserText: "stale instruction",
+      repo: "owner/repo",
+      planSummary: "old plan",
+      lastMarker: marker("COMPLETE"),
+      autoSends: 3,
+    };
+
+    const result = reduce(dirty, { type: "USER_NEW_PROJECT" }, settings);
+    expect(result.state.phase).toBe("idle");
+    expect(result.state.status).toBe("idle");
+    expect(result.state.autoContinueEnabled).toBe(false);
+    expect(result.state.idea).toBe("");
+    expect(result.state.repo).toBeUndefined();
+    expect(result.state.queuedUserText).toBeUndefined();
+    expect(result.state.lastMarker).toBeUndefined();
+    expect(result.state.autoSends).toBe(0);
+    expect(result.state.log.at(-1)?.text).toBe("Ready for a new project");
     expect(result.effects).toContainEqual({ do: "badge", text: "" });
   });
 });
