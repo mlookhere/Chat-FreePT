@@ -578,7 +578,9 @@ export class Panel {
   }
 
   private hideQueueEditor(): void {
-    this.panelEl.querySelector<HTMLElement>('[data-ref="queue-editor"]')?.classList.add("cfpt-hidden");
+    this.panelEl
+      .querySelector<HTMLElement>('[data-ref="queue-editor"]')
+      ?.classList.add("cfpt-hidden");
   }
 
   private saveQueuedMessage(): void {
