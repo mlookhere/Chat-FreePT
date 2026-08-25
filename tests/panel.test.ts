@@ -127,6 +127,11 @@ describe("composer airplane launcher", () => {
 });
 
 describe("first-run onboarding", () => {
+  it("uses a dedicated blurred setup backdrop", () => {
+    expect(PANEL_CSS).toContain(".cfpt-setup-backdrop");
+    expect(PANEL_CSS).toContain("backdrop-filter: blur(4px)");
+  });
+
   it("shows the launcher tip first, highlights the airplane, then shows setup", async () => {
     const panel = makePanel();
     await settle();
