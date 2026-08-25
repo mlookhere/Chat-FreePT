@@ -6,6 +6,7 @@
 
 export type TargetId =
   | "composer"
+  | "composerHeader"
   | "sendButton"
   | "stopButton"
   | "assistantMessage"
@@ -33,17 +34,28 @@ const REGISTRY: Record<TargetId, Target> = {
     candidates: [
       { css: "#prompt-textarea" },
       { css: 'div.ProseMirror[contenteditable="true"]' },
-      { css: 'form [contenteditable="true"]' },
+      { css: 'form[data-type="unified-composer"] [contenteditable="true"]' },
       { css: 'main [contenteditable="true"]' },
     ],
   },
+  composerHeader: {
+    required: false,
+    candidates: [
+      { css: "#thread-bottom [data-prompt-textarea-header]" },
+      { css: "main [data-prompt-textarea-header]" },
+      { css: "[data-prompt-textarea-header]" },
+    ],
+  },
   sendButton: {
-    required: true,
+    // ChatGPT intentionally omits Send while the composer is empty. clickSend() waits
+    // for it after prompt insertion, so its idle absence is not a page-health failure.
+    required: false,
     candidates: [
       { css: 'button[data-testid="send-button"]' },
       { css: "#composer-submit-button" },
       { css: 'button[aria-label="Send prompt"]' },
-      { css: 'form button[type="submit"]' },
+      { css: 'button[aria-label="Send"]' },
+      { css: 'form[data-type="unified-composer"] button[type="submit"]' },
       { css: "form button", textRe: /^send$/i },
     ],
   },
@@ -52,26 +64,29 @@ const REGISTRY: Record<TargetId, Target> = {
     candidates: [
       { css: 'button[data-testid="stop-button"]' },
       { css: 'button[aria-label="Stop streaming"]' },
+      { css: 'button[aria-label="Stop generating"]' },
       { css: 'button[aria-label*="Stop"]' },
     ],
   },
   assistantMessage: {
     required: false,
     candidates: [
+      { css: '[data-message-author-role="assistant"][data-message-id]' },
       { css: '[data-message-author-role="assistant"]' },
-      { css: '[data-testid^="conversation-turn"] .agent-turn' },
+      { css: '[data-testid^="conversation-turn"][data-turn="assistant"] .agent-turn' },
     ],
   },
   userMessage: {
     required: false,
     candidates: [
+      { css: '[data-message-author-role="user"][data-message-id]' },
       { css: '[data-message-author-role="user"]' },
-      { css: '[data-testid^="conversation-turn"] .user-turn' },
+      { css: '[data-testid^="conversation-turn"][data-turn="user"] .user-turn' },
     ],
   },
   conversationRoot: {
     required: true,
-    candidates: [{ css: "main" }, { css: "body" }],
+    candidates: [{ css: "#thread" }, { css: "main#main" }, { css: "main" }, { css: "body" }],
   },
   regenerateButton: {
     required: false,
