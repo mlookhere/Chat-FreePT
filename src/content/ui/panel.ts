@@ -4,7 +4,8 @@ import {
   type MachineEvent,
 } from "../../common/state-machine";
 import type { RunState } from "../../common/types";
-import { healthCheck, query } from "../selectors";
+import { healthCheck, query, queryGuideTarget } from "../selectors";
+import { SetupGuide } from "./setup-guide";
 import { PANEL_CSS } from "./styles";
 
 export interface PanelHooks {
@@ -15,6 +16,12 @@ export interface PanelHooks {
 interface OnboardingState {
   launcherTipSuppressed: boolean;
   setupShown: boolean;
+}
+
+interface NativeSurfaceSnapshot {
+  element: HTMLElement;
+  pointerEvents: string;
+  ariaHidden: string | null;
 }
 
 const ONBOARDING_KEY = "cfpt:onboarding:v1";
@@ -54,16 +61,15 @@ function canQueueNext(state: RunState): boolean {
   return state.phase === "planning" || state.phase === "developing";
 }
 
-/**
- * Compact Chat FreePT controls mounted directly inside ChatGPT's composer surface. The
- * airplane launcher is always present; the full controls float above it only while open.
- * A closed shadow root isolates both style systems while a subtree observer re-homes the
- * single host when ChatGPT replaces its composer during SPA navigation or hydration.
- */
+/** Native-feeling launcher plus a body-level composer takeover that cannot inherit ChatGPT focus traps. */
 export class Panel {
-  private readonly host: HTMLDivElement;
-  private readonly shadow: ShadowRoot;
+  private readonly setupGuide = new SetupGuide();
+  private readonly host: HTMLSpanElement;
+  private readonly launcherShadow: ShadowRoot;
   private readonly launcher: HTMLButtonElement;
+  private readonly overlayHost: HTMLDivElement;
+  private readonly shadow: ShadowRoot;
+  private readonly takeoverBackdropEl: HTMLDivElement;
   private readonly panelEl: HTMLDivElement;
   private readonly launcherTipEl: HTMLDivElement;
   private readonly setupBackdropEl: HTMLDivElement;
@@ -73,93 +79,23 @@ export class Panel {
   private mountQueued = false;
   private disposed = false;
   private onboarding = { ...DEFAULT_ONBOARDING };
+  private nativeSurface: NativeSurfaceSnapshot | null = null;
 
   constructor(private readonly hooks: PanelHooks) {
-    this.host = document.createElement("div");
-    this.host.id = "cfpt-root";
-    this.host.dataset["cfptEmbedded"] = "true";
-    this.host.dataset["cfptLauncher"] = "airplane";
-    this.host.dataset["expanded"] = "false";
-    this.host.dataset["onboarding"] = "loading";
-    this.host.dataset["highlighted"] = "false";
-    this.shadow = this.host.attachShadow({ mode: "closed" });
+    const launcherParts = this.createLauncher();
+    this.host = launcherParts.host;
+    this.launcherShadow = launcherParts.shadow;
+    this.launcher = launcherParts.button;
 
-    const style = document.createElement("style");
-    style.textContent = PANEL_CSS;
-    this.shadow.appendChild(style);
+    const overlay = this.createOverlay();
+    this.overlayHost = overlay.host;
+    this.shadow = overlay.shadow;
+    this.takeoverBackdropEl = overlay.backdrop;
+    this.panelEl = overlay.panel;
+    this.launcherTipEl = overlay.tip;
+    this.setupBackdropEl = overlay.setup;
 
-    this.panelEl = document.createElement("div");
-    this.panelEl.className = "cfpt-panel cfpt-hidden";
-    this.shadow.appendChild(this.panelEl);
-
-    this.launcher = document.createElement("button");
-    this.launcher.type = "button";
-    this.launcher.className = "cfpt-launcher";
-    this.launcher.title = "Open Chat FreePT";
-    this.launcher.setAttribute("aria-label", "Open Chat FreePT");
-    this.launcher.setAttribute("aria-expanded", "false");
-    this.launcher.innerHTML = `
-      <svg class="cfpt-airplane" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path d="M12 2.5c-.8 0-1.4.6-1.4 1.4v5.3L3 13.8v2l7.6-2.4v4.2l-2.3 1.7v1.4l3.7-1.1 3.7 1.1v-1.4l-2.3-1.7v-4.2l7.6 2.4v-2l-7.6-4.6V3.9c0-.8-.6-1.4-1.4-1.4Z"></path>
-      </svg>
-    `;
-    this.launcher.addEventListener("click", () => {
-      if (!this.launcherTipEl.classList.contains("cfpt-hidden")) {
-        void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
-      }
-      this.toggle();
-    });
-    this.shadow.appendChild(this.launcher);
-
-    this.launcherTipEl = document.createElement("div");
-    this.launcherTipEl.className = "cfpt-onboarding-toast cfpt-hidden";
-    this.launcherTipEl.setAttribute("role", "status");
-    this.launcherTipEl.innerHTML = `
-      <div class="cfpt-toast-arrow" aria-hidden="true"></div>
-      <button class="cfpt-icon-close" type="button" data-action="tip-continue" aria-label="Dismiss launcher tip">×</button>
-      <strong>Chat FreePT lives here</strong>
-      <p>Use the airplane inside the ChatGPT input whenever you want to open Chat FreePT.</p>
-      <label class="cfpt-check-row">
-        <input type="checkbox" data-ref="suppress-launcher-tip" />
-        <span>Don't show this tip again</span>
-      </label>
-      <button class="cfpt-btn cfpt-btn-primary cfpt-toast-continue" type="button" data-action="tip-continue">Continue</button>
-    `;
-    this.shadow.appendChild(this.launcherTipEl);
-
-    this.setupBackdropEl = document.createElement("div");
-    this.setupBackdropEl.className = "cfpt-setup-backdrop cfpt-hidden";
-    this.setupBackdropEl.setAttribute("role", "presentation");
-    this.setupBackdropEl.innerHTML = `
-      <section class="cfpt-setup-card" role="dialog" aria-modal="true" aria-labelledby="cfpt-setup-title">
-        <button class="cfpt-icon-close" type="button" data-action="setup-done" aria-label="Close setup instructions">×</button>
-        <div class="cfpt-setup-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2.5c-.8 0-1.4.6-1.4 1.4v5.3L3 13.8v2l7.6-2.4v4.2l-2.3 1.7v1.4l3.7-1.1 3.7 1.1v-1.4l-2.3-1.7v-4.2l7.6 2.4v-2l-7.6-4.6V3.9c0-.8-.6-1.4-1.4-1.4Z"></path></svg>
-        </div>
-        <h2 id="cfpt-setup-title">Set up GitHub access once</h2>
-        <p class="cfpt-setup-lead">For fully autonomous new-repository work, ChatGPT needs a GitHub MCP app with repository and workflow write access.</p>
-        <ol class="cfpt-setup-steps">
-          <li>Open <strong>Settings → Security and login → Developer mode</strong> and turn it on.</li>
-          <li>Open ChatGPT Plugins, select <strong>+</strong>, and add <code>https://api.githubcopilot.com/mcp/</code> using OAuth.</li>
-          <li>In the conversation's Plus menu, choose <strong>Developer mode</strong> and select that GitHub app.</li>
-          <li>Authorize the repository and workflow write access Chat FreePT's preflight requests.</li>
-        </ol>
-        <p class="cfpt-setup-footnote">Existing repositories may work with another GitHub connector if it passes Chat FreePT's capability preflight. Chat FreePT never receives your GitHub credentials.</p>
-        <div class="cfpt-setup-actions">
-          <a class="cfpt-btn" href="https://chatgpt.com/plugins" target="_blank" rel="noreferrer noopener">Open ChatGPT Plugins</a>
-          <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="setup-done">Got it</button>
-        </div>
-      </section>
-    `;
-    this.shadow.appendChild(this.setupBackdropEl);
-
-    this.shadow.addEventListener("click", (event) => this.onClick(event));
-    this.setupBackdropEl.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !this.setupBackdropEl.classList.contains("cfpt-hidden")) {
-        void this.acknowledgeSetup();
-      }
-    });
-
+    this.bindEvents();
     this.mountObserver = new MutationObserver(() => this.scheduleMount());
     this.mountObserver.observe(document.documentElement, { childList: true, subtree: true });
     this.mount();
@@ -167,11 +103,18 @@ export class Panel {
   }
 
   toggle(force?: boolean): void {
-    const show = force ?? this.panelEl.classList.contains("cfpt-hidden");
+    const show = force ?? this.takeoverBackdropEl.classList.contains("cfpt-hidden");
+    this.takeoverBackdropEl.classList.toggle("cfpt-hidden", !show);
     this.panelEl.classList.toggle("cfpt-hidden", !show);
     this.host.dataset["expanded"] = String(show);
     this.launcher.setAttribute("aria-expanded", String(show));
     this.launcher.setAttribute("aria-label", show ? "Close Chat FreePT" : "Open Chat FreePT");
+    if (show) {
+      this.applyNativeTakeover();
+      this.positionTakeover();
+    } else {
+      this.restoreNativeTakeover();
+    }
   }
 
   render(state: RunState, passive = false): void {
@@ -187,16 +130,22 @@ export class Panel {
     if (viewKey !== this.lastViewKey) {
       this.lastViewKey = viewKey;
       this.stopArmed = false;
-      this.panelEl.innerHTML = `<div class="cfpt-body">${this.bodyHtml(state, passive)}</div>`;
+      this.panelEl.innerHTML = this.panelShell(this.bodyHtml(state, passive));
     }
     this.updateDynamic(state);
     this.mount();
+    if (this.host.dataset["expanded"] === "true") this.positionTakeover();
   }
 
   dispose(): void {
     this.disposed = true;
     this.mountObserver.disconnect();
+    window.removeEventListener("resize", this.onViewportChange);
+    window.removeEventListener("scroll", this.onViewportChange, true);
+    this.restoreNativeTakeover();
+    this.setupGuide.dispose();
     this.host.remove();
+    this.overlayHost.remove();
   }
 
   async acknowledgeLauncherTip(suppress: boolean): Promise<void> {
@@ -204,11 +153,8 @@ export class Panel {
     this.host.dataset["highlighted"] = "false";
     if (suppress) this.onboarding.launcherTipSuppressed = true;
     await this.persistOnboarding();
-    if (!this.onboarding.setupShown) {
-      this.showSetupModal();
-    } else {
-      this.host.dataset["onboarding"] = "done";
-    }
+    if (!this.onboarding.setupShown) this.showSetupModal();
+    else this.host.dataset["onboarding"] = "done";
   }
 
   async acknowledgeSetup(): Promise<void> {
@@ -222,6 +168,110 @@ export class Panel {
     this.toggle(true);
   }
 
+  private createLauncher(): { host: HTMLSpanElement; shadow: ShadowRoot; button: HTMLButtonElement } {
+    const host = document.createElement("span");
+    host.id = "cfpt-root";
+    host.dataset["cfptEmbedded"] = "true";
+    host.dataset["cfptLauncher"] = "airplane";
+    host.dataset["cfptHost"] = "launcher";
+    host.dataset["expanded"] = "false";
+    host.dataset["onboarding"] = "loading";
+    host.dataset["highlighted"] = "false";
+    host.dataset["fallback"] = "false";
+
+    const shadow = host.attachShadow({ mode: "closed" });
+    appendStyle(shadow);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cfpt-launcher";
+    button.title = "Open Chat FreePT";
+    button.setAttribute("aria-label", "Open Chat FreePT");
+    button.setAttribute("aria-expanded", "false");
+    button.innerHTML = airplaneSvg();
+    button.addEventListener("click", () => this.onLauncherClick());
+    shadow.appendChild(button);
+    return { host, shadow, button };
+  }
+
+  private createOverlay(): {
+    host: HTMLDivElement;
+    shadow: ShadowRoot;
+    backdrop: HTMLDivElement;
+    panel: HTMLDivElement;
+    tip: HTMLDivElement;
+    setup: HTMLDivElement;
+  } {
+    const host = document.createElement("div");
+    host.id = "cfpt-overlay-root";
+    host.dataset["cfptHost"] = "overlay";
+    const shadow = host.attachShadow({ mode: "closed" });
+    appendStyle(shadow);
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "cfpt-takeover-backdrop cfpt-hidden";
+    const panel = document.createElement("div");
+    panel.className = "cfpt-panel cfpt-hidden";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    backdrop.appendChild(panel);
+    shadow.appendChild(backdrop);
+
+    const tip = document.createElement("div");
+    tip.className = "cfpt-onboarding-toast cfpt-hidden";
+    tip.setAttribute("role", "status");
+    tip.innerHTML = launcherTipHtml();
+    shadow.appendChild(tip);
+
+    const setup = document.createElement("div");
+    setup.className = "cfpt-setup-backdrop cfpt-hidden";
+    shadow.appendChild(setup);
+    document.body.appendChild(host);
+    return { host, shadow, backdrop, panel, tip, setup };
+  }
+
+  private bindEvents(): void {
+    this.shadow.addEventListener("click", (event) => this.onClick(event));
+    this.shadow.addEventListener("pointerdown", (event) => this.stopComposerPropagation(event));
+    this.shadow.addEventListener("mousedown", (event) => this.stopComposerPropagation(event));
+    this.shadow.addEventListener("focusin", (event) => this.stopComposerPropagation(event));
+    this.shadow.addEventListener("keydown", (event) => this.onKeyDown(event));
+    this.takeoverBackdropEl.addEventListener("click", (event) => {
+      if (event.target === this.takeoverBackdropEl) this.toggle(false);
+    });
+    this.setupBackdropEl.addEventListener("click", (event) => {
+      if (event.target === this.setupBackdropEl) void this.acknowledgeSetup();
+    });
+    window.addEventListener("resize", this.onViewportChange);
+    window.addEventListener("scroll", this.onViewportChange, true);
+  }
+
+  private readonly onViewportChange = (): void => {
+    if (this.host.dataset["expanded"] === "true") this.positionTakeover();
+    if (!this.launcherTipEl.classList.contains("cfpt-hidden")) this.positionLauncherTip();
+  };
+
+  private stopComposerPropagation(event: Event): void {
+    if (event.composedPath().includes(this.panelEl) || event.composedPath().includes(this.setupBackdropEl)) {
+      event.stopPropagation();
+    }
+  }
+
+  private onKeyDown(event: Event): void {
+    if (!(event instanceof KeyboardEvent) || event.key !== "Escape") return;
+    if (!this.setupBackdropEl.classList.contains("cfpt-hidden")) {
+      void this.acknowledgeSetup();
+      return;
+    }
+    if (this.host.dataset["expanded"] === "true") this.toggle(false);
+  }
+
+  private onLauncherClick(): void {
+    if (!this.launcherTipEl.classList.contains("cfpt-hidden")) {
+      void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
+    }
+    this.toggle();
+  }
+
   private async initOnboarding(): Promise<void> {
     try {
       const found = await chrome.storage.local.get(ONBOARDING_KEY);
@@ -230,16 +280,9 @@ export class Panel {
       this.onboarding = { ...DEFAULT_ONBOARDING };
     }
     if (this.disposed) return;
-
-    if (!this.onboarding.launcherTipSuppressed) {
-      this.showLauncherTip();
-      return;
-    }
-    if (!this.onboarding.setupShown) {
-      this.showSetupModal();
-      return;
-    }
-    this.host.dataset["onboarding"] = "done";
+    if (!this.onboarding.launcherTipSuppressed) this.showLauncherTip();
+    else if (!this.onboarding.setupShown) this.showSetupModal();
+    else this.host.dataset["onboarding"] = "done";
   }
 
   private async persistOnboarding(): Promise<void> {
@@ -255,19 +298,27 @@ export class Panel {
     this.launcherTipEl.classList.remove("cfpt-hidden");
     this.host.dataset["onboarding"] = "tip";
     this.host.dataset["highlighted"] = "true";
+    this.positionLauncherTip();
   }
 
-  private showSetupModal(): void {
+  private showSetupModal(mode: "paid" | "free" = "paid"): void {
     this.launcherTipEl.classList.add("cfpt-hidden");
     this.host.dataset["highlighted"] = "false";
+    this.setupBackdropEl.innerHTML = mode === "free" ? freeSetupHtml() : paidSetupHtml();
     this.setupBackdropEl.classList.remove("cfpt-hidden");
     this.host.dataset["onboarding"] = "setup";
     queueMicrotask(() => {
-      const button = this.setupBackdropEl.querySelector<HTMLButtonElement>(
-        '[data-action="setup-done"]',
-      );
-      button?.focus();
+      this.setupBackdropEl.querySelector<HTMLButtonElement>("button")?.focus();
     });
+  }
+
+  private async startSetupGuide(): Promise<void> {
+    this.setupBackdropEl.classList.add("cfpt-hidden");
+    this.onboarding.setupShown = true;
+    this.host.dataset["onboarding"] = "done";
+    await this.persistOnboarding();
+    this.toggle(false);
+    await this.setupGuide.start();
   }
 
   private tipCheckboxChecked(): boolean {
@@ -287,9 +338,97 @@ export class Panel {
   }
 
   private mount(): void {
-    const anchor = query("composerSurface") ?? query("composerHeader");
-    if (!anchor || this.host.parentElement === anchor) return;
-    anchor.appendChild(this.host);
+    const plus = queryGuideTarget("composerPlusButton");
+    if (plus?.parentElement) {
+      if (plus.nextElementSibling !== this.host) plus.insertAdjacentElement("afterend", this.host);
+      this.host.dataset["fallback"] = "false";
+    } else {
+      const anchor = query("composerSurface") ?? query("composerHeader");
+      if (anchor && this.host.parentElement !== anchor) anchor.appendChild(this.host);
+      this.host.dataset["fallback"] = "true";
+    }
+    if (!this.overlayHost.isConnected) document.body.appendChild(this.overlayHost);
+    this.syncOverlayTheme();
+    if (this.host.dataset["expanded"] === "true") {
+      this.applyNativeTakeover();
+      this.positionTakeover();
+    }
+    if (!this.launcherTipEl.classList.contains("cfpt-hidden")) this.positionLauncherTip();
+  }
+
+  private syncOverlayTheme(): void {
+    const surface = query("composerSurface");
+    if (!(surface instanceof HTMLElement)) return;
+    const style = getComputedStyle(surface);
+    if (style.backgroundColor) this.overlayHost.style.setProperty("--cfpt-native-surface", style.backgroundColor);
+    if (style.color) this.overlayHost.style.setProperty("--cfpt-native-text", style.color);
+  }
+
+  private applyNativeTakeover(): void {
+    const surface = query("composerSurface");
+    if (!(surface instanceof HTMLElement)) return;
+    if (this.nativeSurface?.element === surface) return;
+    this.restoreNativeTakeover();
+    this.nativeSurface = {
+      element: surface,
+      pointerEvents: surface.style.pointerEvents,
+      ariaHidden: surface.getAttribute("aria-hidden"),
+    };
+    surface.style.pointerEvents = "none";
+    surface.setAttribute("aria-hidden", "true");
+    surface.dataset["cfptTakeover"] = "true";
+  }
+
+  private restoreNativeTakeover(): void {
+    const snapshot = this.nativeSurface;
+    if (!snapshot) return;
+    snapshot.element.style.pointerEvents = snapshot.pointerEvents;
+    if (snapshot.ariaHidden === null) snapshot.element.removeAttribute("aria-hidden");
+    else snapshot.element.setAttribute("aria-hidden", snapshot.ariaHidden);
+    delete snapshot.element.dataset["cfptTakeover"];
+    this.nativeSurface = null;
+  }
+
+  private positionTakeover(): void {
+    const surface = query("composerSurface");
+    if (!(surface instanceof HTMLElement)) return;
+    const rect = surface.getBoundingClientRect();
+    const viewportWidth = Math.max(320, window.innerWidth);
+    const margin = viewportWidth <= 620 ? 8 : 12;
+    const fallbackWidth = Math.min(820, viewportWidth - margin * 2);
+    const width = rect.width >= 280 ? Math.min(rect.width, viewportWidth - margin * 2) : fallbackWidth;
+    const left = rect.width >= 280 ? Math.min(Math.max(margin, rect.left), viewportWidth - width - margin) : (viewportWidth - width) / 2;
+    const bottom = rect.height > 0 ? Math.max(8, window.innerHeight - rect.bottom) : 16;
+    Object.assign(this.panelEl.style, {
+      left: `${Math.round(left)}px`,
+      right: "auto",
+      bottom: `${Math.round(bottom)}px`,
+      top: "auto",
+      width: `${Math.round(width)}px`,
+    });
+  }
+
+  private positionLauncherTip(): void {
+    const rect = this.host.getBoundingClientRect();
+    const width = Math.min(310, window.innerWidth - 24);
+    const left = Math.min(Math.max(12, rect.left - 10), Math.max(12, window.innerWidth - width - 12));
+    const top = rect.top > 175 ? rect.top - 165 : rect.bottom + 10;
+    Object.assign(this.launcherTipEl.style, {
+      left: `${Math.round(left)}px`,
+      right: "auto",
+      top: `${Math.round(Math.max(12, top))}px`,
+      bottom: "auto",
+    });
+  }
+
+  private panelShell(body: string): string {
+    return `
+      <div class="cfpt-panel-head">
+        <strong>Chat FreePT</strong>
+        <button class="cfpt-panel-close" type="button" data-action="close" aria-label="Close Chat FreePT">×</button>
+      </div>
+      <div class="cfpt-body">${body}</div>
+    `;
   }
 
   private bodyHtml(state: RunState, passive: boolean): string {
@@ -300,56 +439,36 @@ export class Panel {
             health.missing.join(", "),
           )}. Auto-run cannot operate until the extension is updated.</div>`
         : "";
-
     if (passive) return warn + this.passiveHtml(state);
     const controls = this.automationControlsHtml(state);
+    return warn + controls + this.statusBodyHtml(state);
+  }
 
+  private statusBodyHtml(state: RunState): string {
     switch (state.status) {
       case "idle":
-        return warn + controls + this.ideaFormHtml(state);
+        return this.ideaFormHtml(state);
       case "inserting":
       case "sending":
       case "streaming":
       case "cooldown":
-        return warn + controls + this.runningHtml(state);
+        return this.runningHtml(state);
       case "awaiting_user":
-        return (
-          warn +
-          controls +
-          (state.phase === "plan_ready" ? this.planReadyHtml(state) : this.needsInputHtml(state))
-        );
+        return state.phase === "plan_ready" ? this.planReadyHtml(state) : this.needsInputHtml(state);
       case "paused":
       case "error":
-        return warn + controls + this.pausedHtml(state);
+        return this.pausedHtml(state);
       case "complete":
-        return warn + controls + this.completeHtml(state);
+        return this.completeHtml(state);
       default:
-        return warn + controls;
+        return "";
     }
   }
 
   private automationControlsHtml(state: RunState): string {
     const enabled = autoContinueEnabled(state);
     const queued = state.queuedUserText?.trim() ?? "";
-    const queueControls = canQueueNext(state)
-      ? `
-        <div class="cfpt-field">
-          ${
-            queued
-              ? `<p class="cfpt-note"><strong>Queued next:</strong> ${esc(queued)}</p>
-                 <button class="cfpt-btn" type="button" data-action="showqueue">Edit queued message</button>
-                 <button class="cfpt-btn" type="button" data-action="clearqueue">Clear queued message</button>`
-              : `<button class="cfpt-btn" type="button" data-action="showqueue">Queue next message</button>`
-          }
-          <div class="cfpt-field cfpt-hidden" data-ref="queue-editor">
-            <label>Next user message</label>
-            <textarea data-ref="queue-next" rows="3" placeholder="Send this instead of the next automatic continue…">${esc(queued)}</textarea>
-            <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="savequeue">Save queued message</button>
-            <button class="cfpt-btn" type="button" data-action="hidequeue">Cancel</button>
-          </div>
-        </div>`
-      : "";
-
+    const queueControls = canQueueNext(state) ? this.queueControlsHtml(queued) : "";
     return `
       <div class="cfpt-field">
         <label class="cfpt-check-row">
@@ -362,11 +481,28 @@ export class Panel {
     `;
   }
 
+  private queueControlsHtml(queued: string): string {
+    const summary = queued
+      ? `<p class="cfpt-note"><strong>Queued next:</strong> ${esc(queued)}</p>
+         <button class="cfpt-btn" type="button" data-action="showqueue">Edit queued message</button>
+         <button class="cfpt-btn" type="button" data-action="clearqueue">Clear queued message</button>`
+      : `<button class="cfpt-btn" type="button" data-action="showqueue">Queue next message</button>`;
+    return `
+      <div class="cfpt-field">
+        ${summary}
+        <div class="cfpt-field cfpt-hidden" data-ref="queue-editor">
+          <label>Next user message</label>
+          <textarea data-ref="queue-next" rows="3" placeholder="Send this instead of the next automatic continue…">${esc(queued)}</textarea>
+          <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="savequeue">Save queued message</button>
+          <button class="cfpt-btn" type="button" data-action="hidequeue">Cancel</button>
+        </div>
+      </div>`;
+  }
+
   private passiveHtml(state: RunState): string {
     return `
       <h3>Active in another tab</h3>
-      <p class="cfpt-note">Another ChatGPT tab currently owns this conversation. This tab is
-      read-only and will take over automatically if the other tab closes or stops responding.</p>
+      <p class="cfpt-note">Another ChatGPT tab currently owns this conversation. This tab is read-only and will take over automatically if the other tab closes or stops responding.</p>
       <p class="cfpt-note">Current state: ${esc(phaseLabel(state.phase))} · ${esc(
         STATUS_LABEL[state.status] ?? state.status,
       )}</p>
@@ -377,36 +513,27 @@ export class Panel {
     return `
       <h3>What should ChatGPT build for you?</h3>
       <div class="cfpt-field">
-        <textarea data-ref="idea" rows="5" placeholder="Describe the project you want built…">${esc(
+        <textarea data-ref="idea" rows="6" placeholder="Describe the project you want built…">${esc(
           state.idea,
         )}</textarea>
       </div>
       <div class="cfpt-radio-row">
-        <label><input type="radio" name="repomode" value="new" ${
-          state.repoMode === "new" ? "checked" : ""
-        }/> New private repo</label>
-        <label><input type="radio" name="repomode" value="existing" ${
-          state.repoMode === "existing" ? "checked" : ""
-        }/> Existing repo</label>
+        <label><input type="radio" name="repomode" value="new" ${state.repoMode === "new" ? "checked" : ""}/> New private repo</label>
+        <label><input type="radio" name="repomode" value="existing" ${state.repoMode === "existing" ? "checked" : ""}/> Existing repo</label>
       </div>
       <div class="cfpt-field">
         <label>Repo name (optional for new; owner/name for existing)</label>
         <input type="text" data-ref="reponame" value="${esc(state.repoName)}" placeholder="e.g. my-idea or owner/my-repo"/>
       </div>
-      <p class="cfpt-note">New private repos generally need GitHub's official remote MCP in
-      ChatGPT Developer Mode because repository and label creation are required. Existing
-      repos can use any GitHub toolset that passes the mode-aware preflight. Chat FreePT
-      never receives your GitHub credentials. <a class="cfpt-link" href="https://chatgpt.com/plugins"
-      target="_blank" rel="noreferrer noopener">Open ChatGPT Plugins</a>.</p>
+      <p class="cfpt-note">Full autonomous GitHub work uses Developer mode + the remote GitHub MCP. Free-plan users can still use Chat FreePT in an assisted workflow, but should prepare an existing repo first and expect manual GitHub steps when ChatGPT lacks write tools.</p>
+      <button class="cfpt-btn" type="button" data-action="setup-open">GitHub setup</button>
       <button class="cfpt-btn cfpt-btn-primary" data-action="start">Start planning</button>
     `;
   }
 
   private runningHtml(state: RunState): string {
     const sendNow =
-      state.status === "cooldown"
-        ? `<button class="cfpt-btn" data-action="sendnow">Send now</button>`
-        : "";
+      state.status === "cooldown" ? `<button class="cfpt-btn" data-action="sendnow">Send now</button>` : "";
     return `
       <div class="cfpt-status-line"><span class="cfpt-spinner"></span>
         <strong data-ref="statusline">${esc(STATUS_LABEL[state.status] ?? state.status)}</strong>
@@ -424,8 +551,7 @@ export class Panel {
       <h3>Master plan ready</h3>
       <p class="cfpt-note">${esc(state.planSummary ?? "Review the plan in the conversation.")}</p>
       ${repoLine(state)}
-      <p class="cfpt-note">Want changes? Just reply in the chat — the plan phase resumes
-      automatically. Happy with it?</p>
+      <p class="cfpt-note">Want changes? Reply in the chat and the plan phase resumes automatically. Happy with it?</p>
       <button class="cfpt-btn cfpt-btn-primary" data-action="startdev">Start development</button>
       <button class="cfpt-btn cfpt-btn-danger" data-action="stop">Stop</button>
     `;
@@ -440,7 +566,7 @@ export class Panel {
         autoPaused
           ? ""
           : `<div class="cfpt-field">
-               <textarea data-ref="reply" rows="3" placeholder="Type your answer…"></textarea>
+               <textarea data-ref="reply" rows="4" placeholder="Type your answer…"></textarea>
              </div>
              <button class="cfpt-btn cfpt-btn-primary" data-action="reply">Send reply</button>
              <button class="cfpt-btn" data-action="resume">I answered in the chat — resume</button>`
@@ -496,8 +622,9 @@ export class Panel {
     if (statusLine) statusLine.textContent = STATUS_LABEL[state.status] ?? state.status;
   }
 
-  private onClick(e: Event): void {
-    const target = (e.target as HTMLElement).closest("[data-action]") as HTMLElement | null;
+  private onClick(event: Event): void {
+    event.stopPropagation();
+    const target = (event.target as HTMLElement).closest<HTMLElement>("[data-action]");
     if (!target) return;
     switch (target.dataset["action"]) {
       case "close":
@@ -550,6 +677,16 @@ export class Panel {
         break;
       case "tip-continue":
         void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
+        break;
+      case "setup-open":
+      case "setup-back":
+        this.showSetupModal();
+        break;
+      case "free-setup":
+        this.showSetupModal("free");
+        break;
+      case "setup-guide":
+        void this.startSetupGuide();
         break;
       case "setup-done":
         void this.acknowledgeSetup();
@@ -614,7 +751,9 @@ export class Panel {
 
   private refValue(ref: string): string {
     const el = this.panelEl.querySelector(`[data-ref="${ref}"]`) as
-      HTMLTextAreaElement | HTMLInputElement | null;
+      | HTMLTextAreaElement
+      | HTMLInputElement
+      | null;
     return el?.value ?? "";
   }
 
@@ -624,6 +763,71 @@ export class Panel {
     ) as HTMLInputElement | null;
     return el?.value ?? "";
   }
+}
+
+function appendStyle(root: ShadowRoot): void {
+  const style = document.createElement("style");
+  style.textContent = PANEL_CSS;
+  root.appendChild(style);
+}
+
+function airplaneSvg(): string {
+  return `
+    <svg class="cfpt-airplane" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 2.5c-.8 0-1.4.6-1.4 1.4v5.3L3 13.8v2l7.6-2.4v4.2l-2.3 1.7v1.4l3.7-1.1 3.7 1.1v-1.4l-2.3-1.7v-4.2l7.6 2.4v-2l-7.6-4.6V3.9c0-.8-.6-1.4-1.4-1.4Z"></path>
+    </svg>`;
+}
+
+function launcherTipHtml(): string {
+  return `
+    <button class="cfpt-icon-close" type="button" data-action="tip-continue" aria-label="Dismiss launcher tip">×</button>
+    <strong>Chat FreePT lives here</strong>
+    <p>The airplane sits beside ChatGPT's + button. Open it whenever you want Chat FreePT to take over the composer.</p>
+    <label class="cfpt-check-row">
+      <input type="checkbox" data-ref="suppress-launcher-tip" />
+      <span>Don't show this tip again</span>
+    </label>
+    <button class="cfpt-btn cfpt-btn-primary cfpt-toast-continue" type="button" data-action="tip-continue">Continue</button>`;
+}
+
+function paidSetupHtml(): string {
+  return `
+    <section class="cfpt-setup-card" role="dialog" aria-modal="true" aria-labelledby="cfpt-setup-title">
+      <button class="cfpt-icon-close" type="button" data-action="setup-done" aria-label="Close setup">×</button>
+      <div class="cfpt-setup-icon" aria-hidden="true">${airplaneSvg()}</div>
+      <div class="cfpt-plan-badge">Paid plan · full GitHub automation</div>
+      <h2 id="cfpt-setup-title">Connect GitHub with a follow-along guide</h2>
+      <p class="cfpt-setup-lead">For full autonomous repository work, Chat FreePT needs ChatGPT's Developer mode and a custom GitHub MCP/plugin with the write permissions you approve. ChatGPT marks Developer mode as Elevated Risk because unverified connectors can modify data.</p>
+      <p class="cfpt-setup-lead">The guide opens Settings for you and highlights one live ChatGPT control at a time: Security and login → Developer mode → Plugins → + → GitHub MCP URL → OAuth → Create → add GitHub MCP to this chat.</p>
+      <div class="cfpt-setup-actions">
+        <button class="cfpt-btn" type="button" data-action="free-setup">Using ChatGPT Free?</button>
+        <button class="cfpt-btn" type="button" data-action="setup-done">I'll set it up myself</button>
+        <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="setup-guide">Follow along</button>
+      </div>
+    </section>`;
+}
+
+function freeSetupHtml(): string {
+  return `
+    <section class="cfpt-setup-card" role="dialog" aria-modal="true" aria-labelledby="cfpt-free-title">
+      <button class="cfpt-icon-close" type="button" data-action="setup-done" aria-label="Close setup">×</button>
+      <div class="cfpt-plan-badge">ChatGPT Free · assisted GitHub workflow</div>
+      <h2 id="cfpt-free-title">Prepare GitHub manually first</h2>
+      <p class="cfpt-setup-lead">Chat FreePT's local planning, continuation, queueing, pause, and NEEDS_INPUT flow still works on Free. The limitation is the full custom-MCP/Developer-mode path, so repository actions may need you.</p>
+      <ol class="cfpt-setup-steps">
+        <li>Create the target GitHub repository yourself before starting Chat FreePT.</li>
+        <li>Make sure <strong>main</strong> exists and create <strong>dev</strong> from the same starting commit.</li>
+        <li>In Chat FreePT choose <strong>Existing repo</strong> and enter <code>owner/repo</code>; do not rely on New private repo creation.</li>
+        <li>Enable whatever GitHub/plugin access your ChatGPT account currently exposes. If no write tool is available, keep GitHub open separately.</li>
+        <li>When ChatGPT cannot create a branch/file, Issue/label, PR, merge, or inspect CI, it should stop with <strong>NEEDS_INPUT</strong>. Perform only that requested GitHub step manually, return to the chat, and Resume.</li>
+        <li>Because those writes are manual, Free mode is assisted rather than fully autonomous; never treat a missing/zero CI result as green.</li>
+      </ol>
+      <p class="cfpt-setup-footnote">Chat FreePT does not receive your GitHub password or token. Workspace policy and ChatGPT feature availability can vary by account.</p>
+      <div class="cfpt-setup-actions">
+        <button class="cfpt-btn" type="button" data-action="setup-back">Back</button>
+        <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="setup-done">I understand</button>
+      </div>
+    </section>`;
 }
 
 function phaseLabel(phase: string): string {
