@@ -109,6 +109,7 @@ describe("panel continuation controls", () => {
     const { panel: current } = makePanel();
     current.render(newRunState("c1", 1));
 
+    expect(shadow.textContent).toContain("Auto-continue");
     expect(shadow.querySelector('[data-action="auto-continue"]')).not.toBeNull();
     expect(shadow.querySelector('[data-action="showqueue"]')).toBeNull();
   });
