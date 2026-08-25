@@ -96,7 +96,9 @@ describe("selector registry", () => {
   });
 
   it("falls back to the unified form when the composer-surface attribute disappears", () => {
-    document.querySelector('[data-composer-surface="true"]')?.removeAttribute("data-composer-surface");
+    document
+      .querySelector('[data-composer-surface="true"]')
+      ?.removeAttribute("data-composer-surface");
     const surface = resolve("composerSurface");
     expect(surface?.element.tagName).toBe("FORM");
     expect(surface?.candidateIndex).toBe(3);
