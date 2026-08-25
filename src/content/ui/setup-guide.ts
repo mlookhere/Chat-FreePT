@@ -291,10 +291,7 @@ export class SetupGuide {
 
     const rect = target.getBoundingClientRect();
     const width = Math.min(340, window.innerWidth - 24);
-    const left = Math.min(
-      Math.max(12, rect.left),
-      Math.max(12, window.innerWidth - width - 12),
-    );
+    const left = Math.min(Math.max(12, rect.left), Math.max(12, window.innerWidth - width - 12));
     const roomBelow = window.innerHeight - rect.bottom;
     const top = roomBelow > 210 ? rect.bottom + 12 : Math.max(12, rect.top - 190);
     Object.assign(this.card.style, {
@@ -539,7 +536,9 @@ function isControlEnabled(element: HTMLElement): boolean {
 
 function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
   const prototype =
-    element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+    element instanceof HTMLInputElement
+      ? HTMLInputElement.prototype
+      : HTMLTextAreaElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
   if (setter) setter.call(element, value);
   else element.value = value;

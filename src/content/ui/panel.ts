@@ -168,7 +168,11 @@ export class Panel {
     this.toggle(true);
   }
 
-  private createLauncher(): { host: HTMLSpanElement; shadow: ShadowRoot; button: HTMLButtonElement } {
+  private createLauncher(): {
+    host: HTMLSpanElement;
+    shadow: ShadowRoot;
+    button: HTMLButtonElement;
+  } {
     const host = document.createElement("span");
     host.id = "cfpt-root";
     host.dataset["cfptEmbedded"] = "true";
@@ -251,7 +255,10 @@ export class Panel {
   };
 
   private stopComposerPropagation(event: Event): void {
-    if (event.composedPath().includes(this.panelEl) || event.composedPath().includes(this.setupBackdropEl)) {
+    if (
+      event.composedPath().includes(this.panelEl) ||
+      event.composedPath().includes(this.setupBackdropEl)
+    ) {
       event.stopPropagation();
     }
   }
@@ -360,7 +367,8 @@ export class Panel {
     const surface = query("composerSurface");
     if (!(surface instanceof HTMLElement)) return;
     const style = getComputedStyle(surface);
-    if (style.backgroundColor) this.overlayHost.style.setProperty("--cfpt-native-surface", style.backgroundColor);
+    if (style.backgroundColor)
+      this.overlayHost.style.setProperty("--cfpt-native-surface", style.backgroundColor);
     if (style.color) this.overlayHost.style.setProperty("--cfpt-native-text", style.color);
   }
 
@@ -396,8 +404,12 @@ export class Panel {
     const viewportWidth = Math.max(320, window.innerWidth);
     const margin = viewportWidth <= 620 ? 8 : 12;
     const fallbackWidth = Math.min(820, viewportWidth - margin * 2);
-    const width = rect.width >= 280 ? Math.min(rect.width, viewportWidth - margin * 2) : fallbackWidth;
-    const left = rect.width >= 280 ? Math.min(Math.max(margin, rect.left), viewportWidth - width - margin) : (viewportWidth - width) / 2;
+    const width =
+      rect.width >= 280 ? Math.min(rect.width, viewportWidth - margin * 2) : fallbackWidth;
+    const left =
+      rect.width >= 280
+        ? Math.min(Math.max(margin, rect.left), viewportWidth - width - margin)
+        : (viewportWidth - width) / 2;
     const bottom = rect.height > 0 ? Math.max(8, window.innerHeight - rect.bottom) : 16;
     Object.assign(this.panelEl.style, {
       left: `${Math.round(left)}px`,
@@ -411,7 +423,10 @@ export class Panel {
   private positionLauncherTip(): void {
     const rect = this.host.getBoundingClientRect();
     const width = Math.min(310, window.innerWidth - 24);
-    const left = Math.min(Math.max(12, rect.left - 10), Math.max(12, window.innerWidth - width - 12));
+    const left = Math.min(
+      Math.max(12, rect.left - 10),
+      Math.max(12, window.innerWidth - width - 12),
+    );
     const top = rect.top > 175 ? rect.top - 165 : rect.bottom + 10;
     Object.assign(this.launcherTipEl.style, {
       left: `${Math.round(left)}px`,
@@ -454,7 +469,9 @@ export class Panel {
       case "cooldown":
         return this.runningHtml(state);
       case "awaiting_user":
-        return state.phase === "plan_ready" ? this.planReadyHtml(state) : this.needsInputHtml(state);
+        return state.phase === "plan_ready"
+          ? this.planReadyHtml(state)
+          : this.needsInputHtml(state);
       case "paused":
       case "error":
         return this.pausedHtml(state);
@@ -533,7 +550,9 @@ export class Panel {
 
   private runningHtml(state: RunState): string {
     const sendNow =
-      state.status === "cooldown" ? `<button class="cfpt-btn" data-action="sendnow">Send now</button>` : "";
+      state.status === "cooldown"
+        ? `<button class="cfpt-btn" data-action="sendnow">Send now</button>`
+        : "";
     return `
       <div class="cfpt-status-line"><span class="cfpt-spinner"></span>
         <strong data-ref="statusline">${esc(STATUS_LABEL[state.status] ?? state.status)}</strong>
@@ -751,9 +770,7 @@ export class Panel {
 
   private refValue(ref: string): string {
     const el = this.panelEl.querySelector(`[data-ref="${ref}"]`) as
-      | HTMLTextAreaElement
-      | HTMLInputElement
-      | null;
+      HTMLTextAreaElement | HTMLInputElement | null;
     return el?.value ?? "";
   }
 
