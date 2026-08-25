@@ -5,7 +5,9 @@ import { PANEL_CSS } from "../src/content/ui/styles";
 import { installChromeMock } from "./chrome-mock";
 
 const panels: Panel[] = [];
+const shadows: ShadowRoot[] = [];
 let stores: ReturnType<typeof installChromeMock>;
+let attachShadowSpy: ReturnType<typeof vi.spyOn>;
 
 function fixture(): void {
   document.body.innerHTML = `
@@ -14,14 +16,16 @@ function fixture(): void {
         <div id="thread-bottom">
           <div data-prompt-textarea-header></div>
           <form data-type="unified-composer">
-            <div data-composer-surface="true">
+            <div data-composer-surface="true" aria-hidden="false" style="pointer-events: auto">
+              <div class="left-controls">
+                <button data-testid="composer-plus-btn" aria-label="Add files">+</button>
+              </div>
               <div id="prompt-textarea" class="ProseMirror" contenteditable="true"></div>
             </div>
           </form>
         </div>
       </div>
-    </main>
-  `;
+    </main>`;
 }
 
 function makePanel(): Panel {
@@ -36,8 +40,33 @@ function makePanel(): Panel {
 
 function host(): HTMLElement {
   const element = document.getElementById("cfpt-root");
-  if (!element) throw new Error("embedded Chat FreePT host missing");
+  if (!element) throw new Error("Chat FreePT launcher host missing");
   return element;
+}
+
+function overlayHost(): HTMLElement {
+  const element = document.getElementById("cfpt-overlay-root");
+  if (!element) throw new Error("Chat FreePT overlay host missing");
+  return element;
+}
+
+function overlayShadow(): ShadowRoot {
+  const root = shadows.at(-1);
+  if (!root) throw new Error("Chat FreePT overlay shadow missing");
+  return root;
+}
+
+function nativeSurface(): HTMLElement {
+  const surface = document.querySelector<HTMLElement>('[data-composer-surface="true"]');
+  if (!surface) throw new Error("native composer surface missing");
+  return surface;
+}
+
+function onboardingDone(): void {
+  stores.local["cfpt:onboarding:v1"] = {
+    launcherTipSuppressed: true,
+    setupShown: true,
+  };
 }
 
 async function settle(): Promise<void> {
@@ -47,68 +76,170 @@ async function settle(): Promise<void> {
 beforeEach(() => {
   stores = installChromeMock();
   fixture();
+  shadows.splice(0);
+  const original = HTMLElement.prototype.attachShadow;
+  attachShadowSpy = vi.spyOn(HTMLElement.prototype, "attachShadow").mockImplementation(function (
+    this: HTMLElement,
+    init: ShadowRootInit,
+  ) {
+    const root = original.call(this, init);
+    shadows.push(root);
+    return root;
+  });
 });
 
 afterEach(() => {
   panels.splice(0).forEach((panel) => panel.dispose());
+  attachShadowSpy.mockRestore();
+  shadows.splice(0);
 });
 
-describe("composer airplane launcher", () => {
-  it("mounts exactly once inside the ChatGPT composer surface", () => {
+describe("native composer launcher placement", () => {
+  it("mounts immediately to the right of ChatGPT's + button", () => {
+    onboardingDone();
     makePanel();
-    const surface = document.querySelector('[data-composer-surface="true"]');
-    const header = document.querySelector("[data-prompt-textarea-header]");
+    const plus = document.querySelector('[data-testid="composer-plus-btn"]');
 
-    expect(surface?.querySelector("#cfpt-root")).toBe(host());
-    expect(header?.querySelector("#cfpt-root")).toBeNull();
+    expect(plus?.nextElementSibling).toBe(host());
+    expect(host().parentElement).toBe(plus?.parentElement);
+    expect(host().dataset["fallback"]).toBe("false");
     expect(document.querySelectorAll("#cfpt-root")).toHaveLength(1);
-    expect(host().dataset["cfptEmbedded"]).toBe("true");
+  });
+
+  it("keeps the expanded surface outside the native composer DOM", () => {
+    onboardingDone();
+    makePanel();
+
+    expect(overlayHost().parentElement).toBe(document.body);
+    expect(nativeSurface().contains(overlayHost())).toBe(false);
     expect(host().dataset["cfptLauncher"]).toBe("airplane");
   });
 
-  it("uses a compact launcher instead of the old full-width dock", () => {
-    expect(PANEL_CSS).toContain(".cfpt-launcher");
-    expect(PANEL_CSS).toContain(".cfpt-airplane");
-    expect(PANEL_CSS).not.toContain(".cfpt-dock");
-  });
-
-  it("tracks toggle and rendered status on the light-DOM host", () => {
-    const panel = makePanel();
-    const idle = newRunState("conversation-1", 1);
-
-    panel.render(idle);
-    expect(host().dataset["status"]).toBe("idle");
-    expect(host().dataset["phase"]).toBe("idle");
-    expect(host().dataset["expanded"]).toBe("false");
-
-    panel.toggle();
-    expect(host().dataset["expanded"]).toBe("true");
-
-    panel.render({
-      ...idle,
-      phase: "planning",
-      status: "awaiting_user",
-      pauseReason: "Choose a repository name",
-    });
-    expect(host().dataset["state"]).toBe("attention");
-    expect(host().dataset["status"]).toBe("awaiting_user");
-  });
-
-  it("re-homes the same host when ChatGPT replaces the composer surface", async () => {
+  it("re-homes the same launcher beside a replacement + button", async () => {
+    onboardingDone();
     makePanel();
-    const first = document.querySelector('[data-composer-surface="true"]');
     const replacement = document.createElement("div");
     replacement.setAttribute("data-composer-surface", "true");
-    replacement.innerHTML = '<div id="prompt-textarea" contenteditable="true"></div>';
-    first?.replaceWith(replacement);
-
+    replacement.innerHTML = `
+      <div class="left-controls"><button data-testid="composer-plus-btn" aria-label="Add files">+</button></div>
+      <div id="prompt-textarea" contenteditable="true"></div>`;
+    nativeSurface().replaceWith(replacement);
     await settle();
 
-    expect(replacement.querySelector("#cfpt-root")).toBe(host());
+    const plus = replacement.querySelector('[data-testid="composer-plus-btn"]');
+    expect(plus?.nextElementSibling).toBe(host());
     expect(document.querySelectorAll("#cfpt-root")).toHaveLength(1);
   });
 
-  it("expands the composer controls for completion instead of creating a completion overlay", () => {
+  it("uses integrated takeover styles rather than the old detached dock", () => {
+    expect(PANEL_CSS).toContain(".cfpt-takeover-backdrop");
+    expect(PANEL_CSS).toContain("backdrop-filter: blur(22px)");
+    expect(PANEL_CSS).toContain('data-cfpt-host="launcher"');
+    expect(PANEL_CSS).toContain("z-index: 2147483646");
+    expect(PANEL_CSS).not.toContain(".cfpt-dock");
+  });
+});
+
+describe("composer takeover lifecycle", () => {
+  it("blocks the native composer while open and restores its exact state on close", () => {
+    onboardingDone();
+    const panel = makePanel();
+    panel.render(newRunState("conversation-1", 1));
+
+    panel.toggle(true);
+    expect(nativeSurface().style.pointerEvents).toBe("none");
+    expect(nativeSurface().getAttribute("aria-hidden")).toBe("true");
+    expect(nativeSurface().dataset["cfptTakeover"]).toBe("true");
+    expect(host().dataset["expanded"]).toBe("true");
+
+    panel.toggle(false);
+    expect(nativeSurface().style.pointerEvents).toBe("auto");
+    expect(nativeSurface().getAttribute("aria-hidden")).toBe("false");
+    expect(nativeSurface().dataset["cfptTakeover"]).toBeUndefined();
+  });
+
+  it("closes when the user clicks outside the integrated panel", () => {
+    onboardingDone();
+    const panel = makePanel();
+    panel.render(newRunState("conversation-1", 1));
+    panel.toggle(true);
+
+    overlayShadow().querySelector<HTMLElement>(".cfpt-takeover-backdrop")?.click();
+    expect(host().dataset["expanded"]).toBe("false");
+    expect(nativeSurface().style.pointerEvents).toBe("auto");
+  });
+
+  it("closes on Escape", () => {
+    onboardingDone();
+    const panel = makePanel();
+    panel.render(newRunState("conversation-1", 1));
+    panel.toggle(true);
+
+    const body = overlayShadow().querySelector<HTMLElement>(".cfpt-body");
+    body?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(host().dataset["expanded"]).toBe("false");
+  });
+
+  it("keeps planning input focus outside ChatGPT's composer focus handlers", () => {
+    onboardingDone();
+    const nativeFocus = vi.fn();
+    nativeSurface().addEventListener("focusin", nativeFocus);
+    const panel = makePanel();
+    panel.render(newRunState("conversation-1", 1));
+    panel.toggle(true);
+
+    const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
+    idea?.focus();
+    expect(overlayShadow().activeElement).toBe(idea);
+    expect(nativeFocus).not.toHaveBeenCalled();
+  });
+});
+
+describe("first-run and plan-aware setup", () => {
+  it("keeps the working launcher-tip then setup sequence", async () => {
+    const panel = makePanel();
+    await settle();
+    expect(host().dataset["onboarding"]).toBe("tip");
+    expect(host().dataset["highlighted"]).toBe("true");
+
+    await panel.acknowledgeLauncherTip(true);
+    expect(host().dataset["onboarding"]).toBe("setup");
+    expect(host().dataset["highlighted"]).toBe("false");
+
+    await panel.acknowledgeSetup();
+    expect(host().dataset["onboarding"]).toBe("done");
+    expect(stores.local["cfpt:onboarding:v1"]).toEqual({
+      launcherTipSuppressed: true,
+      setupShown: true,
+    });
+  });
+
+  it("offers an opt-in follow-along path and a separate Free path", async () => {
+    onboardingDone();
+    const panel = makePanel();
+    panel.render(newRunState("conversation-1", 1));
+    panel.toggle(true);
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="setup-open"]')?.click();
+
+    expect(overlayShadow().textContent).toContain("Follow along");
+    expect(overlayShadow().textContent).toContain("Using ChatGPT Free?");
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="free-setup"]')?.click();
+    expect(overlayShadow().textContent).toContain("Prepare GitHub manually first");
+    expect(overlayShadow().textContent).toContain("Existing repo");
+    expect(overlayShadow().textContent).toContain("NEEDS_INPUT");
+  });
+
+  it("does not re-show onboarding after suppression and completion", async () => {
+    onboardingDone();
+    makePanel();
+    await settle();
+
+    expect(host().dataset["onboarding"]).toBe("done");
+    expect(host().dataset["highlighted"]).toBe("false");
+  });
+
+  it("expands the same composer takeover for completion", () => {
+    onboardingDone();
     const panel = makePanel();
     const complete = {
       ...newRunState("conversation-1", 1),
@@ -120,81 +251,6 @@ describe("composer airplane launcher", () => {
     panel.showCompletionModal(complete);
 
     expect(host().dataset["expanded"]).toBe("true");
-    expect(document.querySelector(".cfpt-modal-backdrop")).toBeNull();
-  });
-});
-
-describe("first-run onboarding", () => {
-  it("uses a dedicated blurred setup backdrop", () => {
-    expect(PANEL_CSS).toContain(".cfpt-setup-backdrop");
-    expect(PANEL_CSS).toContain("backdrop-filter: blur(4px)");
-  });
-
-  it("shows the launcher tip first, highlights the airplane, then shows setup", async () => {
-    const panel = makePanel();
-    await settle();
-
-    expect(host().dataset["onboarding"]).toBe("tip");
-    expect(host().dataset["highlighted"]).toBe("true");
-
-    await panel.acknowledgeLauncherTip(true);
-    expect(host().dataset["onboarding"]).toBe("setup");
-    expect(host().dataset["highlighted"]).toBe("false");
-    expect(stores.local["cfpt:onboarding:v1"]).toEqual({
-      launcherTipSuppressed: true,
-      setupShown: false,
-    });
-
-    await panel.acknowledgeSetup();
-    expect(host().dataset["onboarding"]).toBe("done");
-    expect(stores.local["cfpt:onboarding:v1"]).toEqual({
-      launcherTipSuppressed: true,
-      setupShown: true,
-    });
-  });
-
-  it("does not show either onboarding surface again after suppression and setup completion", async () => {
-    stores.local["cfpt:onboarding:v1"] = {
-      launcherTipSuppressed: true,
-      setupShown: true,
-    };
-
-    makePanel();
-    await settle();
-
-    expect(host().dataset["onboarding"]).toBe("done");
-    expect(host().dataset["highlighted"]).toBe("false");
-  });
-
-  it("shows the launcher tip again when the user did not check don't-show-again", async () => {
-    const panel = makePanel();
-    await settle();
-    await panel.acknowledgeLauncherTip(false);
-    await panel.acknowledgeSetup();
-    panel.dispose();
-
-    fixture();
-    makePanel();
-    await settle();
-
-    expect(stores.local["cfpt:onboarding:v1"]).toEqual({
-      launcherTipSuppressed: false,
-      setupShown: true,
-    });
-    expect(host().dataset["onboarding"]).toBe("tip");
-    expect(host().dataset["highlighted"]).toBe("true");
-  });
-
-  it("goes directly to the one-time setup dialog when only the launcher tip is suppressed", async () => {
-    stores.local["cfpt:onboarding:v1"] = {
-      launcherTipSuppressed: true,
-      setupShown: false,
-    };
-
-    makePanel();
-    await settle();
-
-    expect(host().dataset["onboarding"]).toBe("setup");
-    expect(host().dataset["highlighted"]).toBe("false");
+    expect(nativeSurface().dataset["cfptTakeover"]).toBe("true");
   });
 });

@@ -18,6 +18,20 @@ export type TargetId =
   | "pageAlert"
   | "toolIndicator";
 
+export type GuideTargetId =
+  | "composerPlusButton"
+  | "settingsSecurity"
+  | "developerModeRow"
+  | "developerModeToggle"
+  | "pluginAddButton"
+  | "pluginNameInput"
+  | "pluginServerInput"
+  | "pluginAuthControl"
+  | "pluginRiskCheckbox"
+  | "pluginCreateButton"
+  | "conversationDeveloperMode"
+  | "conversationGitHubMcp";
+
 export interface Candidate {
   css: string;
   /** When present, css hits are filtered by visible text. */
@@ -213,4 +227,138 @@ export function healthCheck(root: ParentNode = document): HealthReport {
     }
   }
   return { missing, degraded };
+}
+
+/** Optional, text-aware targets used only by the composer integration and opt-in setup guide. */
+const GUIDE_RESOLVERS: Record<GuideTargetId, () => HTMLElement | null> = {
+  composerPlusButton,
+  settingsSecurity: () => clickableText(/^Security and login$/i),
+  developerModeRow,
+  developerModeToggle: () =>
+    controlNearText(
+      /^Developer mode$/i,
+      'button[role="switch"], [role="switch"], input[type="checkbox"]',
+    ),
+  pluginAddButton,
+  pluginNameInput: () => fieldNearLabel(/^(Name|Plugin name)$/i, "input"),
+  pluginServerInput: () =>
+    fieldNearLabel(/(Server URL|Remote MCP|MCP server URL)/i, 'input[type="url"], input'),
+  pluginAuthControl: () => fieldNearLabel(/Authentication/i, 'select, [role="combobox"], button'),
+  pluginRiskCheckbox: () =>
+    controlNearText(/I understand.*continue/i, 'input[type="checkbox"], [role="checkbox"]'),
+  pluginCreateButton: () => clickableText(/^Create$/i),
+  conversationDeveloperMode: () => clickableText(/^Developer mode$/i),
+  conversationGitHubMcp: () => clickableText(/^GitHub MCP$/i) ?? clickableText(/^GitHub$/i),
+};
+
+export function queryGuideTarget(id: GuideTargetId): HTMLElement | null {
+  return GUIDE_RESOLVERS[id]();
+}
+
+function composerPlusButton(): HTMLElement | null {
+  const selectors = [
+    'button[data-testid="composer-plus-btn"]',
+    'button[aria-label*="Add photos" i]',
+    'button[aria-label*="Add files" i]',
+    'button[aria-label*="Attach" i]',
+    'button[aria-label*="Upload" i]',
+  ];
+  for (const css of selectors) {
+    const found = document.querySelector<HTMLElement>(css);
+    if (found) return found;
+  }
+  const form =
+    query("composerSurface")?.closest("form") ??
+    document.querySelector('form[data-type="unified-composer"]');
+  if (!form) return null;
+  return textElement(/^\+$/i, form, "button") as HTMLElement | null;
+}
+
+function developerModeRow(): HTMLElement | null {
+  const label = textElement(/^Developer mode$/i);
+  if (!(label instanceof HTMLElement)) return null;
+  let node: HTMLElement | null = label;
+  for (let depth = 0; node && depth < 7; depth += 1) {
+    if (node.querySelector('button[role="switch"], [role="switch"], input[type="checkbox"]')) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return label.parentElement ?? label;
+}
+
+function pluginAddButton(): HTMLElement | null {
+  const labeled = document.querySelector<HTMLElement>(
+    'button[aria-label*="Add plugin" i], button[aria-label*="Create plugin" i], button[title*="Add plugin" i]',
+  );
+  if (labeled) return labeled;
+  const plus = textElement(/^\+$/, document, "button");
+  if (plus instanceof HTMLElement) return plus;
+  const search = document.querySelector<HTMLElement>(
+    'input[placeholder*="Search plugin" i], input[type="search"]',
+  );
+  const container = search?.parentElement?.parentElement;
+  const buttons = container ? Array.from(container.querySelectorAll<HTMLElement>("button")) : [];
+  return buttons.at(-1) ?? null;
+}
+
+function clickableText(pattern: RegExp): HTMLElement | null {
+  const text = textElement(pattern);
+  if (!(text instanceof HTMLElement)) return null;
+  return (
+    text.closest<HTMLElement>(
+      'button, a, [role="button"], [role="tab"], [role="menuitem"], [role="option"]',
+    ) ?? text
+  );
+}
+
+function fieldNearLabel(pattern: RegExp, selector: string): HTMLElement | null {
+  const label = textElement(pattern, document, "label, span, div, p");
+  if (!(label instanceof HTMLElement)) return null;
+  if (label instanceof HTMLLabelElement && label.htmlFor) {
+    const linked = document.getElementById(label.htmlFor);
+    if (linked instanceof HTMLElement) return linked;
+  }
+  let node: HTMLElement | null = label;
+  for (let depth = 0; node && depth < 5; depth += 1) {
+    const control = node.querySelector<HTMLElement>(selector);
+    if (control) return control;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function controlNearText(pattern: RegExp, selector: string): HTMLElement | null {
+  const label = textElement(pattern);
+  if (!(label instanceof HTMLElement)) return null;
+  let node: HTMLElement | null = label;
+  for (let depth = 0; node && depth < 7; depth += 1) {
+    const control = node.querySelector<HTMLElement>(selector);
+    if (control) return control;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function textElement(
+  pattern: RegExp,
+  root: ParentNode = document,
+  css = "button, a, label, h1, h2, h3, h4, strong, span, div, p",
+): Element | null {
+  let nodes: Element[];
+  try {
+    nodes = Array.from(root.querySelectorAll(css));
+  } catch {
+    return null;
+  }
+  const matches = nodes.filter((element) => {
+    if (element.getAttribute("aria-hidden") === "true") return false;
+    return pattern.test((element.textContent ?? "").trim());
+  });
+  matches.sort(
+    (a, b) =>
+      a.children.length - b.children.length ||
+      (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0),
+  );
+  return matches[0] ?? null;
 }
