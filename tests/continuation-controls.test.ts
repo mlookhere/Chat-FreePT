@@ -217,6 +217,7 @@ describe("run reset semantics", () => {
     expect(result.state.queuedUserText).toBeUndefined();
     expect(result.state.lastMarker).toBeUndefined();
     expect(result.state.autoSends).toBe(0);
+    expect(result.state.log).toHaveLength(1);
     expect(result.state.log.at(-1)?.text).toBe("Ready for a new project");
     expect(result.effects).toContainEqual({ do: "badge", text: "" });
   });
