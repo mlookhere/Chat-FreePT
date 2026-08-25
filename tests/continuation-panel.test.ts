@@ -23,7 +23,6 @@ function fixture(): void {
 function makePanel(onEvent = vi.fn()): { panel: Panel; onEvent: ReturnType<typeof vi.fn> } {
   const hooks: PanelHooks = {
     onEvent,
-    onNewProject: vi.fn(),
     getHandoffPrompt: vi.fn(() => "handoff"),
   };
   panel = new Panel(hooks);
@@ -103,6 +102,33 @@ describe("panel continuation controls", () => {
 
     shadow.querySelector<HTMLButtonElement>('[data-action="clearqueue"]')?.click();
     expect(onEvent).toHaveBeenCalledWith({ type: "USER_CLEAR_QUEUE" });
+  });
+
+  it("derives the manual-continue view from machine state, not pause text", () => {
+    const { panel: current } = makePanel();
+    current.render({
+      ...newRunState("c1", 1),
+      phase: "developing",
+      status: "awaiting_user",
+      autoContinueEnabled: false,
+      lastMarker: { status: "CONTINUE", version: 1, raw: "CONTINUE" },
+      pauseReason: "Copy can change without changing semantics.",
+    });
+
+    expect(shadow.textContent).toContain("Auto-continue is off");
+    expect(shadow.querySelector('[data-ref="reply"]')).toBeNull();
+  });
+
+  it("dispatches New project through the machine event channel", () => {
+    const { panel: current, onEvent } = makePanel();
+    current.render({
+      ...newRunState("c1", 1),
+      phase: "complete",
+      status: "complete",
+    });
+
+    shadow.querySelector<HTMLButtonElement>('[data-action="newproject"]')?.click();
+    expect(onEvent).toHaveBeenCalledWith({ type: "USER_NEW_PROJECT" });
   });
 
   it("does not expose queue controls outside planning or development", () => {
