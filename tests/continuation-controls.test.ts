@@ -92,7 +92,7 @@ describe("auto-continue control", () => {
   });
 });
 
-describe("queued continuation input and reset", () => {
+describe("queued continuation input", () => {
   it("sends a queued user message before continue even when auto-continue is off", () => {
     let state = streamingRun();
     state = reduce(state, { type: "USER_SET_AUTO_CONTINUE", enabled: false }, settings).state;
@@ -158,7 +158,9 @@ describe("queued continuation input and reset", () => {
     expect(state.queuedUserText).toBeUndefined();
     expect(state.cooldownUntil).toBeUndefined();
   });
+});
 
+describe("run reset semantics", () => {
   it("STOP resets stale run state while preserving the auto-continue preference", () => {
     const dirty: RunState = {
       ...streamingRun(),
