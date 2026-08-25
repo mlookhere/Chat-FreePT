@@ -34,11 +34,7 @@ function configureBounds(): void {
     SETTINGS_LIMITS.sendDelayMs.min / 1000,
     SETTINGS_LIMITS.sendDelayMs.max / 1000,
   );
-  setBounds(
-    "quietSec",
-    SETTINGS_LIMITS.quietMs.min / 1000,
-    SETTINGS_LIMITS.quietMs.max / 1000,
-  );
+  setBounds("quietSec", SETTINGS_LIMITS.quietMs.min / 1000, SETTINGS_LIMITS.quietMs.max / 1000);
 }
 
 async function init(): Promise<void> {
