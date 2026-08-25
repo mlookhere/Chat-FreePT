@@ -64,7 +64,7 @@ describe("plan prompt", () => {
     const existing = buildMcpPreflight("existing", "me/mine");
     expect(existing).toContain("EXISTING-REPOSITORY mode for me/mine");
     expect(existing).toMatch(/Do NOT\s+require repository creation/);
-    expect(existing).toContain("only for labels that are actually missing");
+    expect(existing).toMatch(/only for labels that are actually\s+missing/);
   });
 
   it("uses current Developer Mode setup and does not require default-branch mutation", () => {
