@@ -1,17 +1,16 @@
 import type { RunState, Settings } from "./types";
-import { DEFAULT_SETTINGS } from "./types";
+import { normalizeSettings } from "./settings";
 
 const SETTINGS_KEY = "cfpt:settings";
 const RUN_PREFIX = "cfpt:run:";
 
 export async function loadSettings(): Promise<Settings> {
   const found = await chrome.storage.sync.get(SETTINGS_KEY);
-  const stored = found[SETTINGS_KEY] as Partial<Settings> | undefined;
-  return { ...DEFAULT_SETTINGS, ...stored };
+  return normalizeSettings(found[SETTINGS_KEY]);
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
-  await chrome.storage.sync.set({ [SETTINGS_KEY]: settings });
+  await chrome.storage.sync.set({ [SETTINGS_KEY]: normalizeSettings(settings) });
 }
 
 export function runKey(conversationId: string): string {
