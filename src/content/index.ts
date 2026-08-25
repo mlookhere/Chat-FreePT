@@ -8,7 +8,6 @@ import {
   loadRun,
   loadSettings,
   releaseTabLock,
-  saveRun,
 } from "../common/storage";
 import type { RunState, Settings } from "../common/types";
 import type { ContentRequest } from "../common/types";
@@ -197,13 +196,6 @@ async function boot(): Promise<void> {
 
   panel = new Panel({
     onEvent: (event) => controller?.dispatch(event),
-    onNewProject: () => {
-      if (!controller) return;
-      const fresh = newRunState(currentConvId, Date.now());
-      controller.state = fresh;
-      void saveRun(fresh).catch((err) => log.warn("state save failed", err));
-      panel?.render(fresh);
-    },
     getHandoffPrompt: () => (controller ? buildHandoffPrompt(controller.state) : ""),
   });
 

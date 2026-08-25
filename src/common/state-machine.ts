@@ -14,6 +14,7 @@ export type MachineEvent =
   | { type: "USER_PAUSE" }
   | { type: "USER_RESUME" }
   | { type: "USER_STOP" }
+  | { type: "USER_NEW_PROJECT" }
   | { type: "USER_REPLY"; text: string }
   | { type: "USER_SET_AUTO_CONTINUE"; enabled: boolean }
   | { type: "USER_QUEUE_NEXT"; text: string }
@@ -60,6 +61,7 @@ type UserEvent = Extract<
       | "USER_PAUSE"
       | "USER_RESUME"
       | "USER_STOP"
+      | "USER_NEW_PROJECT"
       | "USER_REPLY"
       | "USER_SET_AUTO_CONTINUE"
       | "USER_QUEUE_NEXT"
@@ -87,6 +89,7 @@ const USER_EVENTS = new Set<MachineEvent["type"]>([
   "USER_PAUSE",
   "USER_RESUME",
   "USER_STOP",
+  "USER_NEW_PROJECT",
   "USER_REPLY",
   "USER_SET_AUTO_CONTINUE",
   "USER_QUEUE_NEXT",
@@ -129,6 +132,15 @@ export function isActive(state: RunState): boolean {
 
 export function autoContinueEnabled(state: RunState): boolean {
   return state.autoContinueEnabled !== false;
+}
+
+export function isWaitingForManualContinue(state: RunState): boolean {
+  return (
+    state.status === "awaiting_user" &&
+    state.lastMarker?.status === "CONTINUE" &&
+    !autoContinueEnabled(state) &&
+    isContinuablePhase(state)
+  );
 }
 
 /** Remaining delay for a persisted cooldown. Legacy cooldowns without a deadline resume now. */
@@ -198,6 +210,8 @@ function reduceUserEvent(ctx: ReduceContext, event: UserEvent): boolean {
       return resumeRun(ctx);
     case "USER_STOP":
       return stopRun(ctx);
+    case "USER_NEW_PROJECT":
+      return newProject(ctx);
     case "USER_REPLY":
       return sendUserReply(ctx, event);
     case "USER_SET_AUTO_CONTINUE":
@@ -265,12 +279,22 @@ function resumeRun(ctx: ReduceContext): boolean {
   return true;
 }
 
-function stopRun(ctx: ReduceContext): boolean {
+function resetRun(ctx: ReduceContext, logText: string): void {
   const enabled = autoContinueEnabled(ctx.state);
   const reset = newRunState(ctx.state.conversationId, ctx.now);
   reset.autoContinueEnabled = enabled;
-  reset.log = [{ at: ctx.now, kind: "info", text: "Stopped and reset" }];
+  reset.log = [{ at: ctx.now, kind: "info", text: logText }];
   ctx.state = reset;
+}
+
+function stopRun(ctx: ReduceContext): boolean {
+  resetRun(ctx, "Stopped and reset");
+  ctx.effects.push({ do: "badge", text: "" });
+  return true;
+}
+
+function newProject(ctx: ReduceContext): boolean {
+  resetRun(ctx, "Ready for a new project");
   ctx.effects.push({ do: "badge", text: "" });
   return true;
 }

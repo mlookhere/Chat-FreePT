@@ -92,8 +92,6 @@ describe("plan prompt", () => {
   });
 
   it("does not itself parse as a status marker sent by the assistant", () => {
-    // The prompt necessarily quotes the CHATFREEPT_STATUS syntax; the parser must not
-    // treat the placeholder form as a real status.
     const prompt = buildPlanPrompt(planInput);
     const marker = parseMarker(prompt);
     expect(marker).toBeNull();
@@ -108,6 +106,7 @@ describe("develop prompt", () => {
     expect(prompt).toContain("self-audit");
     expect(prompt).toContain("COMPLETE");
     expect(prompt).toContain(String(Math.round(DEFAULT_SETTINGS.sendDelayMs / 1000)));
+    expect(prompt).toContain("Chat FreePT follow-up messages are your clock ticks");
   });
 });
 
@@ -138,6 +137,11 @@ describe("continue / nudge / reply / handoff", () => {
     expect(prompt).toContain("DEVELOPING");
     expect(prompt).toContain("Operating contract");
   });
+
+  it("handoff falls back when both repo fields are empty", () => {
+    const prompt = buildHandoffPrompt(newRunState("c1", 0));
+    expect(prompt).toContain("Repo: (see the plan conversation)");
+  });
 });
 
 describe("marker block", () => {
@@ -151,5 +155,11 @@ describe("marker block", () => {
       expect(count).toBe(1);
     }
     expect(MARKER_BLOCK).toContain("Never omit the block");
+  });
+
+  it("describes queued and controlled continuation instead of promising an automatic continue", () => {
+    expect(MARKER_BLOCK).toContain("queued next message");
+    expect(MARKER_BLOCK).toContain("depending on my controls");
+    expect(MARKER_BLOCK).not.toContain('I will reply "continue" automatically');
   });
 });
