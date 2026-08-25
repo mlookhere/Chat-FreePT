@@ -34,7 +34,7 @@ function streamingRun(): RunState {
   ]).state;
 }
 
-describe("continuation controls", () => {
+describe("auto-continue control", () => {
   it("defaults new and legacy runs to auto-continue enabled", () => {
     expect(autoContinueEnabled(newRunState("new", 1))).toBe(true);
     const legacy = { ...newRunState("legacy", 1), autoContinueEnabled: undefined };
@@ -72,7 +72,9 @@ describe("continuation controls", () => {
     expect(resumed.state.status).toBe("cooldown");
     expect(resumed.effects).toContainEqual({ do: "startCooldown", ms: 1000 });
   });
+});
 
+describe("queued continuation input and stop reset", () => {
   it("sends a queued user message before continue even when auto-continue is off", () => {
     let state = streamingRun();
     state = reduce(state, { type: "USER_SET_AUTO_CONTINUE", enabled: false }, settings).state;
