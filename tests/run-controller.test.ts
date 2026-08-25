@@ -121,7 +121,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("RunController orchestration", () => {
+describe("RunController sends and continuation controls", () => {
   it("drives a plan prompt through insert and confirmed send", async () => {
     const controller = makeController();
 
@@ -204,7 +204,9 @@ describe("RunController orchestration", () => {
     expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
+});
 
+describe("RunController recovery and disposal", () => {
   it("accepts a user reply after NEEDS_INPUT and re-enters streaming", async () => {
     const controller = makeController(streamingState());
 
