@@ -1,0 +1,33 @@
+name: Prettier state cleanup diagnostic
+
+on:
+  pull_request:
+    branches: [work/44-state-ownership-cleanup]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    name: Apply formatted state machine
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install locked Node toolchain
+        run: npm ci --no-audit --no-fund
+      - name: Apply exact Prettier output to cleanup branch
+        run: |
+          git checkout -B work/44-state-ownership-cleanup origin/work/44-state-ownership-cleanup
+          npx prettier --write src/common/state-machine.ts
+          if git diff --quiet -- src/common/state-machine.ts; then
+            echo "State machine is already formatted."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/common/state-machine.ts
+          git commit -m "style: apply exact Prettier output"
+          git push origin HEAD:work/44-state-ownership-cleanup
