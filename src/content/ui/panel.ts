@@ -532,9 +532,7 @@ export class Panel {
 
   private refValue(ref: string): string {
     const el = this.panelEl.querySelector(`[data-ref="${ref}"]`) as
-      | HTMLTextAreaElement
-      | HTMLInputElement
-      | null;
+      HTMLTextAreaElement | HTMLInputElement | null;
     return el?.value ?? "";
   }
 
