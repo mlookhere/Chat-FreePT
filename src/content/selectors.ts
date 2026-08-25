@@ -7,6 +7,7 @@
 export type TargetId =
   | "composer"
   | "composerHeader"
+  | "composerSurface"
   | "sendButton"
   | "stopButton"
   | "assistantMessage"
@@ -44,6 +45,15 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: "#thread-bottom [data-prompt-textarea-header]" },
       { css: "main [data-prompt-textarea-header]" },
       { css: "[data-prompt-textarea-header]" },
+    ],
+  },
+  composerSurface: {
+    required: false,
+    candidates: [
+      { css: '#thread-bottom form[data-type="unified-composer"] [data-composer-surface="true"]' },
+      { css: 'form[data-type="unified-composer"] [data-composer-surface="true"]' },
+      { css: '[data-composer-surface="true"]' },
+      { css: 'form[data-type="unified-composer"]' },
     ],
   },
   sendButton: {
