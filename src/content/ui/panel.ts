@@ -1,6 +1,6 @@
 import type { MachineEvent } from "../../common/state-machine";
 import type { RunState } from "../../common/types";
-import { healthCheck } from "../selectors";
+import { healthCheck, query } from "../selectors";
 import { PANEL_CSS } from "./styles";
 
 export interface PanelHooks {
@@ -28,74 +28,117 @@ function esc(text: string): string {
 }
 
 /**
- * The floating launcher + side panel. Rendered inside a closed shadow root so the host
- * page's styles and ours never touch. The body re-renders only when the view key
- * changes; counters and the activity log update in place so textareas keep focus.
+ * Native-style Chat FreePT controls embedded in ChatGPT's composer header slot. A closed
+ * shadow root keeps both style systems isolated, while a subtree observer re-homes the
+ * single host when ChatGPT replaces its composer during SPA navigation or hydration.
  */
 export class Panel {
   private readonly host: HTMLDivElement;
   private readonly shadow: ShadowRoot;
-  private readonly fab: HTMLButtonElement;
+  private readonly dock: HTMLButtonElement;
+  private readonly dockPhase: HTMLSpanElement;
+  private readonly dockStatus: HTMLSpanElement;
+  private readonly chevron: HTMLSpanElement;
   private readonly panelEl: HTMLDivElement;
+  private readonly mountObserver: MutationObserver;
   private lastViewKey = "";
   private stopArmed = false;
+  private mountQueued = false;
 
   constructor(private readonly hooks: PanelHooks) {
     this.host = document.createElement("div");
     this.host.id = "cfpt-root";
+    this.host.dataset["cfptEmbedded"] = "true";
+    this.host.dataset["expanded"] = "false";
     this.shadow = this.host.attachShadow({ mode: "closed" });
 
     const style = document.createElement("style");
     style.textContent = PANEL_CSS;
     this.shadow.appendChild(style);
 
-    this.fab = document.createElement("button");
-    this.fab.className = "cfpt-fab";
-    this.fab.textContent = "FP";
-    this.fab.title = "Chat FreePT";
-    this.fab.addEventListener("click", () => this.toggle());
-    this.shadow.appendChild(this.fab);
-
     this.panelEl = document.createElement("div");
     this.panelEl.className = "cfpt-panel cfpt-hidden";
-    this.panelEl.addEventListener("click", (e) => this.onClick(e));
+    this.panelEl.addEventListener("click", (event) => this.onClick(event));
     this.shadow.appendChild(this.panelEl);
 
-    document.documentElement.appendChild(this.host);
+    this.dock = document.createElement("button");
+    this.dock.type = "button";
+    this.dock.className = "cfpt-dock";
+    this.dock.title = "Chat FreePT controls";
+    this.dock.setAttribute("aria-expanded", "false");
+    this.dock.innerHTML = `
+      <span class="cfpt-mark" aria-hidden="true">FP</span>
+      <span class="cfpt-dock-title">Chat FreePT</span>
+      <span class="cfpt-chip" data-phase="idle">Ready</span>
+      <span class="cfpt-dock-status">Idle</span>
+      <span class="cfpt-chevron" aria-hidden="true">▴</span>
+    `;
+    this.dock.addEventListener("click", () => this.toggle());
+    this.shadow.appendChild(this.dock);
 
-    // The page's framework occasionally rewrites documentElement children; re-attach.
-    const keepAlive = new MutationObserver(() => {
-      if (!this.host.isConnected) document.documentElement.appendChild(this.host);
-    });
-    keepAlive.observe(document.documentElement, { childList: true });
+    this.dockPhase = this.requiredShadowElement<HTMLSpanElement>(".cfpt-chip");
+    this.dockStatus = this.requiredShadowElement<HTMLSpanElement>(".cfpt-dock-status");
+    this.chevron = this.requiredShadowElement<HTMLSpanElement>(".cfpt-chevron");
+
+    this.mountObserver = new MutationObserver(() => this.scheduleMount());
+    this.mountObserver.observe(document.documentElement, { childList: true, subtree: true });
+    this.mount();
   }
 
   toggle(force?: boolean): void {
     const show = force ?? this.panelEl.classList.contains("cfpt-hidden");
     this.panelEl.classList.toggle("cfpt-hidden", !show);
+    this.host.dataset["expanded"] = String(show);
+    this.dock.setAttribute("aria-expanded", String(show));
+    this.chevron.textContent = show ? "▾" : "▴";
   }
 
   render(state: RunState, passive = false): void {
-    this.fab.dataset["state"] = passive ? "attention" : fabState(state);
+    const visualState = passive ? "attention" : dockState(state);
+    this.host.dataset["state"] = visualState;
+    this.host.dataset["status"] = state.status;
+    this.host.dataset["phase"] = state.phase;
+    this.dock.dataset["state"] = visualState;
+    this.dockPhase.dataset["phase"] = state.phase;
+    this.dockPhase.textContent = phaseLabel(state.phase);
+    this.dockStatus.textContent = passive
+      ? "Active in another tab"
+      : (STATUS_LABEL[state.status] ?? state.status);
 
     const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${passive}`;
     if (viewKey !== this.lastViewKey) {
       this.lastViewKey = viewKey;
       this.stopArmed = false;
-      this.panelEl.innerHTML = this.viewHtml(state, passive);
+      this.panelEl.innerHTML = `<div class="cfpt-body">${this.bodyHtml(state, passive)}</div>`;
     }
     this.updateDynamic(state);
+    this.mount();
   }
 
-  private viewHtml(state: RunState, passive: boolean): string {
-    return `
-      <div class="cfpt-header">
-        <span class="cfpt-title">Chat FreePT</span>
-        <span class="cfpt-chip" data-phase="${esc(state.phase)}">${esc(phaseLabel(state.phase))}</span>
-        <button class="cfpt-btn" data-action="close" style="margin:0;padding:2px 8px">×</button>
-      </div>
-      <div class="cfpt-body">${this.bodyHtml(state, passive)}</div>
-    `;
+  dispose(): void {
+    this.mountObserver.disconnect();
+    this.host.remove();
+  }
+
+  private requiredShadowElement<T extends Element>(selector: string): T {
+    const element = this.shadow.querySelector(selector);
+    if (!element) throw new Error(`Chat FreePT shadow element missing: ${selector}`);
+    return element as T;
+  }
+
+  private scheduleMount(): void {
+    if (this.mountQueued) return;
+    this.mountQueued = true;
+    queueMicrotask(() => {
+      this.mountQueued = false;
+      this.mount();
+    });
+  }
+
+  private mount(): void {
+    const anchor = query("composerHeader");
+    if (!anchor || this.host.parentElement === anchor) return;
+    anchor.appendChild(this.host);
   }
 
   private bodyHtml(state: RunState, passive: boolean): string {
@@ -229,7 +272,7 @@ export class Panel {
 
   private completeHtml(state: RunState): string {
     return `
-      <h3>Development complete 🎉</h3>
+      <h3>Development complete</h3>
       ${repoLine(state)}
       <p class="cfpt-note">ChatGPT reports the project is done — verify it at the repo.</p>
       <button class="cfpt-btn cfpt-btn-primary" data-action="newproject">New project</button>
@@ -346,34 +389,9 @@ export class Panel {
     return el?.value ?? "";
   }
 
-  showCompletionModal(state: RunState): void {
-    const existing = this.shadow.querySelector(".cfpt-modal-backdrop");
-    if (existing) existing.remove();
-    const backdrop = document.createElement("div");
-    backdrop.className = "cfpt-modal-backdrop";
-    const repoUrl = state.repo ? `https://github.com/${state.repo}` : undefined;
-    backdrop.innerHTML = `
-      <div class="cfpt-modal">
-        <div class="big">🎉</div>
-        <h2>Development complete</h2>
-        <p>ChatGPT reports every plan item is merged and CI is green${
-          state.repo ? ` on <strong>${esc(state.repo)}</strong>` : ""
-        }. Verify it at the repository.</p>
-        ${
-          repoUrl
-            ? `<a class="cfpt-btn cfpt-btn-primary cfpt-link" style="color:#fff" href="${esc(
-                repoUrl,
-              )}" target="_blank" rel="noreferrer noopener">View repository</a>`
-            : ""
-        }
-        <button class="cfpt-btn" data-close="1">Close</button>
-      </div>
-    `;
-    backdrop.addEventListener("click", (e) => {
-      const el = e.target as HTMLElement;
-      if (el === backdrop || el.dataset["close"]) backdrop.remove();
-    });
-    this.shadow.appendChild(backdrop);
+  showCompletionModal(_state: RunState): void {
+    // Completion stays embedded instead of creating a page-wide overlay.
+    this.toggle(true);
   }
 }
 
@@ -396,7 +414,7 @@ function phaseLabel(phase: string): string {
   }
 }
 
-function fabState(state: RunState): string {
+function dockState(state: RunState): string {
   if (state.status === "error") return "error";
   if (state.status === "awaiting_user") return "attention";
   if (state.status === "complete") return "done";
