@@ -1,11 +1,14 @@
-import { autoContinueEnabled, type MachineEvent } from "../../common/state-machine";
+import {
+  autoContinueEnabled,
+  isWaitingForManualContinue,
+  type MachineEvent,
+} from "../../common/state-machine";
 import type { RunState } from "../../common/types";
 import { healthCheck, query } from "../selectors";
 import { PANEL_CSS } from "./styles";
 
 export interface PanelHooks {
   onEvent: (event: MachineEvent) => void;
-  onNewProject: () => void;
   getHandoffPrompt: () => string;
 }
 
@@ -429,7 +432,7 @@ export class Panel {
   }
 
   private needsInputHtml(state: RunState): string {
-    const autoPaused = state.pauseReason === "Auto-continue is off.";
+    const autoPaused = isWaitingForManualContinue(state);
     return `
       <h3>${autoPaused ? "Auto-continue is off" : "ChatGPT needs your input"}</h3>
       <p class="cfpt-note">${esc(state.pauseReason ?? "See the conversation for the question.")}</p>
@@ -522,7 +525,7 @@ export class Panel {
         this.stopRun(target);
         break;
       case "newproject":
-        this.hooks.onNewProject();
+        this.hooks.onEvent({ type: "USER_NEW_PROJECT" });
         break;
       case "copyhandoff":
         this.copyHandoff(target);
