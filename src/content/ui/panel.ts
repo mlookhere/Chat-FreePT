@@ -9,6 +9,17 @@ export interface PanelHooks {
   getHandoffPrompt: () => string;
 }
 
+interface OnboardingState {
+  launcherTipSuppressed: boolean;
+  setupShown: boolean;
+}
+
+const ONBOARDING_KEY = "cfpt:onboarding:v1";
+const DEFAULT_ONBOARDING: OnboardingState = {
+  launcherTipSuppressed: false,
+  setupShown: false,
+};
+
 const STATUS_LABEL: Record<string, string> = {
   idle: "Idle",
   inserting: "Writing prompt…",
@@ -27,29 +38,43 @@ function esc(text: string): string {
   return div.innerHTML;
 }
 
+function normalizeOnboarding(value: unknown): OnboardingState {
+  if (!value || typeof value !== "object") return { ...DEFAULT_ONBOARDING };
+  const candidate = value as Partial<OnboardingState>;
+  return {
+    launcherTipSuppressed: candidate.launcherTipSuppressed === true,
+    setupShown: candidate.setupShown === true,
+  };
+}
+
 /**
- * Native-style Chat FreePT controls embedded in ChatGPT's composer header slot. A closed
- * shadow root keeps both style systems isolated, while a subtree observer re-homes the
+ * Compact Chat FreePT controls mounted directly inside ChatGPT's composer surface. The
+ * airplane launcher is always present; the full controls float above it only while open.
+ * A closed shadow root isolates both style systems while a subtree observer re-homes the
  * single host when ChatGPT replaces its composer during SPA navigation or hydration.
  */
 export class Panel {
   private readonly host: HTMLDivElement;
   private readonly shadow: ShadowRoot;
-  private readonly dock: HTMLButtonElement;
-  private readonly dockPhase: HTMLSpanElement;
-  private readonly dockStatus: HTMLSpanElement;
-  private readonly chevron: HTMLSpanElement;
+  private readonly launcher: HTMLButtonElement;
   private readonly panelEl: HTMLDivElement;
+  private readonly launcherTipEl: HTMLDivElement;
+  private readonly setupBackdropEl: HTMLDivElement;
   private readonly mountObserver: MutationObserver;
   private lastViewKey = "";
   private stopArmed = false;
   private mountQueued = false;
+  private disposed = false;
+  private onboarding = { ...DEFAULT_ONBOARDING };
 
   constructor(private readonly hooks: PanelHooks) {
     this.host = document.createElement("div");
     this.host.id = "cfpt-root";
     this.host.dataset["cfptEmbedded"] = "true";
+    this.host.dataset["cfptLauncher"] = "airplane";
     this.host.dataset["expanded"] = "false";
+    this.host.dataset["onboarding"] = "loading";
+    this.host.dataset["highlighted"] = "false";
     this.shadow = this.host.attachShadow({ mode: "closed" });
 
     const style = document.createElement("style");
@@ -58,52 +83,98 @@ export class Panel {
 
     this.panelEl = document.createElement("div");
     this.panelEl.className = "cfpt-panel cfpt-hidden";
-    this.panelEl.addEventListener("click", (event) => this.onClick(event));
     this.shadow.appendChild(this.panelEl);
 
-    this.dock = document.createElement("button");
-    this.dock.type = "button";
-    this.dock.className = "cfpt-dock";
-    this.dock.title = "Chat FreePT controls";
-    this.dock.setAttribute("aria-expanded", "false");
-    this.dock.innerHTML = `
-      <span class="cfpt-mark" aria-hidden="true">FP</span>
-      <span class="cfpt-dock-title">Chat FreePT</span>
-      <span class="cfpt-chip" data-phase="idle">Ready</span>
-      <span class="cfpt-dock-status">Idle</span>
-      <span class="cfpt-chevron" aria-hidden="true">▴</span>
+    this.launcher = document.createElement("button");
+    this.launcher.type = "button";
+    this.launcher.className = "cfpt-launcher";
+    this.launcher.title = "Open Chat FreePT";
+    this.launcher.setAttribute("aria-label", "Open Chat FreePT");
+    this.launcher.setAttribute("aria-expanded", "false");
+    this.launcher.innerHTML = `
+      <svg class="cfpt-airplane" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 2.5c-.8 0-1.4.6-1.4 1.4v5.3L3 13.8v2l7.6-2.4v4.2l-2.3 1.7v1.4l3.7-1.1 3.7 1.1v-1.4l-2.3-1.7v-4.2l7.6 2.4v-2l-7.6-4.6V3.9c0-.8-.6-1.4-1.4-1.4Z"></path>
+      </svg>
     `;
-    this.dock.addEventListener("click", () => this.toggle());
-    this.shadow.appendChild(this.dock);
+    this.launcher.addEventListener("click", () => {
+      if (!this.launcherTipEl.classList.contains("cfpt-hidden")) {
+        void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
+      }
+      this.toggle();
+    });
+    this.shadow.appendChild(this.launcher);
 
-    this.dockPhase = this.requiredShadowElement<HTMLSpanElement>(".cfpt-chip");
-    this.dockStatus = this.requiredShadowElement<HTMLSpanElement>(".cfpt-dock-status");
-    this.chevron = this.requiredShadowElement<HTMLSpanElement>(".cfpt-chevron");
+    this.launcherTipEl = document.createElement("div");
+    this.launcherTipEl.className = "cfpt-onboarding-toast cfpt-hidden";
+    this.launcherTipEl.setAttribute("role", "status");
+    this.launcherTipEl.innerHTML = `
+      <div class="cfpt-toast-arrow" aria-hidden="true"></div>
+      <button class="cfpt-icon-close" type="button" data-action="tip-continue" aria-label="Dismiss launcher tip">×</button>
+      <strong>Chat FreePT lives here</strong>
+      <p>Use the airplane inside the ChatGPT input whenever you want to open Chat FreePT.</p>
+      <label class="cfpt-check-row">
+        <input type="checkbox" data-ref="suppress-launcher-tip" />
+        <span>Don't show this tip again</span>
+      </label>
+      <button class="cfpt-btn cfpt-btn-primary cfpt-toast-continue" type="button" data-action="tip-continue">Continue</button>
+    `;
+    this.shadow.appendChild(this.launcherTipEl);
+
+    this.setupBackdropEl = document.createElement("div");
+    this.setupBackdropEl.className = "cfpt-setup-backdrop cfpt-hidden";
+    this.setupBackdropEl.setAttribute("role", "presentation");
+    this.setupBackdropEl.innerHTML = `
+      <section class="cfpt-setup-card" role="dialog" aria-modal="true" aria-labelledby="cfpt-setup-title">
+        <button class="cfpt-icon-close" type="button" data-action="setup-done" aria-label="Close setup instructions">×</button>
+        <div class="cfpt-setup-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2.5c-.8 0-1.4.6-1.4 1.4v5.3L3 13.8v2l7.6-2.4v4.2l-2.3 1.7v1.4l3.7-1.1 3.7 1.1v-1.4l-2.3-1.7v-4.2l7.6 2.4v-2l-7.6-4.6V3.9c0-.8-.6-1.4-1.4-1.4Z"></path></svg>
+        </div>
+        <h2 id="cfpt-setup-title">Set up GitHub access once</h2>
+        <p class="cfpt-setup-lead">For fully autonomous new-repository work, ChatGPT needs a GitHub MCP app with repository and workflow write access.</p>
+        <ol class="cfpt-setup-steps">
+          <li>Open <strong>Settings → Security and login → Developer mode</strong> and turn it on.</li>
+          <li>Open ChatGPT Plugins, select <strong>+</strong>, and add <code>https://api.githubcopilot.com/mcp/</code> using OAuth.</li>
+          <li>In the conversation's Plus menu, choose <strong>Developer mode</strong> and select that GitHub app.</li>
+          <li>Authorize the repository and workflow write access Chat FreePT's preflight requests.</li>
+        </ol>
+        <p class="cfpt-setup-footnote">Existing repositories may work with another GitHub connector if it passes Chat FreePT's capability preflight. Chat FreePT never receives your GitHub credentials.</p>
+        <div class="cfpt-setup-actions">
+          <a class="cfpt-btn" href="https://chatgpt.com/plugins" target="_blank" rel="noreferrer noopener">Open ChatGPT Plugins</a>
+          <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="setup-done">Got it</button>
+        </div>
+      </section>
+    `;
+    this.shadow.appendChild(this.setupBackdropEl);
+
+    this.shadow.addEventListener("click", (event) => this.onClick(event));
+    this.shadow.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !this.setupBackdropEl.classList.contains("cfpt-hidden")) {
+        void this.acknowledgeSetup();
+      }
+    });
 
     this.mountObserver = new MutationObserver(() => this.scheduleMount());
     this.mountObserver.observe(document.documentElement, { childList: true, subtree: true });
     this.mount();
+    void this.initOnboarding();
   }
 
   toggle(force?: boolean): void {
     const show = force ?? this.panelEl.classList.contains("cfpt-hidden");
     this.panelEl.classList.toggle("cfpt-hidden", !show);
     this.host.dataset["expanded"] = String(show);
-    this.dock.setAttribute("aria-expanded", String(show));
-    this.chevron.textContent = show ? "▾" : "▴";
+    this.launcher.setAttribute("aria-expanded", String(show));
+    this.launcher.setAttribute("aria-label", show ? "Close Chat FreePT" : "Open Chat FreePT");
   }
 
   render(state: RunState, passive = false): void {
-    const visualState = passive ? "attention" : dockState(state);
+    const visualState = passive ? "attention" : launcherState(state);
     this.host.dataset["state"] = visualState;
     this.host.dataset["status"] = state.status;
     this.host.dataset["phase"] = state.phase;
-    this.dock.dataset["state"] = visualState;
-    this.dockPhase.dataset["phase"] = state.phase;
-    this.dockPhase.textContent = phaseLabel(state.phase);
-    this.dockStatus.textContent = passive
-      ? "Active in another tab"
-      : (STATUS_LABEL[state.status] ?? state.status);
+    this.launcher.dataset["state"] = visualState;
+    const status = passive ? "Active in another tab" : (STATUS_LABEL[state.status] ?? state.status);
+    this.launcher.title = `Chat FreePT · ${phaseLabel(state.phase)} · ${status}`;
 
     const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${passive}`;
     if (viewKey !== this.lastViewKey) {
@@ -116,14 +187,85 @@ export class Panel {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.mountObserver.disconnect();
     this.host.remove();
   }
 
-  private requiredShadowElement<T extends Element>(selector: string): T {
-    const element = this.shadow.querySelector(selector);
-    if (!element) throw new Error(`Chat FreePT shadow element missing: ${selector}`);
-    return element as T;
+  async acknowledgeLauncherTip(suppress: boolean): Promise<void> {
+    this.launcherTipEl.classList.add("cfpt-hidden");
+    this.host.dataset["highlighted"] = "false";
+    if (suppress) this.onboarding.launcherTipSuppressed = true;
+    await this.persistOnboarding();
+    if (!this.onboarding.setupShown) {
+      this.showSetupModal();
+    } else {
+      this.host.dataset["onboarding"] = "done";
+    }
+  }
+
+  async acknowledgeSetup(): Promise<void> {
+    this.setupBackdropEl.classList.add("cfpt-hidden");
+    this.onboarding.setupShown = true;
+    this.host.dataset["onboarding"] = "done";
+    await this.persistOnboarding();
+  }
+
+  showCompletionModal(_state: RunState): void {
+    this.toggle(true);
+  }
+
+  private async initOnboarding(): Promise<void> {
+    try {
+      const found = await chrome.storage.local.get(ONBOARDING_KEY);
+      this.onboarding = normalizeOnboarding(found[ONBOARDING_KEY]);
+    } catch {
+      this.onboarding = { ...DEFAULT_ONBOARDING };
+    }
+    if (this.disposed) return;
+
+    if (!this.onboarding.launcherTipSuppressed) {
+      this.showLauncherTip();
+      return;
+    }
+    if (!this.onboarding.setupShown) {
+      this.showSetupModal();
+      return;
+    }
+    this.host.dataset["onboarding"] = "done";
+  }
+
+  private async persistOnboarding(): Promise<void> {
+    try {
+      await chrome.storage.local.set({ [ONBOARDING_KEY]: this.onboarding });
+    } catch {
+      // Onboarding persistence must never prevent the extension controls from operating.
+    }
+  }
+
+  private showLauncherTip(): void {
+    this.setupBackdropEl.classList.add("cfpt-hidden");
+    this.launcherTipEl.classList.remove("cfpt-hidden");
+    this.host.dataset["onboarding"] = "tip";
+    this.host.dataset["highlighted"] = "true";
+  }
+
+  private showSetupModal(): void {
+    this.launcherTipEl.classList.add("cfpt-hidden");
+    this.host.dataset["highlighted"] = "false";
+    this.setupBackdropEl.classList.remove("cfpt-hidden");
+    this.host.dataset["onboarding"] = "setup";
+    queueMicrotask(() => {
+      const button = this.setupBackdropEl.querySelector<HTMLButtonElement>('[data-action="setup-done"]');
+      button?.focus();
+    });
+  }
+
+  private tipCheckboxChecked(): boolean {
+    const input = this.launcherTipEl.querySelector<HTMLInputElement>(
+      '[data-ref="suppress-launcher-tip"]',
+    );
+    return input?.checked === true;
   }
 
   private scheduleMount(): void {
@@ -136,7 +278,7 @@ export class Panel {
   }
 
   private mount(): void {
-    const anchor = query("composerHeader");
+    const anchor = query("composerSurface") ?? query("composerHeader");
     if (!anchor || this.host.parentElement === anchor) return;
     anchor.appendChild(this.host);
   }
@@ -338,6 +480,12 @@ export class Panel {
       case "copyhandoff":
         this.copyHandoff(target);
         break;
+      case "tip-continue":
+        void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
+        break;
+      case "setup-done":
+        void this.acknowledgeSetup();
+        break;
     }
   }
 
@@ -380,7 +528,9 @@ export class Panel {
 
   private refValue(ref: string): string {
     const el = this.panelEl.querySelector(`[data-ref="${ref}"]`) as
-      HTMLTextAreaElement | HTMLInputElement | null;
+      | HTMLTextAreaElement
+      | HTMLInputElement
+      | null;
     return el?.value ?? "";
   }
 
@@ -389,11 +539,6 @@ export class Panel {
       `input[name="${name}"]:checked`,
     ) as HTMLInputElement | null;
     return el?.value ?? "";
-  }
-
-  showCompletionModal(_state: RunState): void {
-    // Completion stays embedded instead of creating a page-wide overlay.
-    this.toggle(true);
   }
 }
 
@@ -416,7 +561,7 @@ function phaseLabel(phase: string): string {
   }
 }
 
-function dockState(state: RunState): string {
+function launcherState(state: RunState): string {
   if (state.status === "error") return "error";
   if (state.status === "awaiting_user") return "attention";
   if (state.status === "complete") return "done";
