@@ -77,6 +77,20 @@ describe("plan prompt", () => {
     expect(prompt).not.toContain("set dev as the default branch");
   });
 
+  it("uses main as production and dev as integration", () => {
+    const plan = buildPlanPrompt(planInput);
+    const develop = buildDevelopPrompt(DEFAULT_SETTINGS);
+
+    expect(plan).toContain("dev is integration; main is production");
+    expect(plan).toContain("release — PR dev into main");
+    expect(plan).toMatch(/name dev or main explicitly/);
+    expect(develop).toContain("dev → main");
+
+    expect(plan).not.toContain("master is production");
+    expect(plan).not.toContain("PR dev into master");
+    expect(develop).not.toContain("dev → master");
+  });
+
   it("does not itself parse as a status marker sent by the assistant", () => {
     // The prompt necessarily quotes the CHATFREEPT_STATUS syntax; the parser must not
     // treat the placeholder form as a real status.

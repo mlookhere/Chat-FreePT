@@ -95,8 +95,8 @@ export const CI_CONTRACT_BLOCK = `## Operating contract (CI-Pipline)
 
 - One independently deliverable change = one GitHub Issue = one branch
   work/<issue-number>-<slug> from dev = one PR into dev.
-- dev is integration; master is production. There is NO branch protection (free private
-  repo) — the discipline is contractual: never commit directly to dev or master after
+- dev is integration; main is production. There is NO branch protection (free private
+  repo) — the discipline is contractual: never commit directly to dev or main after
   seeding; only PR merges move code into dev.
 - A PR merges only when every GitHub Actions check on it has completed and succeeded.
   Zero checks is NOT green — if a PR shows no checks, find out why before merging.
@@ -139,12 +139,12 @@ it with your GitHub tools):
    ./ci/run <stage> as the entry points and keeping job names unchanged (they are
    referenced as required checks).
 5. Seed branches explicitly. For a new repo, discover the platform-created initial branch
-   after initialization (commonly main), then create master and dev from the fully seeded
-   commit on that branch. For an existing repo, inspect master/dev before creating or
-   modifying either. Do NOT require changing the repository default branch: every later
-   operation must name dev or master explicitly. If a safe default-branch mutation tool is
-   available you may set dev after both branches exist, but its absence is never a blocker.
-   Do NOT configure branch protection.
+   after initialization (normally main), then ensure main contains the fully seeded commit
+   and create dev from that same commit. For an existing repo, inspect main/dev before
+   creating or modifying either. Do NOT require changing the repository default branch:
+   every later operation must name dev or main explicitly. If a safe default-branch
+   mutation tool is available you may set main after both branches exist, but its absence
+   is never a blocker. Do NOT configure branch protection.
 6. Create the labels the plane expects (type:bug, type:feature, type:maintenance,
    type:release; state:ready, state:active, state:blocked, state:review,
    state:release-ready; risk:database, risk:security, risk:billing, risk:deployment,
@@ -179,7 +179,7 @@ Build a master plan for this project:
 Produce a numbered master plan in which every item is one Issue-sized, independently
 deliverable, CI-verifiable slice (aim for 4–10 items). Item 1 is always: project scaffold
 plus toolchain such that the fast and pr CI stages pass on a hello-world. The final item
-is always: release — PR dev into master with the release stage green.
+is always: release — PR dev into main with the release stage green.
 
 For each item: title, acceptance criteria, files or areas touched, gates it must pass,
 risk labels. Also state the chosen language/toolchain and the exact commands/stages you
@@ -233,7 +233,7 @@ NOTE: waiting on <run or PR>.
 ## Completion
 
 You are done only when: every plan Issue is closed via a merged PR, the release item
-(dev → master) is merged with the release stage green, the control Issue reflects the
+(dev → main) is merged with the release stage green, the control Issue reflects the
 final state, and no open work Issues or PRs remain. Before declaring completion, run a
 self-audit with your tools: list open Issues and open PRs; if any remain, you are not
 done. Then end with COMPLETE (REPO and URL fields set).
