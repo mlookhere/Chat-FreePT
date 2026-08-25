@@ -94,7 +94,7 @@ describe("queued continuation input and stop reset", () => {
     expect(result.state.autoSends).toBe(settings.autoContinueCap);
     expect(result.effects).toContainEqual({
       do: "insertAndSend",
-      kind: "user_text",
+      kind: "queued_user_text",
       text: "Run the audit first.",
     });
   });
