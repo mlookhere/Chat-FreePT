@@ -12,9 +12,7 @@ export const SETTINGS_LIMITS = {
 type NumericSetting = keyof typeof SETTINGS_LIMITS;
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : {};
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
 function normalizedNumber(
@@ -52,16 +50,8 @@ export function normalizeSettings(value: unknown): Settings {
   const source = asRecord(value);
   return {
     v: DEFAULT_SETTINGS.v,
-    continueMessage: normalizedString(
-      source,
-      "continueMessage",
-      DEFAULT_SETTINGS.continueMessage,
-    ),
-    autoContinueCap: normalizedNumber(
-      source,
-      "autoContinueCap",
-      DEFAULT_SETTINGS.autoContinueCap,
-    ),
+    continueMessage: normalizedString(source, "continueMessage", DEFAULT_SETTINGS.continueMessage),
+    autoContinueCap: normalizedNumber(source, "autoContinueCap", DEFAULT_SETTINGS.autoContinueCap),
     sendDelayMs: normalizedNumber(source, "sendDelayMs", DEFAULT_SETTINGS.sendDelayMs),
     quietMs: normalizedNumber(source, "quietMs", DEFAULT_SETTINGS.quietMs),
     toolQuietMs: normalizedNumber(source, "toolQuietMs", DEFAULT_SETTINGS.toolQuietMs),
