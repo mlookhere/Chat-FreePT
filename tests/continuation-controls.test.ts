@@ -37,7 +37,8 @@ function streamingRun(): RunState {
 describe("auto-continue control", () => {
   it("defaults new and legacy runs to auto-continue enabled", () => {
     expect(autoContinueEnabled(newRunState("new", 1))).toBe(true);
-    const legacy = { ...newRunState("legacy", 1), autoContinueEnabled: undefined };
+    const legacy = newRunState("legacy", 1);
+    delete legacy.autoContinueEnabled;
     expect(autoContinueEnabled(legacy)).toBe(true);
   });
 
