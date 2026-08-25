@@ -1,0 +1,34 @@
+name: Prettier composer takeover diagnostic
+
+on:
+  pull_request:
+    branches:
+      - work/50-composer-takeover-guided-setup
+
+permissions:
+  contents: write
+
+jobs:
+  apply-format:
+    name: Apply exact Prettier output
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Install locked Node toolchain
+        run: npm ci --no-audit --no-fund
+      - name: Apply exact Prettier output to feature branch
+        run: |
+          git checkout -B work/50-composer-takeover-guided-setup origin/work/50-composer-takeover-guided-setup
+          npx prettier --write src/content/ui/panel.ts src/content/ui/setup-guide.ts
+          if git diff --quiet -- src/content/ui/panel.ts src/content/ui/setup-guide.ts; then
+            echo "Composer takeover files are already formatted."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/content/ui/panel.ts src/content/ui/setup-guide.ts
+          git commit -m "style: apply exact Prettier output"
+          git push origin HEAD:work/50-composer-takeover-guided-setup
