@@ -29,7 +29,13 @@ export type MachineEvent =
   | { type: "PAGE_SIGNAL"; signal: PageSignal };
 
 export type PromptKind =
-  "plan" | "develop" | "continue" | "contract_refresh" | "nudge" | "user_text";
+  | "plan"
+  | "develop"
+  | "continue"
+  | "contract_refresh"
+  | "nudge"
+  | "user_text"
+  | "queued_user_text";
 
 export type Effect =
   | { do: "insertAndSend"; kind: PromptKind; text?: string }
@@ -398,7 +404,7 @@ function finishCooldown(ctx: ReduceContext): boolean {
     delete state.queuedUserText;
     state.status = "inserting";
     note(ctx, "send", "Sending queued user message");
-    ctx.effects.push({ do: "insertAndSend", kind: "user_text", text });
+    ctx.effects.push({ do: "insertAndSend", kind: "queued_user_text", text });
     return true;
   }
 
