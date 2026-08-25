@@ -230,33 +230,29 @@ export function healthCheck(root: ParentNode = document): HealthReport {
 }
 
 /** Optional, text-aware targets used only by the composer integration and opt-in setup guide. */
+const GUIDE_RESOLVERS: Record<GuideTargetId, () => HTMLElement | null> = {
+  composerPlusButton,
+  settingsSecurity: () => clickableText(/^Security and login$/i),
+  developerModeRow,
+  developerModeToggle: () =>
+    controlNearText(
+      /^Developer mode$/i,
+      'button[role="switch"], [role="switch"], input[type="checkbox"]',
+    ),
+  pluginAddButton,
+  pluginNameInput: () => fieldNearLabel(/^(Name|Plugin name)$/i, "input"),
+  pluginServerInput: () =>
+    fieldNearLabel(/(Server URL|Remote MCP|MCP server URL)/i, 'input[type="url"], input'),
+  pluginAuthControl: () => fieldNearLabel(/Authentication/i, 'select, [role="combobox"], button'),
+  pluginRiskCheckbox: () =>
+    controlNearText(/I understand.*continue/i, 'input[type="checkbox"], [role="checkbox"]'),
+  pluginCreateButton: () => clickableText(/^Create$/i),
+  conversationDeveloperMode: () => clickableText(/^Developer mode$/i),
+  conversationGitHubMcp: () => clickableText(/^GitHub MCP$/i) ?? clickableText(/^GitHub$/i),
+};
+
 export function queryGuideTarget(id: GuideTargetId): HTMLElement | null {
-  switch (id) {
-    case "composerPlusButton":
-      return composerPlusButton();
-    case "settingsSecurity":
-      return clickableText(/^Security and login$/i);
-    case "developerModeRow":
-      return developerModeRow();
-    case "developerModeToggle":
-      return controlNearText(/^Developer mode$/i, 'button[role="switch"], [role="switch"], input[type="checkbox"]');
-    case "pluginAddButton":
-      return pluginAddButton();
-    case "pluginNameInput":
-      return fieldNearLabel(/^(Name|Plugin name)$/i, "input");
-    case "pluginServerInput":
-      return fieldNearLabel(/(Server URL|Remote MCP|MCP server URL)/i, 'input[type="url"], input');
-    case "pluginAuthControl":
-      return fieldNearLabel(/Authentication/i, 'select, [role="combobox"], button');
-    case "pluginRiskCheckbox":
-      return controlNearText(/I understand.*continue/i, 'input[type="checkbox"], [role="checkbox"]');
-    case "pluginCreateButton":
-      return clickableText(/^Create$/i);
-    case "conversationDeveloperMode":
-      return clickableText(/^Developer mode$/i);
-    case "conversationGitHubMcp":
-      return clickableText(/^GitHub MCP$/i) ?? clickableText(/^GitHub$/i);
-  }
+  return GUIDE_RESOLVERS[id]();
 }
 
 function composerPlusButton(): HTMLElement | null {
@@ -271,7 +267,9 @@ function composerPlusButton(): HTMLElement | null {
     const found = document.querySelector<HTMLElement>(css);
     if (found) return found;
   }
-  const form = query("composerSurface")?.closest("form") ?? document.querySelector('form[data-type="unified-composer"]');
+  const form =
+    query("composerSurface")?.closest("form") ??
+    document.querySelector('form[data-type="unified-composer"]');
   if (!form) return null;
   return textElement(/^\+$/i, form, "button") as HTMLElement | null;
 }
@@ -281,7 +279,9 @@ function developerModeRow(): HTMLElement | null {
   if (!(label instanceof HTMLElement)) return null;
   let node: HTMLElement | null = label;
   for (let depth = 0; node && depth < 7; depth += 1) {
-    if (node.querySelector('button[role="switch"], [role="switch"], input[type="checkbox"]')) return node;
+    if (node.querySelector('button[role="switch"], [role="switch"], input[type="checkbox"]')) {
+      return node;
+    }
     node = node.parentElement;
   }
   return label.parentElement ?? label;
@@ -294,7 +294,9 @@ function pluginAddButton(): HTMLElement | null {
   if (labeled) return labeled;
   const plus = textElement(/^\+$/, document, "button");
   if (plus instanceof HTMLElement) return plus;
-  const search = document.querySelector<HTMLElement>('input[placeholder*="Search plugin" i], input[type="search"]');
+  const search = document.querySelector<HTMLElement>(
+    'input[placeholder*="Search plugin" i], input[type="search"]',
+  );
   const container = search?.parentElement?.parentElement;
   const buttons = container ? Array.from(container.querySelectorAll<HTMLElement>("button")) : [];
   return buttons.at(-1) ?? null;
@@ -303,7 +305,11 @@ function pluginAddButton(): HTMLElement | null {
 function clickableText(pattern: RegExp): HTMLElement | null {
   const text = textElement(pattern);
   if (!(text instanceof HTMLElement)) return null;
-  return text.closest<HTMLElement>('button, a, [role="button"], [role="tab"], [role="menuitem"], [role="option"]') ?? text;
+  return (
+    text.closest<HTMLElement>(
+      'button, a, [role="button"], [role="tab"], [role="menuitem"], [role="option"]',
+    ) ?? text
+  );
 }
 
 function fieldNearLabel(pattern: RegExp, selector: string): HTMLElement | null {
@@ -334,7 +340,11 @@ function controlNearText(pattern: RegExp, selector: string): HTMLElement | null 
   return null;
 }
 
-function textElement(pattern: RegExp, root: ParentNode = document, css = "button, a, label, h1, h2, h3, h4, span, div, p"): Element | null {
+function textElement(
+  pattern: RegExp,
+  root: ParentNode = document,
+  css = "button, a, label, h1, h2, h3, h4, span, div, p",
+): Element | null {
   let nodes: Element[];
   try {
     nodes = Array.from(root.querySelectorAll(css));
@@ -345,6 +355,10 @@ function textElement(pattern: RegExp, root: ParentNode = document, css = "button
     if (element.getAttribute("aria-hidden") === "true") return false;
     return pattern.test((element.textContent ?? "").trim());
   });
-  matches.sort((a, b) => a.children.length - b.children.length || (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0));
+  matches.sort(
+    (a, b) =>
+      a.children.length - b.children.length ||
+      (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0),
+  );
   return matches[0] ?? null;
 }
