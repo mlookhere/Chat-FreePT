@@ -1,0 +1,29 @@
+name: Prettier diagnostic
+
+on:
+  pull_request:
+    branches: [work/36-airplane-launcher-onboarding]
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    name: Capture formatted panel
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install locked Node toolchain
+        run: npm ci --no-audit --no-fund
+      - name: Format panel with repository Prettier
+        run: npx prettier --write src/content/ui/panel.ts
+      - name: Upload exact formatted panel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: prettier-panel-${{ github.run_id }}
+          path: src/content/ui/panel.ts
+          if-no-files-found: error
+          retention-days: 1
