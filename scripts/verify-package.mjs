@@ -71,7 +71,7 @@ export async function verifyDist(root = "dist") {
     actual = (await filesUnder(root)).sort();
   } catch (error) {
     if (error?.code === "ENOENT") {
-      throw new Error(`${root}/ is missing — run \`npm run build\` first.`);
+      throw new Error(`${root}/ is missing — run \`npm run build\` first.`, { cause: error });
     }
     throw error;
   }
