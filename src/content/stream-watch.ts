@@ -64,8 +64,8 @@ export class StreamWatcher {
     this.baselineElement = message?.el ?? null;
     this.baselineText = message?.text ?? "";
     this.state = "waiting";
-    this.streamStartedAt = Date.now();
-    this.lastMutationAt = this.streamStartedAt;
+    this.streamStartedAt = 0;
+    this.lastMutationAt = Date.now();
     this.settleStartedAt = 0;
     this.stuckReported = false;
     this.replyObserved = false;
@@ -104,7 +104,6 @@ export class StreamWatcher {
   }
 
   private tickWaiting(now: number, stopVisible: boolean): void {
-    this.checkStuck(now);
     if (stopVisible || this.assistantTurnChanged()) {
       this.observeReplyStart(now, stopVisible);
     }
@@ -150,7 +149,7 @@ export class StreamWatcher {
   private observeReplyStart(now: number, stopVisible: boolean): void {
     if (!this.replyObserved) {
       this.replyObserved = true;
-      if (this.streamStartedAt === 0) this.streamStartedAt = now;
+      this.streamStartedAt = now;
       this.stuckReported = false;
       this.callbacks.onStart();
     }
@@ -170,6 +169,7 @@ export class StreamWatcher {
   private checkStuck(now: number): void {
     if (
       !this.stuckReported &&
+      this.replyObserved &&
       this.streamStartedAt > 0 &&
       now - this.streamStartedAt > this.settings.maxStreamMinutes * 60_000
     ) {
