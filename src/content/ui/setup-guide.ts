@@ -592,10 +592,7 @@ function guideCopy(step: SetupGuideStep, found: boolean): GuideCopy {
         `No existing <b>${APP_NAME}</b> was found. I’m opening ChatGPT’s Create app form.${wait}`,
       );
     case "plugin-name":
-      return copy(
-        "7 · Preparing app name",
-        `I’m filling <b>${APP_NAME}</b>.${wait}`,
-      );
+      return copy("7 · Preparing app name", `I’m filling <b>${APP_NAME}</b>.${wait}`);
     case "plugin-server":
       return copy(
         "8 · Preparing full GitHub toolset",
