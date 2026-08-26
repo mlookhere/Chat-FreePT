@@ -166,6 +166,7 @@ describe("setup guide settings flow", () => {
     makeGuide();
     await settle();
 
+    // JSDOM does not clamp synthetic scrollTop like browsers; movement is the invariant.
     expect(scroller.scrollTop).not.toBe(0);
     expect(shadow.textContent).toContain("Developer mode");
   });
