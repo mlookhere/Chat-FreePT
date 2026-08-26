@@ -681,7 +681,9 @@ function controlValue(element: HTMLElement | null): string {
 
 function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
   const prototype =
-    element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+    element instanceof HTMLInputElement
+      ? HTMLInputElement.prototype
+      : HTMLTextAreaElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
   if (setter) setter.call(element, value);
   else element.value = value;
@@ -697,7 +699,8 @@ function settingsScrollContainer(target: HTMLElement): HTMLElement | null {
     node = node.parentElement;
   }
 
-  const modal = target.closest<HTMLElement>("#modal-settings") ?? document.getElementById("modal-settings");
+  const modal =
+    target.closest<HTMLElement>("#modal-settings") ?? document.getElementById("modal-settings");
   return modal?.querySelector<HTMLElement>('[class*="overflow-y-auto"]') ?? null;
 }
 

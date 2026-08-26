@@ -160,7 +160,9 @@ describe("composer and guided-setup targets", () => {
 
     expect(queryGuideTarget("settingsSecurity")?.textContent).toContain("Security and login");
     expect(queryGuideTarget("developerModeRow")?.classList.contains("developer-row")).toBe(true);
-    expect(queryGuideTarget("developerModeToggle")?.getAttribute("aria-label")).toBe("Developer mode");
+    expect(queryGuideTarget("developerModeToggle")?.getAttribute("aria-label")).toBe(
+      "Developer mode",
+    );
   });
 
   it("resolves the current Plugins search, Create app button, and only exact GitHub MCP result", () => {
