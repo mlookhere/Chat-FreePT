@@ -359,12 +359,17 @@ function pluginServerInput(): HTMLElement | null {
 
 function pluginAuthControl(): HTMLElement | null {
   return (document.getElementById("custom-connector-auth") ??
+    document.querySelector<HTMLElement>(
+      'select[aria-label*="Authentication" i], [role="combobox"][aria-label*="Authentication" i], button[aria-label*="Authentication" i]',
+    ) ??
     fieldNearLabel(/Authentication/i, 'select, [role="combobox"], button')) as HTMLElement | null;
 }
 
 function pluginOauthOption(): HTMLElement | null {
   const candidates = Array.from(
-    document.querySelectorAll<HTMLElement>('[role="option"], [role="menuitem"], [role="menuitemradio"], button'),
+    document.querySelectorAll<HTMLElement>(
+      '[role="option"], [role="menuitem"], [role="menuitemradio"], button',
+    ),
   );
   const exact = candidates.filter((element) => /^OAuth$/i.test((element.textContent ?? "").trim()));
   exact.sort((a, b) => a.children.length - b.children.length);
