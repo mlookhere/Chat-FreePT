@@ -1,0 +1,34 @@
+name: Prettier invalidated context diagnostic
+
+on:
+  pull_request:
+    branches:
+      - work/54-stop-invalidated-context
+
+permissions:
+  contents: write
+
+jobs:
+  apply-format:
+    name: Apply exact Prettier output
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Install locked Node toolchain
+        run: npm ci --no-audit --no-fund
+      - name: Apply exact Prettier output to feature branch
+        run: |
+          git checkout -B work/54-stop-invalidated-context origin/work/54-stop-invalidated-context
+          npx prettier --write tests/extension-context.test.ts
+          if git diff --quiet -- tests/extension-context.test.ts; then
+            echo "Invalidated-context regression test is already formatted."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/extension-context.test.ts
+          git commit -m "style: apply exact Prettier output"
+          git push origin HEAD:work/54-stop-invalidated-context
