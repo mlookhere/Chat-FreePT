@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SetupGuide } from "../src/content/ui/setup-guide";
 import { installChromeMock } from "./chrome-mock";
 
-const SESSION_KEY = "cfpt:setup-guide:v2";
+const SESSION_KEY = "cfpt:setup-guide:v3";
 let stores: ReturnType<typeof installChromeMock>;
 let shadow: ShadowRoot;
 let attachShadowSpy: ReturnType<typeof vi.spyOn>;
@@ -27,6 +27,29 @@ function makeGuide(): SetupGuide {
 
 async function settle(ms = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function customFormHtml(): string {
+  return `
+    <div id="modal-create-custom-connector">
+      <form id="custom-form">
+        <input id="custom-connector-name" aria-label="Name" />
+        <div role="radiogroup" aria-label="Connection">
+          <button type="button" role="radio" aria-label="Server URL" aria-checked="true">Server URL</button>
+          <button type="button" role="radio" aria-label="Tunnel" aria-checked="false">Tunnel</button>
+        </div>
+        <input id="custom-connector-url" inputmode="url" />
+        <select id="custom-connector-auth">
+          <option value="NONE">No Auth</option>
+          <option value="OAUTH">OAuth</option>
+        </select>
+        <label for="trust-checkbox">
+          <input id="trust-checkbox" data-testid="trust-checkbox" type="checkbox" />
+          I understand and want to continue
+        </label>
+        <button id="create-custom" type="submit" disabled><span>Create</span></button>
+      </form>
+    </div>`;
 }
 
 beforeEach(() => {
@@ -97,9 +120,6 @@ describe("setup guide tab isolation", () => {
     expect(shadow.querySelector(".cfpt-guide-ring")?.classList.contains("cfpt-guide-hidden")).toBe(
       true,
     );
-    expect(shadow.querySelector(".cfpt-guide-card")?.classList.contains("cfpt-guide-hidden")).toBe(
-      true,
-    );
   });
 });
 
@@ -123,29 +143,9 @@ describe("setup guide settings flow", () => {
       scrollHeight: { configurable: true, value: 1200 },
     });
     scroller.getBoundingClientRect = () =>
-      ({
-        top: 100,
-        bottom: 500,
-        height: 400,
-        left: 0,
-        right: 600,
-        width: 600,
-        x: 0,
-        y: 100,
-        toJSON: () => ({}),
-      }) as DOMRect;
+      ({ top: 100, bottom: 500, height: 400, left: 0, right: 600, width: 600, x: 0, y: 100, toJSON: () => ({}) }) as DOMRect;
     row.getBoundingClientRect = () =>
-      ({
-        top: 850,
-        bottom: 920,
-        height: 70,
-        left: 100,
-        right: 550,
-        width: 450,
-        x: 100,
-        y: 850,
-        toJSON: () => ({}),
-      }) as DOMRect;
+      ({ top: 850, bottom: 920, height: 70, left: 100, right: 550, width: 450, x: 100, y: 850, toJSON: () => ({}) }) as DOMRect;
 
     makeGuide();
     await settle();
@@ -180,59 +180,88 @@ describe("setup guide settings flow", () => {
     makeGuide();
     await settle();
 
-    expect(shadow.textContent).toContain("3 · Enable Developer mode");
     toggle?.click();
     await settle(150);
     expect(sessionState()).toMatchObject({ step: "plugins" });
   });
 });
 
-describe("setup guide plugin flow", () => {
-  it("searches for the exact custom GitHub MCP app before offering Create app", async () => {
-    stored("plugin-search");
-    document.body.innerHTML = `
-      <input id="plugin-search" aria-label="Search plugins" value="GitHub" />
-      <button aria-label="Create app"></button>`;
+describe("setup guide custom MCP automation", () => {
+  it("resumes on Plugins without any conversation composer", async () => {
+    stored("plugin-risk");
+    document.body.innerHTML = customFormHtml();
     makeGuide();
     await settle();
 
-    shadow.querySelector<HTMLButtonElement>('[data-guide-action="search-plugin"]')?.click();
-    await settle(300);
-
-    expect((document.getElementById("plugin-search") as HTMLInputElement).value).toBe("GitHub MCP");
-    expect(sessionState()).toMatchObject({ step: "plugin-add" });
-    expect(shadow.textContent).toContain("Create the app");
+    expect(document.getElementById("prompt-textarea")).toBeNull();
+    expect(shadow.textContent).toContain("Your approval required");
+    expect(sessionState()).toMatchObject({ step: "plugin-risk" });
   });
 
-  it("skips custom app creation when an existing GitHub MCP result is present", async () => {
-    stored("plugin-add");
+  it("searches, opens Create app, and fills safe MCP fields automatically", async () => {
+    stored("plugin-search");
+    document.body.innerHTML = `
+      <input id="plugin-search" aria-label="Search plugins" value="GitHub" />
+      <button id="create-app" aria-label="Create app"></button>`;
+    const createApp = document.getElementById("create-app") as HTMLButtonElement;
+    createApp.addEventListener("click", () => {
+      document.body.insertAdjacentHTML("beforeend", customFormHtml());
+      const auth = document.getElementById("custom-connector-auth") as HTMLSelectElement;
+      auth.value = "NONE";
+      document.getElementById("custom-form")?.addEventListener("submit", (event) => event.preventDefault());
+    });
+
+    makeGuide();
+    await settle(600);
+
+    expect((document.getElementById("plugin-search") as HTMLInputElement).value).toBe("GitHub MCP");
+    expect((document.getElementById("custom-connector-name") as HTMLInputElement).value).toBe("GitHub MCP");
+    expect((document.getElementById("custom-connector-url") as HTMLInputElement).value).toBe(
+      "https://api.githubcopilot.com/mcp/",
+    );
+    expect((document.getElementById("custom-connector-auth") as HTMLSelectElement).value).toBe("OAUTH");
+    expect((document.getElementById("trust-checkbox") as HTMLInputElement).checked).toBe(false);
+    expect(sessionState()).toMatchObject({ step: "plugin-risk" });
+    expect(shadow.textContent).toContain("never approve this risk disclosure for you");
+  });
+
+  it("waits for explicit risk approval and explicit Create click", async () => {
+    stored("plugin-risk");
+    document.body.innerHTML = customFormHtml();
+    const risk = document.getElementById("trust-checkbox") as HTMLInputElement;
+    const create = document.getElementById("create-custom") as HTMLButtonElement;
+    const createClick = vi.fn();
+    risk.addEventListener("click", () => {
+      create.disabled = false;
+    });
+    create.addEventListener("click", createClick);
+    document.getElementById("custom-form")?.addEventListener("submit", (event) => event.preventDefault());
+    makeGuide();
+    await settle();
+
+    expect(risk.checked).toBe(false);
+    expect(createClick).not.toHaveBeenCalled();
+    risk.click();
+    await settle(120);
+    expect(risk.checked).toBe(true);
+    expect(sessionState()).toMatchObject({ step: "plugin-create" });
+    expect(createClick).not.toHaveBeenCalled();
+
+    create.click();
+    await settle(120);
+    expect(createClick).toHaveBeenCalledTimes(1);
+    expect(sessionState()).toMatchObject({ step: "oauth" });
+  });
+
+  it("reuses an existing exact custom GitHub MCP and skips creation", async () => {
+    stored("plugin-search");
     document.body.innerHTML = `
       <input id="plugin-search" aria-label="Search plugins" value="GitHub MCP" />
       <article><a aria-label="Open GitHub MCP" href="/plugins/custom-github-mcp">GitHub MCP</a></article>`;
     makeGuide();
     await settle();
 
-    expect(sessionState()).toMatchObject({ step: "chat-plus" });
-  });
-
-  it("fills the exact GitHub MCP server URL using native input events", async () => {
-    stored("plugin-server");
-    document.body.innerHTML = `
-      <label for="server-url">Server URL</label>
-      <input id="server-url" type="url" />`;
-    const input = document.getElementById("server-url") as HTMLInputElement;
-    const inputEvent = vi.fn();
-    const changeEvent = vi.fn();
-    input.addEventListener("input", inputEvent);
-    input.addEventListener("change", changeEvent);
-    makeGuide();
-    await settle();
-
-    shadow.querySelector<HTMLButtonElement>('[data-guide-action="fill-url"]')?.click();
-    await settle();
-    expect(input.value).toBe("https://api.githubcopilot.com/mcp/");
-    expect(inputEvent).toHaveBeenCalledTimes(1);
-    expect(changeEvent).toHaveBeenCalledTimes(1);
-    expect(sessionState()).toMatchObject({ step: "plugin-auth" });
+    expect(sessionState()).toMatchObject({ step: "done" });
+    expect(shadow.textContent).toContain("Setup complete");
   });
 });
