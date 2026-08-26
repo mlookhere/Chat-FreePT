@@ -12,6 +12,7 @@ import { cooldownRemainingMs, isActive, reduce } from "../common/state-machine";
 import { saveRun } from "../common/storage";
 import type { BgRequest, RunState, Settings } from "../common/types";
 import { clickSend, composerIsEmpty, insertPrompt } from "./composer";
+import { isExtensionContextInvalidated } from "./extension-context";
 import { scanPageSignals } from "./page-signals";
 import { healthCheck } from "./selectors";
 import { StreamWatcher } from "./stream-watch";
@@ -30,17 +31,23 @@ export class RunController {
   private lastSignal: string | null = null;
   private readonly onChange: (state: RunState) => void;
   private readonly onShowModal: () => void;
+  private readonly onContextInvalidated: () => void;
   private disposed = false;
 
   constructor(
     initial: RunState,
     settings: Settings,
-    hooks: { onChange: (state: RunState) => void; onShowModal: () => void },
+    hooks: {
+      onChange: (state: RunState) => void;
+      onShowModal: () => void;
+      onContextInvalidated?: () => void;
+    },
   ) {
     this.state = initial;
     this.settings = settings;
     this.onChange = hooks.onChange;
     this.onShowModal = hooks.onShowModal;
+    this.onContextInvalidated = hooks.onContextInvalidated ?? (() => undefined);
     this.watcher = new StreamWatcher(
       {
         onStart: () => this.dispatch({ type: "STREAM_STARTED" }),
@@ -60,12 +67,13 @@ export class RunController {
     this.watcher.stop();
     this.clearCooldownTimer();
     if (this.signalTimer !== undefined) clearInterval(this.signalTimer);
+    this.signalTimer = undefined;
   }
 
   /** A brand-new chat gets its real /c/<uuid> id after the first reply; adopt it in place. */
   adoptConversationId(conversationId: string): void {
     this.state = { ...this.state, conversationId };
-    void saveRun(this.state).catch((err) => log.warn("state save failed", err));
+    void saveRun(this.state).catch((err) => this.handleChromeFailure("state save failed", err));
   }
 
   dispatch(event: MachineEvent): void {
@@ -77,7 +85,7 @@ export class RunController {
     if (previousStatus === "cooldown" && state.status !== "cooldown") {
       this.clearCooldownTimer();
     }
-    void saveRun(state).catch((err) => log.warn("state save failed", err));
+    void saveRun(state).catch((err) => this.handleChromeFailure("state save failed", err));
     this.onChange(state);
     for (const effect of effects) void this.execute(effect);
   }
@@ -239,9 +247,19 @@ export class RunController {
   }
 
   private sendToBackground(message: BgRequest): void {
-    void chrome.runtime.sendMessage(message).catch((err) => {
-      log.debug("background message failed", err);
-    });
+    void chrome.runtime
+      .sendMessage(message)
+      .catch((err) => this.handleChromeFailure("background message failed", err, true));
+  }
+
+  private handleChromeFailure(message: string, error: unknown, debug = false): void {
+    if (isExtensionContextInvalidated(error)) {
+      this.dispose();
+      this.onContextInvalidated();
+      return;
+    }
+    if (debug) log.debug(message, error);
+    else log.warn(message, error);
   }
 }
 
