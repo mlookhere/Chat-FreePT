@@ -42,11 +42,16 @@ or rejected by authorization, STOP and report the exact missing capability class
 tell me to configure GitHub's official remote MCP in ChatGPT:
 
 1. Settings → Security and login → Developer mode: turn it on.
-2. Open https://chatgpt.com/plugins, select +, and create a developer-mode app for
-   https://api.githubcopilot.com/mcp/ using OAuth.
-3. In this conversation, open the Plus menu, choose Developer mode, and select that GitHub
-   app for the conversation.
-4. Authorize repository and workflow write access needed for this project.
+2. Open https://chatgpt.com/plugins, select + / Create app, and create a custom
+   developer-mode app named GitHub MCP using Server URL
+   https://api.githubcopilot.com/mcp/ and OAuth. Complete ChatGPT's explicit risk
+   acknowledgement and the GitHub authorization yourself.
+3. Return to this conversation and resume. Do not require a separate composer attachment
+   or a Developer mode → GitHub MCP menu item when the current ChatGPT UI does not expose
+   one; instead, run this capability preflight again and trust the tools actually available.
+4. If the remote MCP still does not expose the required repository/workflow write
+   capabilities after OAuth, report the exact missing capability classes rather than
+   substituting the ordinary GitHub plugin or pretending setup succeeded.
 
 Do not ask me to run shell commands or click GitHub controls. End with NEEDS_INPUT so I can
 finish only the ChatGPT/MCP setup and then resume.`;
