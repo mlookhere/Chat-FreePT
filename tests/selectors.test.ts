@@ -165,27 +165,28 @@ describe("composer and guided-setup targets", () => {
     );
   });
 
-  it("resolves the current Plugins search, Create app button, and only exact GitHub MCP result", () => {
+  it("resolves Plugins controls and only the dedicated Chat FreePT GitHub MCP result", () => {
     document.body.innerHTML = `
       <input id="plugin-search" placeholder="Search plugins" aria-label="Search plugins" value="GitHub" />
       <button aria-label="Create app"></button>
       <article><a aria-label="Open GitHub" href="/plugins/public-github">GitHub</a></article>
-      <article><a aria-label="Open GitHub MCP" href="/plugins/custom-github-mcp">GitHub MCP</a></article>`;
+      <article><a aria-label="Open GitHub MCP" href="/plugins/custom-github-mcp">GitHub MCP</a></article>
+      <article><a aria-label="Open Chat FreePT GitHub MCP" href="/plugins/custom-chat-freept-github-mcp">Chat FreePT GitHub MCP</a></article>`;
 
     expect(queryGuideTarget("pluginSearchInput")?.id).toBe("plugin-search");
     expect(queryGuideTarget("pluginAddButton")?.getAttribute("aria-label")).toBe("Create app");
     expect(queryGuideTarget("githubMcpPluginResult")?.getAttribute("aria-label")).toBe(
-      "Open GitHub MCP",
+      "Open Chat FreePT GitHub MCP",
     );
   });
 
-  it("does not mistake the public GitHub plugin for a custom GitHub MCP app", () => {
+  it("does not mistake public or legacy GitHub entries for the dedicated app", () => {
     document.body.innerHTML = `
       <input id="plugin-search" aria-label="Search plugins" value="GitHub" />
-      <article><a aria-label="Open GitHub" href="/plugins/public-github">GitHub</a></article>`;
+      <article><a aria-label="Open GitHub" href="/plugins/public-github">GitHub</a></article>
+      <article><a aria-label="Open GitHub MCP" href="/plugins/custom-github-mcp">GitHub MCP</a></article>`;
 
     expect(queryGuideTarget("githubMcpPluginResult")).toBeNull();
-    expect(queryGuideTarget("conversationGitHubMcp")).toBeNull();
   });
 
   it("prefers the exact current New Plugin form controls", () => {
@@ -198,7 +199,8 @@ describe("composer and guided-setup targets", () => {
             <button type="button" role="radio" aria-checked="false" aria-label="Tunnel">Tunnel</button>
           </div>
           <input id="custom-connector-url" inputmode="url" placeholder="https://example.com/sse" />
-          <select id="custom-connector-auth"><option value="OAUTH">OAuth</option></select>
+          <button role="combobox" aria-label="Authentication">No Auth</button>
+          <div role="option">OAuth</div>
           <label for="trust-checkbox"><input id="trust-checkbox" data-testid="trust-checkbox" type="checkbox" />I understand and want to continue</label>
           <button type="submit" disabled><div>Create</div></button>
         </form>
@@ -209,18 +211,21 @@ describe("composer and guided-setup targets", () => {
       "Server URL",
     );
     expect(queryGuideTarget("pluginServerInput")?.id).toBe("custom-connector-url");
-    expect(queryGuideTarget("pluginAuthControl")?.id).toBe("custom-connector-auth");
+    expect(queryGuideTarget("pluginAuthControl")?.getAttribute("aria-label")).toBe(
+      "Authentication",
+    );
+    expect(queryGuideTarget("pluginOauthOption")?.textContent).toBe("OAuth");
     expect(queryGuideTarget("pluginRiskCheckbox")?.id).toBe("trust-checkbox");
     expect(queryGuideTarget("pluginCreateButton")?.getAttribute("type")).toBe("submit");
   });
 
-  it("still resolves exact custom GitHub MCP if the conversation menu exposes it", () => {
+  it("still resolves either dedicated or legacy MCP names if a conversation menu exposes one", () => {
     document.body.innerHTML = `
       <div role="menu">
         <button role="menuitem">Developer mode</button>
-        <button role="menuitem">GitHub MCP</button>
+        <button role="menuitem">Chat FreePT GitHub MCP</button>
       </div>`;
     expect(queryGuideTarget("conversationDeveloperMode")?.textContent).toBe("Developer mode");
-    expect(queryGuideTarget("conversationGitHubMcp")?.textContent).toBe("GitHub MCP");
+    expect(queryGuideTarget("conversationGitHubMcp")?.textContent).toBe("Chat FreePT GitHub MCP");
   });
 });
