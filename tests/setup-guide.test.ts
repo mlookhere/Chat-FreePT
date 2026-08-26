@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SetupGuide } from "../src/content/ui/setup-guide";
 import { installChromeMock } from "./chrome-mock";
 
-const SESSION_KEY = "cfpt:setup-guide:v2";
+const SESSION_KEY = "cfpt:setup-guide:v4";
 let stores: ReturnType<typeof installChromeMock>;
 let shadow: ShadowRoot;
 let attachShadowSpy: ReturnType<typeof vi.spyOn>;
@@ -27,6 +27,29 @@ function makeGuide(): SetupGuide {
 
 async function settle(ms = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function customFormHtml(): string {
+  return `
+    <div id="modal-create-custom-connector">
+      <form id="custom-form">
+        <input id="custom-connector-name" aria-label="Name" />
+        <div role="radiogroup" aria-label="Connection">
+          <button type="button" role="radio" aria-label="Server URL" aria-checked="true">Server URL</button>
+          <button type="button" role="radio" aria-label="Tunnel" aria-checked="false">Tunnel</button>
+        </div>
+        <input id="custom-connector-url" inputmode="url" />
+        <select id="custom-connector-auth">
+          <option value="NONE">No Auth</option>
+          <option value="OAUTH">OAuth</option>
+        </select>
+        <label for="trust-checkbox">
+          <input id="trust-checkbox" data-testid="trust-checkbox" type="checkbox" />
+          I understand and want to continue
+        </label>
+        <button id="create-custom" type="submit" disabled><span>Create</span></button>
+      </form>
+    </div>`;
 }
 
 beforeEach(() => {
@@ -68,21 +91,17 @@ describe("setup guide tab isolation", () => {
     expect(stores.local["cfpt:setup-guide:v1"]).toMatchObject({ step: "developer-toggle" });
   });
 
-  it("highlights Security and login, then advances in the same tab session", async () => {
+  it("automatically opens Security and login in the same tab session", async () => {
     stored("security");
     document.body.innerHTML = '<button id="security">Security and login</button>';
+    const security = document.getElementById("security") as HTMLButtonElement;
+    const clicked = vi.fn();
+    security.addEventListener("click", clicked);
     makeGuide();
-    await settle();
+    await settle(160);
 
-    const ring = shadow.querySelector(".cfpt-guide-ring");
-    expect(shadow.querySelectorAll(".cfpt-guide-ring")).toHaveLength(1);
-    expect(ring?.classList.contains("cfpt-guide-hidden")).toBe(false);
-    expect(shadow.textContent).toContain("1 · Security and login");
-
-    document.getElementById("security")?.click();
-    await settle(100);
+    expect(clicked).toHaveBeenCalledTimes(1);
     expect(sessionState()).toMatchObject({ step: "developer" });
-    expect(ring?.classList.contains("cfpt-guide-hidden")).toBe(true);
   });
 
   it("keeps cancellation local to this tab session", async () => {
@@ -95,9 +114,6 @@ describe("setup guide tab isolation", () => {
     await settle();
     expect(sessionState()).toMatchObject({ active: false });
     expect(shadow.querySelector(".cfpt-guide-ring")?.classList.contains("cfpt-guide-hidden")).toBe(
-      true,
-    );
-    expect(shadow.querySelector(".cfpt-guide-card")?.classList.contains("cfpt-guide-hidden")).toBe(
       true,
     );
   });
@@ -150,11 +166,12 @@ describe("setup guide settings flow", () => {
     makeGuide();
     await settle();
 
-    expect(scroller.scrollTop).toBeGreaterThan(0);
-    expect(shadow.textContent).toContain("Developer mode is lower on this page");
+    // JSDOM does not clamp synthetic scrollTop like browsers; movement is the invariant.
+    expect(scroller.scrollTop).not.toBe(0);
+    expect(shadow.textContent).toContain("Developer mode");
   });
 
-  it("skips Developer mode when the semantic switch is already enabled", async () => {
+  it("skips the Developer switch when it is already enabled and opens Plugins", async () => {
     stored("developer-toggle");
     document.body.innerHTML = `
       <section>
@@ -164,75 +181,113 @@ describe("setup guide settings flow", () => {
     makeGuide();
     await settle();
 
-    expect(sessionState()).toMatchObject({ step: "plugins" });
-    expect(shadow.textContent).toContain("4 · Open Plugins");
+    expect(sessionState()).toMatchObject({ step: "plugin-search" });
   });
 
-  it("advances after a disabled Developer mode switch becomes enabled", async () => {
+  it("turns on Developer mode automatically after Follow along", async () => {
     stored("developer-toggle");
     document.body.innerHTML = `
       <section>
         <span>Developer mode</span>
         <button id="developer-switch" role="switch" aria-label="Developer mode" aria-checked="false"></button>
       </section>`;
-    const toggle = document.getElementById("developer-switch");
-    toggle?.addEventListener("click", () => toggle.setAttribute("aria-checked", "true"));
+    const toggle = document.getElementById("developer-switch") as HTMLButtonElement;
+    const clicked = vi.fn();
+    toggle.addEventListener("click", () => {
+      clicked();
+      toggle.setAttribute("aria-checked", "true");
+    });
     makeGuide();
-    await settle();
+    await settle(260);
 
-    expect(shadow.textContent).toContain("3 · Enable Developer mode");
-    toggle?.click();
-    await settle(150);
-    expect(sessionState()).toMatchObject({ step: "plugins" });
+    expect(clicked).toHaveBeenCalledTimes(1);
+    expect(sessionState()).toMatchObject({ step: "plugin-search" });
   });
 });
 
-describe("setup guide plugin flow", () => {
-  it("searches for the exact custom GitHub MCP app before offering Create app", async () => {
+describe("setup guide custom MCP automation", () => {
+  it("resumes on Plugins without any conversation composer", async () => {
+    stored("plugin-risk");
+    document.body.innerHTML = customFormHtml();
+    makeGuide();
+    await settle();
+
+    expect(document.getElementById("prompt-textarea")).toBeNull();
+    expect(shadow.textContent).toContain("Your approval required");
+    expect(sessionState()).toMatchObject({ step: "plugin-risk" });
+  });
+
+  it("searches, opens Create app, and fills all safe MCP fields automatically", async () => {
     stored("plugin-search");
     document.body.innerHTML = `
       <input id="plugin-search" aria-label="Search plugins" value="GitHub" />
-      <button aria-label="Create app"></button>`;
+      <button id="create-app" aria-label="Create app"></button>`;
+    const createApp = document.getElementById("create-app") as HTMLButtonElement;
+    createApp.addEventListener("click", () => {
+      document.body.insertAdjacentHTML("beforeend", customFormHtml());
+      const auth = document.getElementById("custom-connector-auth") as HTMLSelectElement;
+      auth.value = "NONE";
+      document
+        .getElementById("custom-form")
+        ?.addEventListener("submit", (event) => event.preventDefault());
+    });
+
     makeGuide();
-    await settle();
+    await settle(1100);
 
-    shadow.querySelector<HTMLButtonElement>('[data-guide-action="search-plugin"]')?.click();
-    await settle(300);
-
-    expect((document.getElementById("plugin-search") as HTMLInputElement).value).toBe("GitHub MCP");
-    expect(sessionState()).toMatchObject({ step: "plugin-add" });
-    expect(shadow.textContent).toContain("Create the app");
+    expect((document.getElementById("plugin-search") as HTMLInputElement).value).toBe(
+      "Chat FreePT GitHub MCP",
+    );
+    expect((document.getElementById("custom-connector-name") as HTMLInputElement).value).toBe(
+      "Chat FreePT GitHub MCP",
+    );
+    expect((document.getElementById("custom-connector-url") as HTMLInputElement).value).toBe(
+      "https://api.githubcopilot.com/mcp/x/all",
+    );
+    expect((document.getElementById("custom-connector-auth") as HTMLSelectElement).value).toBe(
+      "OAUTH",
+    );
+    expect((document.getElementById("trust-checkbox") as HTMLInputElement).checked).toBe(false);
+    expect(sessionState()).toMatchObject({ step: "plugin-risk" });
+    expect(shadow.textContent).toContain("never approve this risk disclosure for you");
   });
 
-  it("skips custom app creation when an existing GitHub MCP result is present", async () => {
-    stored("plugin-add");
-    document.body.innerHTML = `
-      <input id="plugin-search" aria-label="Search plugins" value="GitHub MCP" />
-      <article><a aria-label="Open GitHub MCP" href="/plugins/custom-github-mcp">GitHub MCP</a></article>`;
+  it("waits for explicit risk approval, then presses Create automatically", async () => {
+    stored("plugin-risk");
+    document.body.innerHTML = customFormHtml();
+    const risk = document.getElementById("trust-checkbox") as HTMLInputElement;
+    const create = document.getElementById("create-custom") as HTMLButtonElement;
+    const createClick = vi.fn();
+    risk.addEventListener("click", () => {
+      create.disabled = false;
+    });
+    create.addEventListener("click", createClick);
+    document
+      .getElementById("custom-form")
+      ?.addEventListener("submit", (event) => event.preventDefault());
     makeGuide();
     await settle();
 
-    expect(sessionState()).toMatchObject({ step: "chat-plus" });
+    expect(risk.checked).toBe(false);
+    expect(createClick).not.toHaveBeenCalled();
+
+    risk.click();
+    await settle(260);
+
+    expect(risk.checked).toBe(true);
+    expect(createClick).toHaveBeenCalledTimes(1);
+    expect(sessionState()).toMatchObject({ step: "oauth" });
   });
 
-  it("fills the exact GitHub MCP server URL using native input events", async () => {
-    stored("plugin-server");
+  it("reuses an existing exact Chat FreePT GitHub MCP and skips creation", async () => {
+    stored("plugin-search");
     document.body.innerHTML = `
-      <label for="server-url">Server URL</label>
-      <input id="server-url" type="url" />`;
-    const input = document.getElementById("server-url") as HTMLInputElement;
-    const inputEvent = vi.fn();
-    const changeEvent = vi.fn();
-    input.addEventListener("input", inputEvent);
-    input.addEventListener("change", changeEvent);
+      <input id="plugin-search" aria-label="Search plugins" value="Chat FreePT GitHub MCP" />
+      <article><a aria-label="Open Chat FreePT GitHub MCP" href="/plugins/custom-chat-freept-github-mcp">Chat FreePT GitHub MCP</a></article>`;
     makeGuide();
     await settle();
 
-    shadow.querySelector<HTMLButtonElement>('[data-guide-action="fill-url"]')?.click();
-    await settle();
-    expect(input.value).toBe("https://api.githubcopilot.com/mcp/");
-    expect(inputEvent).toHaveBeenCalledTimes(1);
-    expect(changeEvent).toHaveBeenCalledTimes(1);
-    expect(sessionState()).toMatchObject({ step: "plugin-auth" });
+    expect(sessionState()).toMatchObject({ step: "done" });
+    expect(shadow.textContent).toContain("Setup complete");
   });
 });

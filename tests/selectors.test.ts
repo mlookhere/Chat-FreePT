@@ -165,52 +165,67 @@ describe("composer and guided-setup targets", () => {
     );
   });
 
-  it("resolves the current Plugins search, Create app button, and only exact GitHub MCP result", () => {
+  it("resolves Plugins controls and only the dedicated Chat FreePT GitHub MCP result", () => {
     document.body.innerHTML = `
       <input id="plugin-search" placeholder="Search plugins" aria-label="Search plugins" value="GitHub" />
       <button aria-label="Create app"></button>
       <article><a aria-label="Open GitHub" href="/plugins/public-github">GitHub</a></article>
-      <article><a aria-label="Open GitHub MCP" href="/plugins/custom-github-mcp">GitHub MCP</a></article>`;
+      <article><a aria-label="Open GitHub MCP" href="/plugins/custom-github-mcp">GitHub MCP</a></article>
+      <article><a aria-label="Open Chat FreePT GitHub MCP" href="/plugins/custom-chat-freept-github-mcp">Chat FreePT GitHub MCP</a></article>`;
 
     expect(queryGuideTarget("pluginSearchInput")?.id).toBe("plugin-search");
     expect(queryGuideTarget("pluginAddButton")?.getAttribute("aria-label")).toBe("Create app");
     expect(queryGuideTarget("githubMcpPluginResult")?.getAttribute("aria-label")).toBe(
-      "Open GitHub MCP",
+      "Open Chat FreePT GitHub MCP",
     );
   });
 
-  it("does not mistake the public GitHub plugin for a custom GitHub MCP app", () => {
+  it("does not mistake public or legacy GitHub entries for the dedicated app", () => {
     document.body.innerHTML = `
       <input id="plugin-search" aria-label="Search plugins" value="GitHub" />
-      <article><a aria-label="Open GitHub" href="/plugins/public-github">GitHub</a></article>`;
+      <article><a aria-label="Open GitHub" href="/plugins/public-github">GitHub</a></article>
+      <article><a aria-label="Open GitHub MCP" href="/plugins/custom-github-mcp">GitHub MCP</a></article>`;
 
     expect(queryGuideTarget("githubMcpPluginResult")).toBeNull();
   });
 
-  it("resolves every field in the developer app form", () => {
+  it("prefers the exact current New Plugin form controls", () => {
     document.body.innerHTML = `
-      <button aria-label="Create app">+</button>
-      <label for="plugin-name">Name</label><input id="plugin-name" />
-      <label for="server-url">Server URL</label><input id="server-url" type="url" />
-      <label for="auth">Authentication</label><select id="auth"><option>OAuth</option></select>
-      <label><span>I understand the risks and want to continue</span><input id="risk" type="checkbox" /></label>
-      <button>Create</button>`;
+      <div id="modal-create-custom-connector">
+        <form>
+          <input id="custom-connector-name" aria-label="Name" placeholder="Custom Tool" />
+          <div role="radiogroup" aria-label="Connection">
+            <button type="button" role="radio" aria-checked="true" aria-label="Server URL">Server URL</button>
+            <button type="button" role="radio" aria-checked="false" aria-label="Tunnel">Tunnel</button>
+          </div>
+          <input id="custom-connector-url" inputmode="url" placeholder="https://example.com/sse" />
+          <button role="combobox" aria-label="Authentication">No Auth</button>
+          <div role="option">OAuth</div>
+          <label for="trust-checkbox"><input id="trust-checkbox" data-testid="trust-checkbox" type="checkbox" />I understand and want to continue</label>
+          <button type="submit" disabled><div>Create</div></button>
+        </form>
+      </div>`;
 
-    expect(queryGuideTarget("pluginAddButton")?.getAttribute("aria-label")).toBe("Create app");
-    expect(queryGuideTarget("pluginNameInput")?.id).toBe("plugin-name");
-    expect(queryGuideTarget("pluginServerInput")?.id).toBe("server-url");
-    expect(queryGuideTarget("pluginAuthControl")?.id).toBe("auth");
-    expect(queryGuideTarget("pluginRiskCheckbox")?.id).toBe("risk");
-    expect(queryGuideTarget("pluginCreateButton")?.textContent).toBe("Create");
+    expect(queryGuideTarget("pluginNameInput")?.id).toBe("custom-connector-name");
+    expect(queryGuideTarget("pluginServerUrlOption")?.getAttribute("aria-label")).toBe(
+      "Server URL",
+    );
+    expect(queryGuideTarget("pluginServerInput")?.id).toBe("custom-connector-url");
+    expect(queryGuideTarget("pluginAuthControl")?.getAttribute("aria-label")).toBe(
+      "Authentication",
+    );
+    expect(queryGuideTarget("pluginOauthOption")?.textContent).toBe("OAuth");
+    expect(queryGuideTarget("pluginRiskCheckbox")?.id).toBe("trust-checkbox");
+    expect(queryGuideTarget("pluginCreateButton")?.getAttribute("type")).toBe("submit");
   });
 
-  it("resolves Developer mode and GitHub MCP choices in the conversation menu", () => {
+  it("still resolves either dedicated or legacy MCP names if a conversation menu exposes one", () => {
     document.body.innerHTML = `
       <div role="menu">
         <button role="menuitem">Developer mode</button>
-        <button role="menuitem">GitHub MCP</button>
+        <button role="menuitem">Chat FreePT GitHub MCP</button>
       </div>`;
     expect(queryGuideTarget("conversationDeveloperMode")?.textContent).toBe("Developer mode");
-    expect(queryGuideTarget("conversationGitHubMcp")?.textContent).toBe("GitHub MCP");
+    expect(queryGuideTarget("conversationGitHubMcp")?.textContent).toBe("Chat FreePT GitHub MCP");
   });
 });

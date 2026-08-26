@@ -27,8 +27,10 @@ export type GuideTargetId =
   | "pluginAddButton"
   | "githubMcpPluginResult"
   | "pluginNameInput"
+  | "pluginServerUrlOption"
   | "pluginServerInput"
   | "pluginAuthControl"
+  | "pluginOauthOption"
   | "pluginRiskCheckbox"
   | "pluginCreateButton"
   | "conversationDeveloperMode"
@@ -240,15 +242,15 @@ const GUIDE_RESOLVERS: Record<GuideTargetId, () => HTMLElement | null> = {
   pluginSearchInput,
   pluginAddButton,
   githubMcpPluginResult,
-  pluginNameInput: () => fieldNearLabel(/^(Name|Plugin name)$/i, "input"),
-  pluginServerInput: () =>
-    fieldNearLabel(/(Server URL|Remote MCP|MCP server URL)/i, 'input[type="url"], input'),
-  pluginAuthControl: () => fieldNearLabel(/Authentication/i, 'select, [role="combobox"], button'),
-  pluginRiskCheckbox: () =>
-    controlNearText(/I understand.*continue/i, 'input[type="checkbox"], [role="checkbox"]'),
-  pluginCreateButton: () => clickableText(/^Create$/i),
+  pluginNameInput,
+  pluginServerUrlOption,
+  pluginServerInput,
+  pluginAuthControl,
+  pluginOauthOption,
+  pluginRiskCheckbox,
+  pluginCreateButton,
   conversationDeveloperMode: () => clickableText(/^Developer mode$/i),
-  conversationGitHubMcp: () => clickableText(/^GitHub MCP$/i) ?? clickableText(/^GitHub$/i),
+  conversationGitHubMcp: () => clickableText(/^(Chat FreePT GitHub MCP|GitHub MCP)$/i),
 };
 
 export function queryGuideTarget(id: GuideTargetId): HTMLElement | null {
@@ -330,10 +332,62 @@ function pluginAddButton(): HTMLElement | null {
 
 function githubMcpPluginResult(): HTMLElement | null {
   const labeled = document.querySelector<HTMLElement>(
-    'a[aria-label="Open GitHub MCP"], button[aria-label="Open GitHub MCP"]',
+    'a[aria-label="Open Chat FreePT GitHub MCP"], button[aria-label="Open Chat FreePT GitHub MCP"]',
   );
   if (labeled) return labeled;
-  return clickableText(/^GitHub MCP$/i);
+  return clickableText(/^Chat FreePT GitHub MCP$/i);
+}
+
+function pluginNameInput(): HTMLElement | null {
+  return (document.getElementById("custom-connector-name") ??
+    fieldNearLabel(/^(Name|Plugin name)$/i, "input")) as HTMLElement | null;
+}
+
+function pluginServerUrlOption(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    '[role="radio"][aria-label="Server URL"], button[aria-label="Server URL"]',
+  );
+}
+
+function pluginServerInput(): HTMLElement | null {
+  return (document.getElementById("custom-connector-url") ??
+    fieldNearLabel(
+      /(Server URL|Remote MCP|MCP server URL)/i,
+      'input[type="url"], input',
+    )) as HTMLElement | null;
+}
+
+function pluginAuthControl(): HTMLElement | null {
+  return (document.getElementById("custom-connector-auth") ??
+    document.querySelector<HTMLElement>(
+      'select[aria-label*="Authentication" i], [role="combobox"][aria-label*="Authentication" i], button[aria-label*="Authentication" i]',
+    ) ??
+    fieldNearLabel(/Authentication/i, 'select, [role="combobox"], button')) as HTMLElement | null;
+}
+
+function pluginOauthOption(): HTMLElement | null {
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      '[role="option"], [role="menuitem"], [role="menuitemradio"], button',
+    ),
+  );
+  const exact = candidates.filter((element) => /^OAuth$/i.test((element.textContent ?? "").trim()));
+  exact.sort((a, b) => a.children.length - b.children.length);
+  return exact[0] ?? null;
+}
+
+function pluginRiskCheckbox(): HTMLElement | null {
+  return (document.getElementById("trust-checkbox") ??
+    controlNearText(
+      /I understand.*continue/i,
+      'input[type="checkbox"], [role="checkbox"]',
+    )) as HTMLElement | null;
+}
+
+function pluginCreateButton(): HTMLElement | null {
+  const modal = document.getElementById("modal-create-custom-connector");
+  const submit = modal?.querySelector<HTMLElement>('button[type="submit"]');
+  return submit ?? clickableText(/^Create$/i);
 }
 
 function clickableText(pattern: RegExp): HTMLElement | null {

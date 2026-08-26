@@ -41,15 +41,27 @@ export const DEVELOPER_MODE_SETUP_BLOCK = `If a required capability is missing, 
 or rejected by authorization, STOP and report the exact missing capability classes. Then
 tell me to configure GitHub's official remote MCP in ChatGPT:
 
-1. Settings → Security and login → Developer mode: turn it on.
-2. Open https://chatgpt.com/plugins, select +, and create a developer-mode app for
-   https://api.githubcopilot.com/mcp/ using OAuth.
-3. In this conversation, open the Plus menu, choose Developer mode, and select that GitHub
-   app for the conversation.
-4. Authorize repository and workflow write access needed for this project.
+1. Start Chat FreePT's GitHub setup and choose Follow along. The extension should open
+   Settings → Security and login, enable Developer mode when the host permits it, and open
+   Plugins automatically. If ChatGPT presents an additional security confirmation, I must
+   approve it myself.
+2. In https://chatgpt.com/plugins, create or reuse the dedicated custom app named
+   Chat FreePT GitHub MCP. Use Server URL
+   https://api.githubcopilot.com/mcp/x/all and OAuth. GitHub documents /x/all as the remote
+   endpoint exposing all available MCP toolsets, which is appropriate for this release-engineering
+   workflow because repository, Issue, label, pull-request, Git and Actions capabilities are required.
+3. The extension may fill the safe fields and press Create after I explicitly check
+   ChatGPT's custom-MCP risk acknowledgement. It must never check that acknowledgement for me
+   or bypass GitHub OAuth. Complete the GitHub authorization myself.
+4. Return to this conversation and resume. Do not require a separate composer attachment
+   or a Developer mode → GitHub MCP menu item when the current ChatGPT UI does not expose
+   one; instead, run this capability preflight again and trust the tools actually available.
+5. If the remote MCP still does not expose the required repository/workflow write
+   capabilities after OAuth, report the exact missing capability classes rather than
+   substituting the ordinary GitHub plugin or pretending setup succeeded.
 
 Do not ask me to run shell commands or click GitHub controls. End with NEEDS_INPUT so I can
-finish only the ChatGPT/MCP setup and then resume.`;
+finish only the explicit ChatGPT/GitHub consent step and then resume.`;
 
 const CORE_MCP_REQUIREMENTS = `Core capabilities required in both modes (tool names may
 differ; match capabilities semantically): read repositories/files/trees; create branches;
