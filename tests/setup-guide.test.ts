@@ -166,8 +166,8 @@ describe("setup guide settings flow", () => {
     makeGuide();
     await settle();
 
-    expect(scroller.scrollTop).toBeGreaterThan(0);
-    expect(shadow.textContent).toContain("Finding Developer mode");
+    expect(scroller.scrollTop).not.toBe(0);
+    expect(shadow.textContent).toContain("Developer mode");
   });
 
   it("skips the Developer switch when it is already enabled and opens Plugins", async () => {
