@@ -67,11 +67,18 @@ describe("plan prompt", () => {
     expect(existing).toMatch(/only for labels that are actually\s+missing/);
   });
 
-  it("uses current Developer Mode setup and does not require default-branch mutation", () => {
+  it("uses the current custom MCP setup flow and does not require default-branch mutation", () => {
     const prompt = buildPlanPrompt(planInput);
     expect(prompt).toContain("Settings → Security and login → Developer mode");
     expect(prompt).toContain("https://chatgpt.com/plugins");
+    expect(prompt).toContain("Create app");
+    expect(prompt).toContain("GitHub MCP");
+    expect(prompt).toContain("Server URL");
     expect(prompt).toContain("https://api.githubcopilot.com/mcp/");
+    expect(prompt).toContain("OAuth");
+    expect(prompt).toContain("run this capability preflight again");
+    expect(prompt).not.toContain("open the Plus menu");
+    expect(prompt).not.toContain("choose Developer mode, and select");
     expect(prompt).toContain("Repository default-branch mutation is NOT required");
     expect(prompt).toContain("Do NOT require changing the repository default branch");
     expect(prompt).not.toContain("set dev as the default branch");
