@@ -13,15 +13,18 @@ import type { RunState, Settings } from "../common/types";
 import type { ContentRequest } from "../common/types";
 import { createExtensionContextGuard } from "./extension-context";
 import { conversationIdFromUrl, watchNavigation } from "./navigation";
+import { chatGptPageMode, type ChatGptPageMode } from "./page-mode";
 import { RunController } from "./run-controller";
 import { require_ } from "./selectors";
 import { Panel } from "./ui/panel";
+import { SetupGuide } from "./ui/setup-guide";
 
 const HEARTBEAT_MS = 5000;
 const TAKEOVER_RETRY_MS = 5000;
 const tabNonce = crypto.randomUUID();
 
 let panel: Panel | null = null;
+let standaloneGuide: SetupGuide | null = null;
 let controller: RunController | null = null;
 let currentConvId = "";
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
@@ -53,6 +56,8 @@ function shutdownInvalidatedContext(): void {
   controller = null;
   panel?.dispose();
   panel = null;
+  standaloneGuide?.dispose();
+  standaloneGuide = null;
 }
 
 function reportAsyncFailure(message: string, error: unknown): void {
@@ -156,7 +161,7 @@ async function tryTakeover(conversationId: string): Promise<void> {
 function loseOwnership(conversationId: string): void {
   if (contextGuard.invalidated || !controller || conversationId !== currentConvId) return;
   const state = controller.state;
-  log.warn("conversation ownership moved to another tab; becoming passive");
+  log.info("conversation ownership moved to another tab; becoming passive");
   enterPassive(state);
 }
 
@@ -173,7 +178,7 @@ async function initConversation(convId: string): Promise<void> {
   const locked = await acquireTabLock(convId, tabNonce);
   if (contextGuard.invalidated) return;
   if (!locked) {
-    log.warn("another tab is driving this conversation; staying passive");
+    log.info("another tab is driving this conversation; staying passive");
     enterPassive(state);
     return;
   }
@@ -181,8 +186,55 @@ async function initConversation(convId: string): Promise<void> {
   startController(state, settings);
 }
 
-async function onNavigate(href: string): Promise<void> {
+function ensureStandaloneGuide(mode: ChatGptPageMode): void {
+  if (mode !== "plugins" || panel || standaloneGuide || contextGuard.invalidated) return;
+  standaloneGuide = new SetupGuide();
+}
+
+function clearStandaloneGuide(): void {
+  standaloneGuide?.dispose();
+  standaloneGuide = null;
+}
+
+async function leaveConversationForUtilityPage(mode: ChatGptPageMode): Promise<void> {
+  stopTakeoverRetry();
+  controller?.dispose();
+  controller = null;
+  stopHeartbeat();
+  const previous = currentConvId;
+  currentConvId = "";
+  await releaseOwnedLock(previous);
   if (contextGuard.invalidated) return;
+  ensureStandaloneGuide(mode);
+  log.debug(`Chat FreePT idle on expected non-composer route (${mode})`);
+}
+
+async function activateComposerPage(): Promise<void> {
+  if (contextGuard.invalidated || panel) return;
+  clearStandaloneGuide();
+  try {
+    await require_("composer", 45000, 500);
+  } catch {
+    const mode = chatGptPageMode(location.href);
+    if (mode !== "composer") {
+      ensureStandaloneGuide(mode);
+      log.debug(`Chat FreePT idle on expected non-composer route (${mode})`);
+      return;
+    }
+    log.warn("composer never appeared; Chat FreePT idle (logged out or layout change?)");
+    return;
+  }
+  if (contextGuard.invalidated || chatGptPageMode(location.href) !== "composer" || panel) return;
+
+  panel = new Panel({
+    onEvent: (event) => controller?.dispatch(event),
+    getHandoffPrompt: () => (controller ? buildHandoffPrompt(controller.state) : ""),
+  });
+  await initConversation(conversationKeyFromLocation());
+  if (!contextGuard.invalidated) log.info("Chat FreePT ready");
+}
+
+async function onComposerNavigate(href: string): Promise<void> {
   const urlConv = conversationIdFromUrl(href);
 
   if (urlConv && currentConvId.startsWith("pending:") && controller) {
@@ -207,7 +259,7 @@ async function onNavigate(href: string): Promise<void> {
       if (contextGuard.invalidated) return;
       currentConvId = urlConv;
       const state = (await loadRun(urlConv)) ?? newRunState(urlConv, Date.now());
-      log.warn("another tab owns the permanent conversation id; staying passive");
+      log.info("another tab owns the permanent conversation id; staying passive");
       enterPassive(state);
       return;
     }
@@ -232,20 +284,21 @@ async function onNavigate(href: string): Promise<void> {
   await initConversation(urlConv ?? `pending:${crypto.randomUUID()}`);
 }
 
-async function boot(): Promise<void> {
-  try {
-    await require_("composer", 45000, 500);
-  } catch {
-    log.warn("composer never appeared; Chat FreePT idle (logged out or layout change?)");
+async function onNavigate(href: string): Promise<void> {
+  if (contextGuard.invalidated) return;
+  const mode = chatGptPageMode(href);
+  if (mode !== "composer") {
+    await leaveConversationForUtilityPage(mode);
     return;
   }
-  if (contextGuard.invalidated) return;
+  if (!panel) {
+    await activateComposerPage();
+    return;
+  }
+  await onComposerNavigate(href);
+}
 
-  panel = new Panel({
-    onEvent: (event) => controller?.dispatch(event),
-    getHandoffPrompt: () => (controller ? buildHandoffPrompt(controller.state) : ""),
-  });
-
+function installLifecycleListeners(): void {
   chrome.runtime.onMessage.addListener((message: ContentRequest) => {
     if (message.type === "toggle-panel") panel?.toggle();
   });
@@ -261,8 +314,17 @@ async function boot(): Promise<void> {
   stopNavigation = watchNavigation((href) => {
     void onNavigate(href).catch((error) => reportAsyncFailure("navigation handling failed", error));
   });
-  await initConversation(conversationKeyFromLocation());
-  if (!contextGuard.invalidated) log.info("Chat FreePT ready");
+}
+
+async function boot(): Promise<void> {
+  installLifecycleListeners();
+  const mode = chatGptPageMode(location.href);
+  if (mode !== "composer") {
+    ensureStandaloneGuide(mode);
+    log.debug(`Chat FreePT idle on expected non-composer route (${mode})`);
+    return;
+  }
+  await activateComposerPage();
 }
 
 void boot().catch((error) => reportAsyncFailure("Chat FreePT boot failed", error));
