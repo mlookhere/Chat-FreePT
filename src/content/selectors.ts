@@ -30,6 +30,7 @@ export type GuideTargetId =
   | "pluginServerUrlOption"
   | "pluginServerInput"
   | "pluginAuthControl"
+  | "pluginOauthOption"
   | "pluginRiskCheckbox"
   | "pluginCreateButton"
   | "conversationDeveloperMode"
@@ -245,10 +246,11 @@ const GUIDE_RESOLVERS: Record<GuideTargetId, () => HTMLElement | null> = {
   pluginServerUrlOption,
   pluginServerInput,
   pluginAuthControl,
+  pluginOauthOption,
   pluginRiskCheckbox,
   pluginCreateButton,
   conversationDeveloperMode: () => clickableText(/^Developer mode$/i),
-  conversationGitHubMcp: () => clickableText(/^GitHub MCP$/i),
+  conversationGitHubMcp: () => clickableText(/^(Chat FreePT GitHub MCP|GitHub MCP)$/i),
 };
 
 export function queryGuideTarget(id: GuideTargetId): HTMLElement | null {
@@ -330,10 +332,10 @@ function pluginAddButton(): HTMLElement | null {
 
 function githubMcpPluginResult(): HTMLElement | null {
   const labeled = document.querySelector<HTMLElement>(
-    'a[aria-label="Open GitHub MCP"], button[aria-label="Open GitHub MCP"]',
+    'a[aria-label="Open Chat FreePT GitHub MCP"], button[aria-label="Open Chat FreePT GitHub MCP"]',
   );
   if (labeled) return labeled;
-  return clickableText(/^GitHub MCP$/i);
+  return clickableText(/^Chat FreePT GitHub MCP$/i);
 }
 
 function pluginNameInput(): HTMLElement | null {
@@ -358,6 +360,15 @@ function pluginServerInput(): HTMLElement | null {
 function pluginAuthControl(): HTMLElement | null {
   return (document.getElementById("custom-connector-auth") ??
     fieldNearLabel(/Authentication/i, 'select, [role="combobox"], button')) as HTMLElement | null;
+}
+
+function pluginOauthOption(): HTMLElement | null {
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLElement>('[role="option"], [role="menuitem"], [role="menuitemradio"], button'),
+  );
+  const exact = candidates.filter((element) => /^OAuth$/i.test((element.textContent ?? "").trim()));
+  exact.sort((a, b) => a.children.length - b.children.length);
+  return exact[0] ?? null;
 }
 
 function pluginRiskCheckbox(): HTMLElement | null {
