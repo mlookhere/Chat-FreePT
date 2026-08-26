@@ -185,26 +185,36 @@ describe("composer and guided-setup targets", () => {
       <article><a aria-label="Open GitHub" href="/plugins/public-github">GitHub</a></article>`;
 
     expect(queryGuideTarget("githubMcpPluginResult")).toBeNull();
+    expect(queryGuideTarget("conversationGitHubMcp")).toBeNull();
   });
 
-  it("resolves every field in the developer app form", () => {
+  it("prefers the exact current New Plugin form controls", () => {
     document.body.innerHTML = `
-      <button aria-label="Create app">+</button>
-      <label for="plugin-name">Name</label><input id="plugin-name" />
-      <label for="server-url">Server URL</label><input id="server-url" type="url" />
-      <label for="auth">Authentication</label><select id="auth"><option>OAuth</option></select>
-      <label><span>I understand the risks and want to continue</span><input id="risk" type="checkbox" /></label>
-      <button>Create</button>`;
+      <div id="modal-create-custom-connector">
+        <form>
+          <input id="custom-connector-name" aria-label="Name" placeholder="Custom Tool" />
+          <div role="radiogroup" aria-label="Connection">
+            <button type="button" role="radio" aria-checked="true" aria-label="Server URL">Server URL</button>
+            <button type="button" role="radio" aria-checked="false" aria-label="Tunnel">Tunnel</button>
+          </div>
+          <input id="custom-connector-url" inputmode="url" placeholder="https://example.com/sse" />
+          <select id="custom-connector-auth"><option value="OAUTH">OAuth</option></select>
+          <label for="trust-checkbox"><input id="trust-checkbox" data-testid="trust-checkbox" type="checkbox" />I understand and want to continue</label>
+          <button type="submit" disabled><div>Create</div></button>
+        </form>
+      </div>`;
 
-    expect(queryGuideTarget("pluginAddButton")?.getAttribute("aria-label")).toBe("Create app");
-    expect(queryGuideTarget("pluginNameInput")?.id).toBe("plugin-name");
-    expect(queryGuideTarget("pluginServerInput")?.id).toBe("server-url");
-    expect(queryGuideTarget("pluginAuthControl")?.id).toBe("auth");
-    expect(queryGuideTarget("pluginRiskCheckbox")?.id).toBe("risk");
-    expect(queryGuideTarget("pluginCreateButton")?.textContent).toBe("Create");
+    expect(queryGuideTarget("pluginNameInput")?.id).toBe("custom-connector-name");
+    expect(queryGuideTarget("pluginServerUrlOption")?.getAttribute("aria-label")).toBe(
+      "Server URL",
+    );
+    expect(queryGuideTarget("pluginServerInput")?.id).toBe("custom-connector-url");
+    expect(queryGuideTarget("pluginAuthControl")?.id).toBe("custom-connector-auth");
+    expect(queryGuideTarget("pluginRiskCheckbox")?.id).toBe("trust-checkbox");
+    expect(queryGuideTarget("pluginCreateButton")?.getAttribute("type")).toBe("submit");
   });
 
-  it("resolves Developer mode and GitHub MCP choices in the conversation menu", () => {
+  it("still resolves exact custom GitHub MCP if the conversation menu exposes it", () => {
     document.body.innerHTML = `
       <div role="menu">
         <button role="menuitem">Developer mode</button>
