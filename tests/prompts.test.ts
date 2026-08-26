@@ -67,15 +67,16 @@ describe("plan prompt", () => {
     expect(existing).toMatch(/only for labels that are actually\s+missing/);
   });
 
-  it("uses the current custom MCP setup flow and does not require default-branch mutation", () => {
+  it("uses the automated full-toolset custom MCP flow and does not require default-branch mutation", () => {
     const prompt = buildPlanPrompt(planInput);
-    expect(prompt).toContain("Settings → Security and login → Developer mode");
+    expect(prompt).toContain("Settings → Security and login");
     expect(prompt).toContain("https://chatgpt.com/plugins");
-    expect(prompt).toContain("Create app");
-    expect(prompt).toContain("GitHub MCP");
+    expect(prompt).toContain("Chat FreePT GitHub MCP");
     expect(prompt).toContain("Server URL");
-    expect(prompt).toContain("https://api.githubcopilot.com/mcp/");
+    expect(prompt).toContain("https://api.githubcopilot.com/mcp/x/all");
+    expect(prompt).toContain("all available MCP toolsets");
     expect(prompt).toContain("OAuth");
+    expect(prompt).toContain("press Create after I explicitly check");
     expect(prompt).toContain("run this capability preflight again");
     expect(prompt).not.toContain("open the Plus menu");
     expect(prompt).not.toContain("choose Developer mode, and select");
