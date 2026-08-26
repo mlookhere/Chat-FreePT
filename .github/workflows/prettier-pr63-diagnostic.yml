@@ -1,0 +1,40 @@
+name: Prettier PR63 diagnostic
+
+on:
+  pull_request:
+    branches:
+      - work/62-mcp-setup-accessibility
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: npm ci --no-audit --no-fund
+      - name: Apply repository Prettier
+        run: >-
+          npx prettier --write
+          src/content/page-mode.ts
+          src/content/selectors.ts
+          src/content/ui/setup-guide.ts
+          tests/setup-guide.test.ts
+      - name: Stage formatter artifact
+        run: |
+          mkdir -p artifacts/prettier/src/content/ui artifacts/prettier/src/content artifacts/prettier/tests
+          cp src/content/page-mode.ts artifacts/prettier/src/content/page-mode.ts
+          cp src/content/selectors.ts artifacts/prettier/src/content/selectors.ts
+          cp src/content/ui/setup-guide.ts artifacts/prettier/src/content/ui/setup-guide.ts
+          cp tests/setup-guide.test.ts artifacts/prettier/tests/setup-guide.test.ts
+      - name: Upload exact formatter output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: prettier-pr63-${{ github.run_id }}
+          path: artifacts/prettier/
+          if-no-files-found: error
+          retention-days: 1
