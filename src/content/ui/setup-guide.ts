@@ -27,11 +27,12 @@ interface GuideCopy {
   actions: string;
 }
 
-const SESSION_KEY = "cfpt:setup-guide:v3";
-const MCP_URL = "https://api.githubcopilot.com/mcp/";
+const SESSION_KEY = "cfpt:setup-guide:v4";
+const MCP_URL = "https://api.githubcopilot.com/mcp/x/all";
 const PLUGINS_URL = "https://chatgpt.com/plugins";
-const APP_NAME = "GitHub MCP";
+const APP_NAME = "Chat FreePT GitHub MCP";
 const SCROLL_RETRY_MS = 150;
+const SEARCH_SETTLE_MS = 800;
 
 const GUIDE_STEPS = new Set<SetupGuideStep>([
   "security",
@@ -203,11 +204,13 @@ export class SetupGuide {
   private readonly onViewportChange = (): void => this.render();
 
   private readonly onPageClick = (event: Event): void => {
-    if (!this.active) return;
+    if (!this.active || this.step !== "plugin-risk") return;
     const target = this.currentTarget();
     const clicked = event.target instanceof Node ? event.target : null;
     if (!target || !clicked || !target.contains(clicked)) return;
-    this.afterTargetClick(target);
+    setTimeout(() => {
+      if (isControlEnabled(target)) void this.setStep("plugin-create");
+    }, 80);
   };
 
   private restore(): void {
@@ -265,23 +268,56 @@ export class SetupGuide {
   }
 
   private advanceSettingsStep(): boolean {
+    if (this.step === "security") return this.advanceSecurity();
+    if (this.step === "developer") return this.advanceDeveloperRow();
+    if (this.step === "developer-toggle") return this.advanceDeveloperToggle();
+    return false;
+  }
+
+  private advanceSecurity(): boolean {
     const toggle = queryGuideTarget("developerModeToggle");
-    if (this.step === "security" && toggle) {
-      void this.setStep("developer");
+    if (toggle) {
+      void this.setStep("developer-toggle");
       return true;
     }
-    if ((this.step === "developer" || this.step === "developer-toggle") && toggle) {
-      if (isControlEnabled(toggle)) {
-        void this.setStep("plugins");
-        return true;
-      }
+    const security = queryGuideTarget("settingsSecurity");
+    if (!security) return false;
+    this.runOnce("security", () => {
+      security.click();
+      setTimeout(() => {
+        if (this.step === "security") void this.setStep("developer");
+      }, 120);
+    });
+    return false;
+  }
+
+  private advanceDeveloperRow(): boolean {
+    const toggle = queryGuideTarget("developerModeToggle");
+    if (!toggle) return false;
+    void this.setStep("developer-toggle");
+    return true;
+  }
+
+  private advanceDeveloperToggle(): boolean {
+    const toggle = queryGuideTarget("developerModeToggle");
+    if (!toggle) return false;
+    if (isControlEnabled(toggle)) {
+      this.openPlugins();
+      return true;
     }
+    this.runOnce("developer-toggle", () => {
+      toggle.click();
+      setTimeout(() => this.render(), 180);
+    });
     return false;
   }
 
   private advancePluginStep(): boolean {
     if (this.existingPluginCompletesSetup()) return true;
     switch (this.step) {
+      case "plugins":
+        this.runOnce("plugins", () => this.openPlugins());
+        return false;
       case "plugin-search":
         return this.autoSearchForPlugin();
       case "plugin-add":
@@ -292,15 +328,20 @@ export class SetupGuide {
         return this.autoFillServer();
       case "plugin-auth":
         return this.autoSelectOauth();
-      case "plugin-risk": {
-        const risk = queryGuideTarget("pluginRiskCheckbox");
-        if (!risk || !isControlEnabled(risk)) return false;
-        void this.setStep("plugin-create");
-        return true;
-      }
+      case "plugin-risk":
+        return this.advanceRiskApproval();
+      case "plugin-create":
+        return this.autoCreateAfterApproval();
       default:
         return false;
     }
+  }
+
+  private advanceRiskApproval(): boolean {
+    const risk = queryGuideTarget("pluginRiskCheckbox");
+    if (!risk || !isControlEnabled(risk)) return false;
+    void this.setStep("plugin-create");
+    return true;
   }
 
   private existingPluginCompletesSetup(): boolean {
@@ -314,23 +355,30 @@ export class SetupGuide {
 
   private autoSearchForPlugin(): boolean {
     const search = queryGuideTarget("pluginSearchInput");
-    if (!(search instanceof HTMLInputElement || search instanceof HTMLTextAreaElement))
+    if (!(search instanceof HTMLInputElement || search instanceof HTMLTextAreaElement)) {
       return false;
+    }
     if (fieldValue(search).trim().toLowerCase() !== APP_NAME.toLowerCase()) {
       setNativeValue(search, APP_NAME);
     }
-    return this.oncePerStep("plugin-search", () => {
-      setTimeout(() => void this.setStep("plugin-add"), 300);
+    this.runOnce("plugin-search", () => {
+      setTimeout(() => {
+        if (this.step === "plugin-search") void this.setStep("plugin-add");
+      }, SEARCH_SETTLE_MS);
     });
+    return false;
   }
 
   private autoOpenCreateForm(): boolean {
     const create = queryGuideTarget("pluginAddButton");
     if (!create) return false;
-    return this.oncePerStep("plugin-add", () => {
+    this.runOnce("plugin-add", () => {
       create.click();
-      setTimeout(() => void this.setStep("plugin-name"), 100);
+      setTimeout(() => {
+        if (this.step === "plugin-add") void this.setStep("plugin-name");
+      }, 120);
     });
+    return false;
   }
 
   private autoFillName(): boolean {
@@ -344,7 +392,11 @@ export class SetupGuide {
   private autoFillServer(): boolean {
     const option = queryGuideTarget("pluginServerUrlOption");
     if (option && !isControlEnabled(option)) {
-      return this.oncePerStep("plugin-server", () => option.click());
+      this.runOnce("plugin-server", () => {
+        option.click();
+        setTimeout(() => this.render(), 100);
+      });
+      return false;
     }
     const input = queryGuideTarget("pluginServerInput");
     if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) return false;
@@ -356,19 +408,42 @@ export class SetupGuide {
   private autoSelectOauth(): boolean {
     const auth = queryGuideTarget("pluginAuthControl");
     if (!auth) return false;
-    if (auth instanceof HTMLSelectElement && auth.value.toUpperCase() !== "OAUTH") {
-      setNativeSelectValue(auth, "OAUTH");
+    if (auth instanceof HTMLSelectElement) {
+      if (auth.value.toUpperCase() !== "OAUTH") setNativeSelectValue(auth, "OAUTH");
+      void this.setStep("plugin-risk");
+      return true;
     }
-    if (!controlValue(auth).includes("oauth")) return false;
-    void this.setStep("plugin-risk");
-    return true;
+    if (controlValue(auth).includes("oauth")) {
+      void this.setStep("plugin-risk");
+      return true;
+    }
+    this.runOnce("plugin-auth", () => {
+      auth.click();
+      setTimeout(() => {
+        const oauth = queryGuideTarget("pluginOauthOption");
+        if (oauth && oauth !== auth) oauth.click();
+        setTimeout(() => this.render(), 80);
+      }, 80);
+    });
+    return false;
   }
 
-  private oncePerStep(step: SetupGuideStep, action: () => void): boolean {
-    if (this.autoActionStep === step) return true;
+  private autoCreateAfterApproval(): boolean {
+    const create = queryGuideTarget("pluginCreateButton");
+    if (!create || isDisabled(create)) return false;
+    this.runOnce("plugin-create", () => {
+      create.click();
+      setTimeout(() => {
+        if (this.step === "plugin-create") void this.setStep("oauth");
+      }, 120);
+    });
+    return false;
+  }
+
+  private runOnce(step: SetupGuideStep, action: () => void): void {
+    if (this.autoActionStep === step) return;
     this.autoActionStep = step;
     action();
-    return true;
   }
 
   private hide(): void {
@@ -434,31 +509,6 @@ export class SetupGuide {
     return false;
   }
 
-  private afterTargetClick(target: HTMLElement): void {
-    switch (this.step) {
-      case "security":
-        this.deferStep("developer");
-        break;
-      case "developer-toggle":
-        setTimeout(() => {
-          if (isControlEnabled(target)) void this.setStep("plugins");
-        }, 120);
-        break;
-      case "plugin-risk":
-        setTimeout(() => {
-          if (isControlEnabled(target)) void this.setStep("plugin-create");
-        }, 80);
-        break;
-      case "plugin-create":
-        this.deferStep("oauth");
-        break;
-    }
-  }
-
-  private deferStep(step: SetupGuideStep): void {
-    setTimeout(() => void this.setStep(step), 80);
-  }
-
   private async setStep(step: SetupGuideStep): Promise<void> {
     this.step = step;
     this.resetStepTracking();
@@ -478,8 +528,6 @@ export class SetupGuide {
     event.stopPropagation();
     const action = target.dataset["guideAction"];
     if (action === "cancel") void this.cancel();
-    else if (action === "developer-next") void this.setStep("developer-toggle");
-    else if (action === "open-plugins") this.openPlugins();
     else if (action === "return-chat") this.returnToChat();
     else if (action === "finish") void this.finish();
   }
@@ -515,45 +563,43 @@ function guideCopy(step: SetupGuideStep, found: boolean): GuideCopy {
   switch (step) {
     case "security":
       return copy(
-        "1 · Security and login",
-        `Click the highlighted <b>Security and login</b> item.${wait}`,
+        "1 · Opening Security and login",
+        `I’m opening <b>Security and login</b> for you.${wait}`,
       );
     case "developer":
       return copy(
-        "2 · Developer mode",
-        `Developer mode is lower on this page. I’ll bring the row into the Settings viewport before highlighting it.${wait}`,
-        primary("developer-next", "Show the switch"),
+        "2 · Finding Developer mode",
+        `Developer mode is lower on this page. I’ll bring it into view automatically.${wait}`,
       );
     case "developer-toggle":
       return copy(
-        "3 · Enable Developer mode",
-        `Turn on the highlighted <b>Developer mode</b> switch. If it is already on, I skip this step automatically.${wait}`,
+        "3 · Enabling Developer mode",
+        `I’m turning on the highlighted <b>Developer mode</b> switch. If ChatGPT opens an additional warning or confirmation, you must approve that prompt yourself.${wait}`,
       );
     case "plugins":
       return copy(
-        "4 · Open Plugins",
-        "Developer mode is ready. Open Plugins; from there I’ll check for an existing custom GitHub MCP and prepare the form automatically.",
-        primary("open-plugins", "Open Plugins"),
+        "4 · Opening Plugins",
+        "Developer mode is ready. I’m opening Plugins automatically.",
       );
     case "plugin-search":
       return copy(
-        "5 · Checking for GitHub MCP",
-        `I’m searching for an existing exact <b>${APP_NAME}</b> custom app.${wait}`,
+        "5 · Checking Chat FreePT GitHub MCP",
+        `I’m searching for an existing exact <b>${APP_NAME}</b> custom app before creating anything.${wait}`,
       );
     case "plugin-add":
       return copy(
         "6 · Opening custom app setup",
-        `No existing custom <b>${APP_NAME}</b> was found. I’m opening ChatGPT’s Create app form.${wait}`,
+        `No existing <b>${APP_NAME}</b> was found. I’m opening ChatGPT’s Create app form.${wait}`,
       );
     case "plugin-name":
       return copy(
-        "7 · Preparing name",
-        `I’m filling <b>${APP_NAME}</b> in the current custom plugin form.${wait}`,
+        "7 · Preparing app name",
+        `I’m filling <b>${APP_NAME}</b>.${wait}`,
       );
     case "plugin-server":
       return copy(
-        "8 · Preparing remote server",
-        `I’m selecting Server URL and filling <code>${MCP_URL}</code>.${wait}`,
+        "8 · Preparing full GitHub toolset",
+        `I’m selecting Server URL and filling <code>${MCP_URL}</code>, GitHub’s remote all-toolsets endpoint.${wait}`,
       );
     case "plugin-auth":
       return copy(
@@ -563,23 +609,23 @@ function guideCopy(step: SetupGuideStep, found: boolean): GuideCopy {
     case "plugin-risk":
       return copy(
         "10 · Your approval required",
-        `ChatGPT requires you to read and check the highlighted <b>I understand and want to continue</b> acknowledgement. Chat FreePT will never approve this risk disclosure for you.${wait}`,
+        `ChatGPT requires you to read and check the highlighted <b>I understand and want to continue</b> acknowledgement. Chat FreePT will never approve this risk disclosure for you. Once you check it, I’ll press Create automatically.${wait}`,
       );
     case "plugin-create":
       return copy(
-        "11 · Create and authorize",
-        `The safe fields are prepared. Review them, then click the highlighted <b>Create</b> button. ChatGPT may open GitHub OAuth; approve only the repository/workflow access you intend to grant.${wait}`,
+        "11 · Creating the custom MCP",
+        `Your risk acknowledgement is complete. I’m pressing <b>Create</b> and continuing to GitHub OAuth automatically.${wait}`,
       );
     case "oauth":
       return copy(
         "12 · Finish GitHub OAuth",
-        "Complete GitHub authorization. If ChatGPT returns here and the custom app becomes visible, I’ll return to your chat automatically; otherwise use the button below after OAuth finishes.",
+        "GitHub authorization is the remaining external consent step. Complete OAuth and approve only the access you intend to grant. When ChatGPT shows the custom app afterward, I’ll return to your original chat automatically; use the button below only if the host does not refresh on its own.",
         primary("return-chat", "OAuth finished — return to chat"),
       );
     case "done":
       return copy(
         "Setup complete",
-        "You’re back in the conversation. There is no extra GitHub MCP menu step to guess at: Chat FreePT’s next GitHub preflight will inspect the tools actually exposed here and stop with NEEDS_INPUT if the host did not attach the required capabilities.",
+        "You’re back in the conversation. Chat FreePT’s next GitHub preflight will inspect the tools actually exposed by the custom MCP and stop with NEEDS_INPUT if any required repository, Issue, label, PR, Git or Actions capability is still missing.",
         primary("finish", "Done"),
       );
   }
@@ -608,6 +654,11 @@ function isControlEnabled(element: HTMLElement): boolean {
     element.getAttribute("data-state") === "checked" ||
     element.getAttribute("data-state") === "on"
   );
+}
+
+function isDisabled(element: HTMLElement): boolean {
+  if (element instanceof HTMLButtonElement) return element.disabled;
+  return element.getAttribute("aria-disabled") === "true";
 }
 
 function fieldValue(element: HTMLElement | null): string {
