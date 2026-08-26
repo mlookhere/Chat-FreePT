@@ -21,7 +21,7 @@ interface OnboardingState {
 interface NativeSurfaceSnapshot {
   element: HTMLElement;
   pointerEvents: string;
-  ariaHidden: string | null;
+  inert: boolean;
 }
 
 const ONBOARDING_KEY = "cfpt:onboarding:v1";
@@ -192,7 +192,12 @@ export class Panel {
     button.setAttribute("aria-label", "Open Chat FreePT");
     button.setAttribute("aria-expanded", "false");
     button.innerHTML = airplaneSvg();
-    button.addEventListener("click", () => this.onLauncherClick());
+    button.addEventListener("pointerdown", (event) => event.stopPropagation());
+    button.addEventListener("mousedown", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.onLauncherClick();
+    });
     shadow.appendChild(button);
     return { host, shadow, button };
   }
@@ -377,22 +382,29 @@ export class Panel {
     if (!(surface instanceof HTMLElement)) return;
     if (this.nativeSurface?.element === surface) return;
     this.restoreNativeTakeover();
+    this.moveFocusOutsideNativeSurface(surface);
     this.nativeSurface = {
       element: surface,
       pointerEvents: surface.style.pointerEvents,
-      ariaHidden: surface.getAttribute("aria-hidden"),
+      inert: surface.inert,
     };
     surface.style.pointerEvents = "none";
-    surface.setAttribute("aria-hidden", "true");
+    surface.inert = true;
     surface.dataset["cfptTakeover"] = "true";
+  }
+
+  private moveFocusOutsideNativeSurface(surface: HTMLElement): void {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || !surface.contains(active)) return;
+    this.panelEl.querySelector<HTMLElement>(".cfpt-panel-close")?.focus({ preventScroll: true });
+    if (surface.contains(document.activeElement)) active.blur();
   }
 
   private restoreNativeTakeover(): void {
     const snapshot = this.nativeSurface;
     if (!snapshot) return;
     snapshot.element.style.pointerEvents = snapshot.pointerEvents;
-    if (snapshot.ariaHidden === null) snapshot.element.removeAttribute("aria-hidden");
-    else snapshot.element.setAttribute("aria-hidden", snapshot.ariaHidden);
+    snapshot.element.inert = snapshot.inert;
     delete snapshot.element.dataset["cfptTakeover"];
     this.nativeSurface = null;
   }
@@ -815,7 +827,7 @@ function paidSetupHtml(): string {
       <div class="cfpt-plan-badge">Paid plan · full GitHub automation</div>
       <h2 id="cfpt-setup-title">Connect GitHub with a follow-along guide</h2>
       <p class="cfpt-setup-lead">For full autonomous repository work, Chat FreePT needs ChatGPT's Developer mode and a custom GitHub MCP/plugin with the write permissions you approve. ChatGPT marks Developer mode as Elevated Risk because unverified connectors can modify data.</p>
-      <p class="cfpt-setup-lead">The guide opens Settings for you and highlights one live ChatGPT control at a time: Security and login → Developer mode → Plugins → + → GitHub MCP URL → OAuth → Create → add GitHub MCP to this chat.</p>
+      <p class="cfpt-setup-lead">The guide opens Settings, enables Developer mode, then takes you to Plugins. It can open the custom app form and fill the GitHub MCP name, remote server URL, and OAuth choice automatically. You still approve ChatGPT's risk warning and GitHub OAuth yourself; afterward the guide returns here and Chat FreePT verifies the actual GitHub capabilities.</p>
       <div class="cfpt-setup-actions">
         <button class="cfpt-btn" type="button" data-action="free-setup">Using ChatGPT Free?</button>
         <button class="cfpt-btn" type="button" data-action="setup-done">I'll set it up myself</button>
