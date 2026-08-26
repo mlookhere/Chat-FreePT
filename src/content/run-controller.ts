@@ -50,10 +50,16 @@ export class RunController {
     this.onContextInvalidated = hooks.onContextInvalidated ?? (() => undefined);
     this.watcher = new StreamWatcher(
       {
-        onStart: () => this.dispatch({ type: "STREAM_STARTED" }),
+        onStart: () => {
+          if (this.state.status === "sending" || this.state.status === "streaming") {
+            this.dispatch({ type: "STREAM_STARTED" });
+          }
+        },
         onComplete: (text) =>
           this.dispatch({ type: "REPLY_COMPLETE", marker: parseMarker(text), text }),
-        onStuck: () => this.dispatch({ type: "STREAM_STUCK" }),
+        onStuck: () => {
+          if (this.state.status === "streaming") this.dispatch({ type: "STREAM_STUCK" });
+        },
       },
       settings,
     );
