@@ -7,6 +7,7 @@ export function isExtensionContextInvalidated(error: unknown): boolean {
 
 export interface ExtensionContextGuard {
   readonly invalidated: boolean;
+  invalidate(): void;
   handle(error: unknown): boolean;
 }
 
@@ -17,17 +18,20 @@ export interface ExtensionContextGuard {
  */
 export function createExtensionContextGuard(onInvalidated: () => void): ExtensionContextGuard {
   let invalidated = false;
+  const invalidate = (): void => {
+    if (invalidated) return;
+    invalidated = true;
+    onInvalidated();
+  };
 
   return {
     get invalidated(): boolean {
       return invalidated;
     },
+    invalidate,
     handle(error: unknown): boolean {
       if (!isExtensionContextInvalidated(error)) return false;
-      if (!invalidated) {
-        invalidated = true;
-        onInvalidated();
-      }
+      invalidate();
       return true;
     },
   };
