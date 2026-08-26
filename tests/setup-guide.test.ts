@@ -50,7 +50,7 @@ afterEach(() => {
   window.sessionStorage.clear();
 });
 
-describe("opt-in setup guide", () => {
+describe("setup guide tab isolation", () => {
   it("keeps walkthrough progress in this tab session instead of extension-wide storage", async () => {
     stores.local["cfpt:setup-guide:v1"] = {
       active: true,
@@ -68,7 +68,7 @@ describe("opt-in setup guide", () => {
     expect(stores.local["cfpt:setup-guide:v1"]).toMatchObject({ step: "developer-toggle" });
   });
 
-  it("highlights only Security and login, then advances in the same tab session", async () => {
+  it("highlights Security and login, then advances in the same tab session", async () => {
     stored("security");
     document.body.innerHTML = '<button id="security">Security and login</button>';
     makeGuide();
@@ -85,7 +85,26 @@ describe("opt-in setup guide", () => {
     expect(ring?.classList.contains("cfpt-guide-hidden")).toBe(true);
   });
 
-  it("scrolls the settings content region before highlighting off-screen Developer mode", async () => {
+  it("keeps cancellation local to this tab session", async () => {
+    stored("security");
+    document.body.innerHTML = '<button id="security">Security and login</button>';
+    makeGuide();
+    await settle();
+
+    shadow.querySelector<HTMLButtonElement>('[data-guide-action="cancel"]')?.click();
+    await settle();
+    expect(sessionState()).toMatchObject({ active: false });
+    expect(shadow.querySelector(".cfpt-guide-ring")?.classList.contains("cfpt-guide-hidden")).toBe(
+      true,
+    );
+    expect(shadow.querySelector(".cfpt-guide-card")?.classList.contains("cfpt-guide-hidden")).toBe(
+      true,
+    );
+  });
+});
+
+describe("setup guide settings flow", () => {
+  it("scrolls settings before highlighting off-screen Developer mode", async () => {
     stored("developer");
     document.body.innerHTML = `
       <div id="modal-settings">
@@ -104,9 +123,29 @@ describe("opt-in setup guide", () => {
       scrollHeight: { configurable: true, value: 1200 },
     });
     scroller.getBoundingClientRect = () =>
-      ({ top: 100, bottom: 500, height: 400, left: 0, right: 600, width: 600, x: 0, y: 100, toJSON: () => ({}) }) as DOMRect;
+      ({
+        top: 100,
+        bottom: 500,
+        height: 400,
+        left: 0,
+        right: 600,
+        width: 600,
+        x: 0,
+        y: 100,
+        toJSON: () => ({}),
+      }) as DOMRect;
     row.getBoundingClientRect = () =>
-      ({ top: 850, bottom: 920, height: 70, left: 100, right: 550, width: 450, x: 100, y: 850, toJSON: () => ({}) }) as DOMRect;
+      ({
+        top: 850,
+        bottom: 920,
+        height: 70,
+        left: 100,
+        right: 550,
+        width: 450,
+        x: 100,
+        y: 850,
+        toJSON: () => ({}),
+      }) as DOMRect;
 
     makeGuide();
     await settle();
@@ -129,7 +168,7 @@ describe("opt-in setup guide", () => {
     expect(shadow.textContent).toContain("4 · Open Plugins");
   });
 
-  it("advances only after a disabled Developer mode switch becomes enabled", async () => {
+  it("advances after a disabled Developer mode switch becomes enabled", async () => {
     stored("developer-toggle");
     document.body.innerHTML = `
       <section>
@@ -146,7 +185,9 @@ describe("opt-in setup guide", () => {
     await settle(150);
     expect(sessionState()).toMatchObject({ step: "plugins" });
   });
+});
 
+describe("setup guide plugin flow", () => {
   it("searches for the exact custom GitHub MCP app before offering Create app", async () => {
     stored("plugin-search");
     document.body.innerHTML = `
@@ -193,22 +234,5 @@ describe("opt-in setup guide", () => {
     expect(inputEvent).toHaveBeenCalledTimes(1);
     expect(changeEvent).toHaveBeenCalledTimes(1);
     expect(sessionState()).toMatchObject({ step: "plugin-auth" });
-  });
-
-  it("removes the current highlight and keeps cancellation local to the tab", async () => {
-    stored("security");
-    document.body.innerHTML = '<button id="security">Security and login</button>';
-    makeGuide();
-    await settle();
-
-    shadow.querySelector<HTMLButtonElement>('[data-guide-action="cancel"]')?.click();
-    await settle();
-    expect(sessionState()).toMatchObject({ active: false });
-    expect(shadow.querySelector(".cfpt-guide-ring")?.classList.contains("cfpt-guide-hidden")).toBe(
-      true,
-    );
-    expect(shadow.querySelector(".cfpt-guide-card")?.classList.contains("cfpt-guide-hidden")).toBe(
-      true,
-    );
   });
 });
