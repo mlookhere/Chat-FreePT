@@ -12,6 +12,7 @@ describe("extension context lifecycle", () => {
     expect(isExtensionContextInvalidated({ message: "Extension context invalidated." })).toBe(
       false,
     );
+    expect(isExtensionContextInvalidated(null)).toBe(false);
   });
 
   it("turns invalidation into one terminal disposal", () => {
