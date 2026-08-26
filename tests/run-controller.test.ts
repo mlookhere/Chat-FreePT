@@ -320,3 +320,34 @@ describe("RunController recovery and disposal", () => {
     controller.dispose();
   });
 });
+
+describe("RunController stale stream isolation", () => {
+  it("keeps NEEDS_INPUT stable when stale start and stuck signals arrive", () => {
+    const controller = makeController(streamingState());
+
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: NEEDS_INPUT\nNOTE: wait for approval");
+    expect(controller.state.status).toBe("awaiting_user");
+
+    watcher().callbacks.onStart();
+    watcher().callbacks.onStuck();
+
+    expect(controller.state.status).toBe("awaiting_user");
+    expect(controller.state.errorCode).toBeUndefined();
+    controller.dispose();
+  });
+
+  it("keeps auto-continue-off waiting stable when stale stream signals arrive", () => {
+    const controller = makeController(streamingState());
+    controller.dispatch({ type: "USER_SET_AUTO_CONTINUE", enabled: false });
+
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    expect(controller.state.status).toBe("awaiting_user");
+
+    watcher().callbacks.onStart();
+    watcher().callbacks.onStuck();
+
+    expect(controller.state.status).toBe("awaiting_user");
+    expect(controller.state.errorCode).toBeUndefined();
+    controller.dispose();
+  });
+});
