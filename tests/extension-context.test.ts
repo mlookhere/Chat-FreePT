@@ -8,8 +8,12 @@ describe("extension context lifecycle", () => {
   it("recognizes Chrome extension-context invalidation errors", () => {
     expect(isExtensionContextInvalidated(new Error("Extension context invalidated."))).toBe(true);
     expect(isExtensionContextInvalidated("extension context invalidated")).toBe(true);
-    expect(isExtensionContextInvalidated(new Error("storage temporarily unavailable"))).toBe(false);
-    expect(isExtensionContextInvalidated({ message: "Extension context invalidated." })).toBe(false);
+    expect(isExtensionContextInvalidated(new Error("storage temporarily unavailable"))).toBe(
+      false,
+    );
+    expect(isExtensionContextInvalidated({ message: "Extension context invalidated." })).toBe(
+      false,
+    );
   });
 
   it("turns invalidation into one terminal disposal", () => {
