@@ -143,9 +143,29 @@ describe("setup guide settings flow", () => {
       scrollHeight: { configurable: true, value: 1200 },
     });
     scroller.getBoundingClientRect = () =>
-      ({ top: 100, bottom: 500, height: 400, left: 0, right: 600, width: 600, x: 0, y: 100, toJSON: () => ({}) }) as DOMRect;
+      ({
+        top: 100,
+        bottom: 500,
+        height: 400,
+        left: 0,
+        right: 600,
+        width: 600,
+        x: 0,
+        y: 100,
+        toJSON: () => ({}),
+      }) as DOMRect;
     row.getBoundingClientRect = () =>
-      ({ top: 850, bottom: 920, height: 70, left: 100, right: 550, width: 450, x: 100, y: 850, toJSON: () => ({}) }) as DOMRect;
+      ({
+        top: 850,
+        bottom: 920,
+        height: 70,
+        left: 100,
+        right: 550,
+        width: 450,
+        x: 100,
+        y: 850,
+        toJSON: () => ({}),
+      }) as DOMRect;
 
     makeGuide();
     await settle();
@@ -208,18 +228,24 @@ describe("setup guide custom MCP automation", () => {
       document.body.insertAdjacentHTML("beforeend", customFormHtml());
       const auth = document.getElementById("custom-connector-auth") as HTMLSelectElement;
       auth.value = "NONE";
-      document.getElementById("custom-form")?.addEventListener("submit", (event) => event.preventDefault());
+      document
+        .getElementById("custom-form")
+        ?.addEventListener("submit", (event) => event.preventDefault());
     });
 
     makeGuide();
     await settle(600);
 
     expect((document.getElementById("plugin-search") as HTMLInputElement).value).toBe("GitHub MCP");
-    expect((document.getElementById("custom-connector-name") as HTMLInputElement).value).toBe("GitHub MCP");
+    expect((document.getElementById("custom-connector-name") as HTMLInputElement).value).toBe(
+      "GitHub MCP",
+    );
     expect((document.getElementById("custom-connector-url") as HTMLInputElement).value).toBe(
       "https://api.githubcopilot.com/mcp/",
     );
-    expect((document.getElementById("custom-connector-auth") as HTMLSelectElement).value).toBe("OAUTH");
+    expect((document.getElementById("custom-connector-auth") as HTMLSelectElement).value).toBe(
+      "OAUTH",
+    );
     expect((document.getElementById("trust-checkbox") as HTMLInputElement).checked).toBe(false);
     expect(sessionState()).toMatchObject({ step: "plugin-risk" });
     expect(shadow.textContent).toContain("never approve this risk disclosure for you");
@@ -235,7 +261,9 @@ describe("setup guide custom MCP automation", () => {
       create.disabled = false;
     });
     create.addEventListener("click", createClick);
-    document.getElementById("custom-form")?.addEventListener("submit", (event) => event.preventDefault());
+    document
+      .getElementById("custom-form")
+      ?.addEventListener("submit", (event) => event.preventDefault());
     makeGuide();
     await settle();
 

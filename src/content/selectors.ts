@@ -337,10 +337,8 @@ function githubMcpPluginResult(): HTMLElement | null {
 }
 
 function pluginNameInput(): HTMLElement | null {
-  return (
-    document.getElementById("custom-connector-name") ??
-    fieldNearLabel(/^(Name|Plugin name)$/i, "input")
-  ) as HTMLElement | null;
+  return (document.getElementById("custom-connector-name") ??
+    fieldNearLabel(/^(Name|Plugin name)$/i, "input")) as HTMLElement | null;
 }
 
 function pluginServerUrlOption(): HTMLElement | null {
@@ -350,24 +348,24 @@ function pluginServerUrlOption(): HTMLElement | null {
 }
 
 function pluginServerInput(): HTMLElement | null {
-  return (
-    document.getElementById("custom-connector-url") ??
-    fieldNearLabel(/(Server URL|Remote MCP|MCP server URL)/i, 'input[type="url"], input')
-  ) as HTMLElement | null;
+  return (document.getElementById("custom-connector-url") ??
+    fieldNearLabel(
+      /(Server URL|Remote MCP|MCP server URL)/i,
+      'input[type="url"], input',
+    )) as HTMLElement | null;
 }
 
 function pluginAuthControl(): HTMLElement | null {
-  return (
-    document.getElementById("custom-connector-auth") ??
-    fieldNearLabel(/Authentication/i, 'select, [role="combobox"], button')
-  ) as HTMLElement | null;
+  return (document.getElementById("custom-connector-auth") ??
+    fieldNearLabel(/Authentication/i, 'select, [role="combobox"], button')) as HTMLElement | null;
 }
 
 function pluginRiskCheckbox(): HTMLElement | null {
-  return (
-    document.getElementById("trust-checkbox") ??
-    controlNearText(/I understand.*continue/i, 'input[type="checkbox"], [role="checkbox"]')
-  ) as HTMLElement | null;
+  return (document.getElementById("trust-checkbox") ??
+    controlNearText(
+      /I understand.*continue/i,
+      'input[type="checkbox"], [role="checkbox"]',
+    )) as HTMLElement | null;
 }
 
 function pluginCreateButton(): HTMLElement | null {

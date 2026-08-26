@@ -314,7 +314,8 @@ export class SetupGuide {
 
   private autoSearchForPlugin(): boolean {
     const search = queryGuideTarget("pluginSearchInput");
-    if (!(search instanceof HTMLInputElement || search instanceof HTMLTextAreaElement)) return false;
+    if (!(search instanceof HTMLInputElement || search instanceof HTMLTextAreaElement))
+      return false;
     if (fieldValue(search).trim().toLowerCase() !== APP_NAME.toLowerCase()) {
       setNativeValue(search, APP_NAME);
     }
@@ -513,7 +514,10 @@ function guideCopy(step: SetupGuideStep, found: boolean): GuideCopy {
   const wait = found ? "" : " I’m waiting for this ChatGPT control to appear.";
   switch (step) {
     case "security":
-      return copy("1 · Security and login", `Click the highlighted <b>Security and login</b> item.${wait}`);
+      return copy(
+        "1 · Security and login",
+        `Click the highlighted <b>Security and login</b> item.${wait}`,
+      );
     case "developer":
       return copy(
         "2 · Developer mode",
@@ -532,15 +536,30 @@ function guideCopy(step: SetupGuideStep, found: boolean): GuideCopy {
         primary("open-plugins", "Open Plugins"),
       );
     case "plugin-search":
-      return copy("5 · Checking for GitHub MCP", `I’m searching for an existing exact <b>${APP_NAME}</b> custom app.${wait}`);
+      return copy(
+        "5 · Checking for GitHub MCP",
+        `I’m searching for an existing exact <b>${APP_NAME}</b> custom app.${wait}`,
+      );
     case "plugin-add":
-      return copy("6 · Opening custom app setup", `No existing custom <b>${APP_NAME}</b> was found. I’m opening ChatGPT’s Create app form.${wait}`);
+      return copy(
+        "6 · Opening custom app setup",
+        `No existing custom <b>${APP_NAME}</b> was found. I’m opening ChatGPT’s Create app form.${wait}`,
+      );
     case "plugin-name":
-      return copy("7 · Preparing name", `I’m filling <b>${APP_NAME}</b> in the current custom plugin form.${wait}`);
+      return copy(
+        "7 · Preparing name",
+        `I’m filling <b>${APP_NAME}</b> in the current custom plugin form.${wait}`,
+      );
     case "plugin-server":
-      return copy("8 · Preparing remote server", `I’m selecting Server URL and filling <code>${MCP_URL}</code>.${wait}`);
+      return copy(
+        "8 · Preparing remote server",
+        `I’m selecting Server URL and filling <code>${MCP_URL}</code>.${wait}`,
+      );
     case "plugin-auth":
-      return copy("9 · Preparing OAuth", `I’m selecting <b>OAuth</b> in ChatGPT’s Authentication field.${wait}`);
+      return copy(
+        "9 · Preparing OAuth",
+        `I’m selecting <b>OAuth</b> in ChatGPT’s Authentication field.${wait}`,
+      );
     case "plugin-risk":
       return copy(
         "10 · Your approval required",
@@ -601,7 +620,8 @@ function fieldValue(element: HTMLElement | null): string {
 function controlValue(element: HTMLElement | null): string {
   if (!element) return "";
   if (element instanceof HTMLSelectElement || element instanceof HTMLInputElement) {
-    const selectedText = element instanceof HTMLSelectElement ? element.selectedOptions[0]?.textContent ?? "" : "";
+    const selectedText =
+      element instanceof HTMLSelectElement ? (element.selectedOptions[0]?.textContent ?? "") : "";
     return `${element.value} ${selectedText}`.toLowerCase();
   }
   return `${element.getAttribute("data-value") ?? ""} ${element.textContent ?? ""}`.toLowerCase();
@@ -613,7 +633,9 @@ function sameUrl(left: string, right: string): boolean {
 
 function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
   const prototype =
-    element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+    element instanceof HTMLInputElement
+      ? HTMLInputElement.prototype
+      : HTMLTextAreaElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
   if (setter) setter.call(element, value);
   else element.value = value;
@@ -640,7 +662,8 @@ function settingsScrollContainer(target: HTMLElement): HTMLElement | null {
     node = node.parentElement;
   }
 
-  const modal = target.closest<HTMLElement>("#modal-settings") ?? document.getElementById("modal-settings");
+  const modal =
+    target.closest<HTMLElement>("#modal-settings") ?? document.getElementById("modal-settings");
   return modal?.querySelector<HTMLElement>('[class*="overflow-y-auto"]') ?? null;
 }
 
