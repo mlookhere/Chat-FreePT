@@ -23,7 +23,9 @@ export type GuideTargetId =
   | "settingsSecurity"
   | "developerModeRow"
   | "developerModeToggle"
+  | "pluginSearchInput"
   | "pluginAddButton"
+  | "githubMcpPluginResult"
   | "pluginNameInput"
   | "pluginServerInput"
   | "pluginAuthControl"
@@ -234,12 +236,10 @@ const GUIDE_RESOLVERS: Record<GuideTargetId, () => HTMLElement | null> = {
   composerPlusButton,
   settingsSecurity: () => clickableText(/^Security and login$/i),
   developerModeRow,
-  developerModeToggle: () =>
-    controlNearText(
-      /^Developer mode$/i,
-      'button[role="switch"], [role="switch"], input[type="checkbox"]',
-    ),
+  developerModeToggle,
+  pluginSearchInput,
   pluginAddButton,
+  githubMcpPluginResult,
   pluginNameInput: () => fieldNearLabel(/^(Name|Plugin name)$/i, "input"),
   pluginServerInput: () =>
     fieldNearLabel(/(Server URL|Remote MCP|MCP server URL)/i, 'input[type="url"], input'),
@@ -274,11 +274,33 @@ function composerPlusButton(): HTMLElement | null {
   return textElement(/^\+$/i, form, "button") as HTMLElement | null;
 }
 
+function developerModeToggle(): HTMLElement | null {
+  const semantic = document.querySelector<HTMLElement>(
+    'button[role="switch"][aria-label="Developer mode"], [role="switch"][aria-label="Developer mode"]',
+  );
+  if (semantic) return semantic;
+  return controlNearText(
+    /^Developer mode$/i,
+    'button[role="switch"], [role="switch"], input[type="checkbox"]',
+  );
+}
+
 function developerModeRow(): HTMLElement | null {
+  const toggle = developerModeToggle();
+  if (toggle) {
+    let node: HTMLElement | null = toggle;
+    for (let depth = 0; node && depth < 7; depth += 1) {
+      const text = node.textContent ?? "";
+      if (/Allows you to add unverified connectors/i.test(text)) return node;
+      node = node.parentElement;
+    }
+  }
+
   const label = textElement(/^Developer mode$/i);
-  if (!(label instanceof HTMLElement)) return null;
+  if (!(label instanceof HTMLElement)) return toggle;
   let node: HTMLElement | null = label;
   for (let depth = 0; node && depth < 7; depth += 1) {
+    if (toggle && node.contains(toggle)) return node;
     if (node.querySelector('button[role="switch"], [role="switch"], input[type="checkbox"]')) {
       return node;
     }
@@ -287,19 +309,31 @@ function developerModeRow(): HTMLElement | null {
   return label.parentElement ?? label;
 }
 
+function pluginSearchInput(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    '#plugin-search, input[aria-label="Search plugins"], input[placeholder="Search plugins"]',
+  );
+}
+
 function pluginAddButton(): HTMLElement | null {
   const labeled = document.querySelector<HTMLElement>(
-    'button[aria-label*="Add plugin" i], button[aria-label*="Create plugin" i], button[title*="Add plugin" i]',
+    'button[aria-label="Create app"], button[aria-label*="Add plugin" i], button[aria-label*="Create plugin" i], button[title*="Add plugin" i]',
   );
   if (labeled) return labeled;
   const plus = textElement(/^\+$/, document, "button");
   if (plus instanceof HTMLElement) return plus;
-  const search = document.querySelector<HTMLElement>(
-    'input[placeholder*="Search plugin" i], input[type="search"]',
-  );
+  const search = pluginSearchInput();
   const container = search?.parentElement?.parentElement;
   const buttons = container ? Array.from(container.querySelectorAll<HTMLElement>("button")) : [];
   return buttons.at(-1) ?? null;
+}
+
+function githubMcpPluginResult(): HTMLElement | null {
+  const labeled = document.querySelector<HTMLElement>(
+    'a[aria-label="Open GitHub MCP"], button[aria-label="Open GitHub MCP"]',
+  );
+  if (labeled) return labeled;
+  return clickableText(/^GitHub MCP$/i);
 }
 
 function clickableText(pattern: RegExp): HTMLElement | null {

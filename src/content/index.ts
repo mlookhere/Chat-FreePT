@@ -224,9 +224,9 @@ async function onNavigate(href: string): Promise<void> {
   if (!urlConv && currentConvId.startsWith("pending:")) return;
 
   stopTakeoverRetry();
-  if (controller && isActive(controller.state)) {
-    controller.dispatch({ type: "USER_PAUSE" });
-  }
+  controller?.dispose();
+  controller = null;
+  stopHeartbeat();
   await releaseOwnedLock(currentConvId);
   if (contextGuard.invalidated) return;
   await initConversation(urlConv ?? `pending:${crypto.randomUUID()}`);

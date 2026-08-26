@@ -118,7 +118,7 @@ describe("StreamWatcher", () => {
     expect(onComplete).not.toHaveBeenCalled();
   });
 
-  it("reports a stuck armed reply even when the stop button never appears", async () => {
+  it("does not age an expected reply into a false generation timeout before output starts", async () => {
     const onStuck = vi.fn();
     watcher = new StreamWatcher(
       { onStart: vi.fn(), onComplete: vi.fn(), onStuck },
@@ -127,8 +127,25 @@ describe("StreamWatcher", () => {
     watcher.start();
     watcher.expectReply();
 
-    await advance(1_600);
+    await advance(4_000);
 
+    expect(onStuck).not.toHaveBeenCalled();
+  });
+
+  it("starts the stuck timer when a reply is actually observed", async () => {
+    const onStart = vi.fn();
+    const onStuck = vi.fn();
+    watcher = new StreamWatcher(
+      { onStart, onComplete: vi.fn(), onStuck },
+      { ...SETTINGS, maxStreamMinutes: 0.001 },
+    );
+    watcher.start();
+    watcher.expectReply();
+    main().appendChild(assistant("new", "Still working without a final marker"));
+
+    await advance(2_400);
+
+    expect(onStart).toHaveBeenCalledTimes(1);
     expect(onStuck).toHaveBeenCalledTimes(1);
   });
 });

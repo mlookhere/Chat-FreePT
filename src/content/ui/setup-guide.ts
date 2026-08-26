@@ -5,6 +5,7 @@ export type SetupGuideStep =
   | "developer"
   | "developer-toggle"
   | "plugins"
+  | "plugin-search"
   | "plugin-add"
   | "plugin-name"
   | "plugin-server"
@@ -29,9 +30,30 @@ interface GuideCopy {
   actions: string;
 }
 
-const STORAGE_KEY = "cfpt:setup-guide:v1";
+const SESSION_KEY = "cfpt:setup-guide:v2";
 const MCP_URL = "https://api.githubcopilot.com/mcp/";
 const PLUGINS_URL = "https://chatgpt.com/plugins";
+const SEARCH_VALUE = "GitHub MCP";
+const SCROLL_RETRY_MS = 150;
+
+const GUIDE_STEPS = new Set<SetupGuideStep>([
+  "security",
+  "developer",
+  "developer-toggle",
+  "plugins",
+  "plugin-search",
+  "plugin-add",
+  "plugin-name",
+  "plugin-server",
+  "plugin-auth",
+  "plugin-risk",
+  "plugin-create",
+  "oauth",
+  "chat-plus",
+  "developer-menu",
+  "github-app",
+  "done",
+]);
 
 const GUIDE_CSS = `
 :host {
@@ -108,6 +130,7 @@ const TARGETS: Partial<Record<SetupGuideStep, GuideTargetId>> = {
   security: "settingsSecurity",
   developer: "developerModeRow",
   "developer-toggle": "developerModeToggle",
+  "plugin-search": "pluginSearchInput",
   "plugin-add": "pluginAddButton",
   "plugin-name": "pluginNameInput",
   "plugin-server": "pluginServerInput",
@@ -124,6 +147,7 @@ const EARLY_COPY_STEPS = new Set<SetupGuideStep>([
   "developer",
   "developer-toggle",
   "plugins",
+  "plugin-search",
   "plugin-add",
   "plugin-name",
   "plugin-server",
@@ -140,6 +164,7 @@ export class SetupGuide {
   private step: SetupGuideStep = "security";
   private returnUrl = "https://chatgpt.com/";
   private lastScrolledStep: SetupGuideStep | null = null;
+  private lastScrollAttemptAt = 0;
   private disposed = false;
 
   constructor() {
@@ -167,15 +192,15 @@ export class SetupGuide {
     window.addEventListener("scroll", this.onViewportChange, true);
     this.observer = new MutationObserver(() => this.render());
     this.observer.observe(document.documentElement, { childList: true, subtree: true });
-    void this.restore();
+    this.restore();
   }
 
   async start(): Promise<void> {
     this.active = true;
     this.step = "security";
     this.returnUrl = chatReturnUrl();
-    this.lastScrolledStep = null;
-    await this.persist();
+    this.resetScrollTracking();
+    this.persist();
     this.render();
     openSettings();
   }
@@ -183,7 +208,7 @@ export class SetupGuide {
   async cancel(): Promise<void> {
     this.active = false;
     this.hide();
-    await this.persist();
+    this.persist();
   }
 
   dispose(): void {
@@ -205,10 +230,10 @@ export class SetupGuide {
     this.afterTargetClick(target);
   };
 
-  private async restore(): Promise<void> {
+  private restore(): void {
     try {
-      const stored = await chrome.storage.local.get(STORAGE_KEY);
-      const value = stored[STORAGE_KEY] as Partial<StoredGuide> | undefined;
+      const raw = window.sessionStorage.getItem(SESSION_KEY);
+      const value = raw ? (JSON.parse(raw) as Partial<StoredGuide>) : undefined;
       if (value?.active === true && isGuideStep(value.step)) {
         this.active = true;
         this.step = value.step;
@@ -220,16 +245,16 @@ export class SetupGuide {
     if (!this.disposed) this.render();
   }
 
-  private async persist(): Promise<void> {
+  private persist(): void {
     try {
       const value: StoredGuide = {
         active: this.active,
         step: this.step,
         returnUrl: this.returnUrl,
       };
-      await chrome.storage.local.set({ [STORAGE_KEY]: value });
+      window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(value));
     } catch {
-      // The guide remains usable for the current page even if persistence is unavailable.
+      // The guide remains usable for the current page even if tab-session persistence fails.
     }
   }
 
@@ -248,17 +273,89 @@ export class SetupGuide {
       this.hide();
       return;
     }
+    if (this.advanceCompletedStep()) return;
 
     const target = this.currentTarget();
-    if (target) {
-      this.positionRing(target);
-      this.maybeScrollTarget(target);
-    } else {
-      this.ring.classList.add("cfpt-guide-hidden");
-    }
+    const targetReady = target ? this.ensureTargetVisible(target) : false;
+    if (target && targetReady) this.positionRing(target);
+    else this.ring.classList.add("cfpt-guide-hidden");
+
     this.card.innerHTML = this.cardHtml(Boolean(target));
     this.card.classList.remove("cfpt-guide-hidden");
-    this.positionCard(target);
+    this.positionCard(targetReady ? target : null);
+  }
+
+  private advanceCompletedStep(): boolean {
+    return this.advanceSettingsStep() || this.advancePluginStep();
+  }
+
+  private advanceSettingsStep(): boolean {
+    const toggle = queryGuideTarget("developerModeToggle");
+    if (this.step === "security" && toggle) {
+      void this.setStep("developer");
+      return true;
+    }
+    if ((this.step === "developer" || this.step === "developer-toggle") && toggle) {
+      if (isControlEnabled(toggle)) {
+        void this.setStep("plugins");
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private advancePluginStep(): boolean {
+    if (this.existingPluginCompletesCreation()) return true;
+    return this.advancePluginFormStep();
+  }
+
+  private existingPluginCompletesCreation(): boolean {
+    if (this.step !== "plugin-search" && this.step !== "plugin-add") return false;
+    if (!queryGuideTarget("githubMcpPluginResult")) return false;
+    this.returnToChat();
+    return true;
+  }
+
+  private advancePluginFormStep(): boolean {
+    switch (this.step) {
+      case "plugin-search":
+        return this.advanceWhenFieldMatches("pluginSearchInput", SEARCH_VALUE, "plugin-add");
+      case "plugin-name":
+        return this.advanceWhenFieldMatches("pluginNameInput", SEARCH_VALUE, "plugin-server");
+      case "plugin-server":
+        return this.advanceWhenFieldMatches("pluginServerInput", MCP_URL, "plugin-auth", true);
+      case "plugin-auth": {
+        const auth = queryGuideTarget("pluginAuthControl");
+        if (!controlValue(auth).includes("oauth")) return false;
+        void this.setStep("plugin-risk");
+        return true;
+      }
+      case "plugin-risk": {
+        const risk = queryGuideTarget("pluginRiskCheckbox");
+        if (!risk || !isControlEnabled(risk)) return false;
+        void this.setStep("plugin-create");
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private advanceWhenFieldMatches(
+    id: GuideTargetId,
+    expected: string,
+    next: SetupGuideStep,
+    ignoreTrailingSlash = false,
+  ): boolean {
+    let actual = fieldValue(queryGuideTarget(id)).trim();
+    let target = expected;
+    if (ignoreTrailingSlash) {
+      actual = actual.replace(/\/$/, "");
+      target = target.replace(/\/$/, "");
+    }
+    if (actual.toLowerCase() !== target.toLowerCase()) return false;
+    void this.setStep(next);
+    return true;
   }
 
   private hide(): void {
@@ -302,13 +399,26 @@ export class SetupGuide {
     });
   }
 
-  private maybeScrollTarget(target: HTMLElement): void {
-    if (this.lastScrolledStep === this.step) return;
-    if (this.step !== "developer" && this.step !== "developer-toggle") return;
-    this.lastScrolledStep = this.step;
-    if (typeof target.scrollIntoView === "function") {
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
+  private ensureTargetVisible(target: HTMLElement): boolean {
+    if (this.step !== "developer" && this.step !== "developer-toggle") return true;
+    if (this.lastScrolledStep === this.step) return true;
+
+    const container = settingsScrollContainer(target);
+    if (isVisibleWithin(target, container)) {
+      this.lastScrolledStep = this.step;
+      return true;
     }
+
+    const now = Date.now();
+    if (now - this.lastScrollAttemptAt < SCROLL_RETRY_MS) return false;
+    this.lastScrollAttemptAt = now;
+
+    if (container) centerInScrollContainer(target, container);
+    else if (typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "auto", block: "center", inline: "nearest" });
+    }
+    requestAnimationFrame(() => this.render());
+    return false;
   }
 
   private afterTargetClick(target: HTMLElement): void {
@@ -351,9 +461,14 @@ export class SetupGuide {
 
   private async setStep(step: SetupGuideStep): Promise<void> {
     this.step = step;
-    this.lastScrolledStep = null;
-    await this.persist();
+    this.resetScrollTracking();
+    this.persist();
     this.render();
+  }
+
+  private resetScrollTracking(): void {
+    this.lastScrolledStep = null;
+    this.lastScrollAttemptAt = 0;
   }
 
   private onGuideClick(event: Event): void {
@@ -364,8 +479,9 @@ export class SetupGuide {
     if (action === "cancel") void this.cancel();
     else if (action === "developer-next") void this.setStep("developer-toggle");
     else if (action === "open-plugins") this.openPlugins();
+    else if (action === "search-plugin") this.searchForPlugin();
     else if (action === "fill-name") {
-      this.fillField("pluginNameInput", "GitHub MCP", "plugin-server");
+      this.fillField("pluginNameInput", SEARCH_VALUE, "plugin-server");
     } else if (action === "fill-url") {
       this.fillField("pluginServerInput", MCP_URL, "plugin-auth");
     } else if (action === "auth-next") void this.setStep("plugin-risk");
@@ -375,7 +491,14 @@ export class SetupGuide {
   }
 
   private openPlugins(): void {
-    void this.setStep("plugin-add").then(() => navigate(PLUGINS_URL));
+    void this.setStep("plugin-search").then(() => navigate(PLUGINS_URL));
+  }
+
+  private searchForPlugin(): void {
+    const search = queryGuideTarget("pluginSearchInput");
+    if (!(search instanceof HTMLInputElement || search instanceof HTMLTextAreaElement)) return;
+    setNativeValue(search, SEARCH_VALUE);
+    setTimeout(() => void this.setStep("plugin-add"), 250);
   }
 
   private fillField(id: GuideTargetId, value: string, next: SetupGuideStep): void {
@@ -397,7 +520,7 @@ export class SetupGuide {
   private async finish(): Promise<void> {
     this.step = "done";
     this.active = false;
-    await this.persist();
+    this.persist();
     this.hide();
   }
 
@@ -427,37 +550,46 @@ function guideCopyEarly(step: SetupGuideStep, wait: string): GuideCopy {
     case "developer":
       return copy(
         "2 · Developer mode",
-        `Developer mode is lower on this page. I’ve brought the highlighted row into view.${wait}`,
+        `Developer mode is lower on this page. I’ll bring the row into the Settings viewport before highlighting it.${wait}`,
         primary("developer-next", "Show the switch"),
       );
     case "developer-toggle":
       return copy(
         "3 · Enable Developer mode",
-        `Turn on the highlighted <b>Developer mode</b> switch. ChatGPT labels this Elevated Risk because it permits unverified connectors.${wait}`,
+        `Turn on the highlighted <b>Developer mode</b> switch. If it is already on, the guide skips this step automatically.${wait}`,
       );
     case "plugins":
       return copy(
         "4 · Open Plugins",
-        "Developer mode is on. Continue to ChatGPT Plugins to add the official remote GitHub MCP endpoint.",
+        "Developer mode is ready. Continue to ChatGPT Plugins; the guide checks for an existing GitHub MCP before asking you to create one.",
         primary("open-plugins", "Open Plugins"),
       );
+    case "plugin-search":
+      return copy(
+        "5 · Check for GitHub MCP",
+        `Search for <b>${SEARCH_VALUE}</b>. If your developer app already exists, the guide will reuse it.${wait}`,
+        primary("search-plugin", "Search GitHub MCP"),
+      );
     case "plugin-add":
-      return copy("5 · Add a plugin", `Click the highlighted <b>+</b> button.${wait}`);
+      return copy(
+        "6 · Create the app",
+        `No existing <b>GitHub MCP</b> app was found. Click the highlighted <b>Create app</b> button.${wait}`,
+      );
     case "plugin-name":
       return copy(
-        "6 · Name",
-        `Use <b>GitHub MCP</b> so it is easy to recognize later.${wait}`,
-        primary("fill-name", "Use GitHub MCP"),
+        "7 · Name",
+        `Use <b>${SEARCH_VALUE}</b> so it is easy to recognize later.${wait}`,
+        primary("fill-name", `Use ${SEARCH_VALUE}`),
       );
     case "plugin-server":
       return copy(
-        "7 · Server URL",
+        "8 · Server URL",
         `Put <code>${MCP_URL}</code> in the highlighted Server URL field.${wait}`,
         primary("fill-url", "Fill server URL"),
       );
     case "plugin-auth":
       return copy(
-        "8 · Authentication",
+        "9 · Authentication",
         `Set Authentication to <b>OAuth</b> in the highlighted control.${wait}`,
         primary("auth-next", "OAuth selected — next"),
       );
@@ -470,31 +602,31 @@ function guideCopyLate(step: SetupGuideStep, wait: string): GuideCopy {
   switch (step) {
     case "plugin-risk":
       return copy(
-        "9 · Risk acknowledgement",
+        "10 · Risk acknowledgement",
         `Read the warning, then check the highlighted acknowledgement.${wait}`,
         primary("risk-next", "Checked — next"),
       );
     case "plugin-create":
-      return copy("10 · Create", `Click the highlighted <b>Create</b> button.${wait}`);
+      return copy("11 · Create", `Click the highlighted <b>Create</b> button.${wait}`);
     case "oauth":
       return copy(
-        "11 · Complete GitHub OAuth",
+        "12 · Complete GitHub OAuth",
         "Finish the GitHub authorization ChatGPT opens. Approve the repository and workflow write permissions you intend Chat FreePT to use, then return here.",
         primary("return-chat", "Connected — return to chat"),
       );
     case "chat-plus":
       return copy(
-        "12 · Add it to this chat",
+        "13 · Add it to this chat",
         `Click the highlighted <b>+</b> beside the composer.${wait}`,
       );
     case "developer-menu":
       return copy(
-        "13 · Developer mode",
+        "14 · Developer mode",
         `Choose the highlighted <b>Developer mode</b> entry. If GitHub MCP appears directly, choose it instead.${wait}`,
       );
     case "github-app":
       return copy(
-        "14 · GitHub MCP",
+        "15 · GitHub MCP",
         `Choose the highlighted <b>GitHub MCP</b> plugin for this conversation.${wait}`,
       );
     case "done":
@@ -521,9 +653,7 @@ function primary(action: string, label: string): string {
 }
 
 function isGuideStep(value: unknown): value is SetupGuideStep {
-  return typeof value === "string" && Object.prototype.hasOwnProperty.call(TARGETS, value)
-    ? true
-    : value === "plugins" || value === "oauth" || value === "done";
+  return typeof value === "string" && GUIDE_STEPS.has(value as SetupGuideStep);
 }
 
 function isControlEnabled(element: HTMLElement): boolean {
@@ -532,6 +662,21 @@ function isControlEnabled(element: HTMLElement): boolean {
     element.getAttribute("aria-checked") === "true" ||
     element.getAttribute("data-state") === "checked"
   );
+}
+
+function fieldValue(element: HTMLElement | null): string {
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    return element.value;
+  }
+  return "";
+}
+
+function controlValue(element: HTMLElement | null): string {
+  if (!element) return "";
+  if (element instanceof HTMLSelectElement || element instanceof HTMLInputElement) {
+    return element.value.toLowerCase();
+  }
+  return `${element.getAttribute("data-value") ?? ""} ${element.textContent ?? ""}`.toLowerCase();
 }
 
 function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
@@ -544,6 +689,35 @@ function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: 
   else element.value = value;
   element.dispatchEvent(new Event("input", { bubbles: true }));
   element.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function settingsScrollContainer(target: HTMLElement): HTMLElement | null {
+  let node = target.parentElement;
+  while (node && node !== document.body) {
+    const style = getComputedStyle(node);
+    if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight) return node;
+    node = node.parentElement;
+  }
+
+  const modal =
+    target.closest<HTMLElement>("#modal-settings") ?? document.getElementById("modal-settings");
+  return modal?.querySelector<HTMLElement>('[class*="overflow-y-auto"]') ?? null;
+}
+
+function isVisibleWithin(target: HTMLElement, container: HTMLElement | null): boolean {
+  const targetRect = target.getBoundingClientRect();
+  const boundary = container?.getBoundingClientRect();
+  const top = boundary && boundary.height > 0 ? boundary.top : 0;
+  const bottom = boundary && boundary.height > 0 ? boundary.bottom : window.innerHeight;
+  return targetRect.bottom > top + 8 && targetRect.top < bottom - 8;
+}
+
+function centerInScrollContainer(target: HTMLElement, container: HTMLElement): void {
+  const targetRect = target.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  const height = container.clientHeight || containerRect.height;
+  const offset = targetRect.top - containerRect.top - Math.max(0, (height - targetRect.height) / 2);
+  container.scrollTop += offset;
 }
 
 function chatReturnUrl(): string {
@@ -564,6 +738,6 @@ function navigate(url: string): void {
   try {
     window.location.assign(url);
   } catch {
-    // JSDOM/test environments do not implement navigation; the persisted step still survives.
+    // JSDOM/test environments do not implement navigation; tab-session state still survives.
   }
 }

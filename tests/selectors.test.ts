@@ -145,29 +145,58 @@ describe("composer and guided-setup targets", () => {
     expect(queryGuideTarget("composerPlusButton")?.dataset["testid"]).toBe("composer-plus-btn");
   });
 
-  it("resolves Security and login, Developer mode row, and its switch", () => {
+  it("resolves Security and login, Developer mode row, and its semantic switch", () => {
     document.body.innerHTML = `
       <nav><button>Security and login</button></nav>
       <section class="developer-row">
         <div><strong>Developer mode</strong><span>Elevated Risk</span></div>
+        <div>Allows you to add unverified connectors that could modify or erase data permanently.</div>
         <button role="switch" aria-checked="false" aria-label="Developer mode"></button>
+      </section>
+      <section>
+        <span>Enforce CSP in developer mode</span>
+        <button role="switch" aria-checked="true" aria-label="Enforce CSP in developer mode"></button>
       </section>`;
 
     expect(queryGuideTarget("settingsSecurity")?.textContent).toContain("Security and login");
     expect(queryGuideTarget("developerModeRow")?.classList.contains("developer-row")).toBe(true);
-    expect(queryGuideTarget("developerModeToggle")?.getAttribute("role")).toBe("switch");
+    expect(queryGuideTarget("developerModeToggle")?.getAttribute("aria-label")).toBe(
+      "Developer mode",
+    );
   });
 
-  it("resolves every field in the New Plugin form", () => {
+  it("resolves the current Plugins search, Create app button, and only exact GitHub MCP result", () => {
     document.body.innerHTML = `
-      <button aria-label="Add plugin">+</button>
+      <input id="plugin-search" placeholder="Search plugins" aria-label="Search plugins" value="GitHub" />
+      <button aria-label="Create app"></button>
+      <article><a aria-label="Open GitHub" href="/plugins/public-github">GitHub</a></article>
+      <article><a aria-label="Open GitHub MCP" href="/plugins/custom-github-mcp">GitHub MCP</a></article>`;
+
+    expect(queryGuideTarget("pluginSearchInput")?.id).toBe("plugin-search");
+    expect(queryGuideTarget("pluginAddButton")?.getAttribute("aria-label")).toBe("Create app");
+    expect(queryGuideTarget("githubMcpPluginResult")?.getAttribute("aria-label")).toBe(
+      "Open GitHub MCP",
+    );
+  });
+
+  it("does not mistake the public GitHub plugin for a custom GitHub MCP app", () => {
+    document.body.innerHTML = `
+      <input id="plugin-search" aria-label="Search plugins" value="GitHub" />
+      <article><a aria-label="Open GitHub" href="/plugins/public-github">GitHub</a></article>`;
+
+    expect(queryGuideTarget("githubMcpPluginResult")).toBeNull();
+  });
+
+  it("resolves every field in the developer app form", () => {
+    document.body.innerHTML = `
+      <button aria-label="Create app">+</button>
       <label for="plugin-name">Name</label><input id="plugin-name" />
       <label for="server-url">Server URL</label><input id="server-url" type="url" />
       <label for="auth">Authentication</label><select id="auth"><option>OAuth</option></select>
       <label><span>I understand the risks and want to continue</span><input id="risk" type="checkbox" /></label>
       <button>Create</button>`;
 
-    expect(queryGuideTarget("pluginAddButton")?.getAttribute("aria-label")).toBe("Add plugin");
+    expect(queryGuideTarget("pluginAddButton")?.getAttribute("aria-label")).toBe("Create app");
     expect(queryGuideTarget("pluginNameInput")?.id).toBe("plugin-name");
     expect(queryGuideTarget("pluginServerInput")?.id).toBe("server-url");
     expect(queryGuideTarget("pluginAuthControl")?.id).toBe("auth");
