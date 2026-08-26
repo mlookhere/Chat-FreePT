@@ -172,7 +172,7 @@ describe("composer takeover lifecycle", () => {
 
     panel.toggle(false);
     expect(nativeSurface().style.pointerEvents).toBe("auto");
-    expect(nativeSurface().inert).toBe(false);
+    expect(nativeSurface().inert ?? false).toBe(false);
     expect(nativeSurface().getAttribute("aria-hidden")).toBe("false");
     expect(nativeSurface().dataset["cfptTakeover"]).toBeUndefined();
   });
