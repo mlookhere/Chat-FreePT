@@ -56,10 +56,24 @@ function overlayShadow(): ShadowRoot {
   return root;
 }
 
+function launcherButton(): HTMLButtonElement {
+  for (const root of shadows) {
+    const button = root.querySelector<HTMLButtonElement>(".cfpt-launcher");
+    if (button) return button;
+  }
+  throw new Error("Chat FreePT launcher button missing");
+}
+
 function nativeSurface(): HTMLElement {
   const surface = document.querySelector<HTMLElement>('[data-composer-surface="true"]');
   if (!surface) throw new Error("native composer surface missing");
   return surface;
+}
+
+function nativeComposer(): HTMLElement {
+  const composer = document.getElementById("prompt-textarea");
+  if (!composer) throw new Error("native composer input missing");
+  return composer;
 }
 
 function onboardingDone(): void {
@@ -141,21 +155,52 @@ describe("native composer launcher placement", () => {
 });
 
 describe("composer takeover lifecycle", () => {
-  it("blocks the native composer while open and restores its exact state on close", () => {
+  it("moves native focus, uses inert, and restores the exact native state on close", () => {
     onboardingDone();
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
+    nativeComposer().focus();
+    expect(document.activeElement).toBe(nativeComposer());
 
     panel.toggle(true);
     expect(nativeSurface().style.pointerEvents).toBe("none");
-    expect(nativeSurface().getAttribute("aria-hidden")).toBe("true");
+    expect(nativeSurface().inert).toBe(true);
+    expect(nativeSurface().getAttribute("aria-hidden")).toBe("false");
     expect(nativeSurface().dataset["cfptTakeover"]).toBe("true");
+    expect(document.activeElement).not.toBe(nativeComposer());
     expect(host().dataset["expanded"]).toBe("true");
 
     panel.toggle(false);
     expect(nativeSurface().style.pointerEvents).toBe("auto");
+    expect(nativeSurface().inert).toBe(false);
     expect(nativeSurface().getAttribute("aria-hidden")).toBe("false");
     expect(nativeSurface().dataset["cfptTakeover"]).toBeUndefined();
+  });
+
+  it("restores a composer that was already inert before takeover", () => {
+    onboardingDone();
+    nativeSurface().inert = true;
+    const panel = makePanel();
+    panel.render(newRunState("conversation-1", 1));
+
+    panel.toggle(true);
+    panel.toggle(false);
+    expect(nativeSurface().inert).toBe(true);
+  });
+
+  it("does not leak launcher events into ChatGPT composer controls", () => {
+    onboardingDone();
+    makePanel().render(newRunState("conversation-1", 1));
+    const nativeHandler = vi.fn();
+    host().parentElement?.addEventListener("pointerdown", nativeHandler);
+    host().parentElement?.addEventListener("mousedown", nativeHandler);
+    host().parentElement?.addEventListener("click", nativeHandler);
+
+    launcherButton().dispatchEvent(new Event("pointerdown", { bubbles: true, composed: true }));
+    launcherButton().dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true }));
+    launcherButton().dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+
+    expect(nativeHandler).not.toHaveBeenCalled();
   });
 
   it("closes when the user clicks outside the integrated panel", () => {
@@ -223,6 +268,7 @@ describe("first-run and plan-aware setup", () => {
 
     expect(overlayShadow().textContent).toContain("Follow along");
     expect(overlayShadow().textContent).toContain("Using ChatGPT Free?");
+    expect(overlayShadow().textContent).toContain("fill the GitHub MCP name");
     overlayShadow().querySelector<HTMLButtonElement>('[data-action="free-setup"]')?.click();
     expect(overlayShadow().textContent).toContain("Prepare GitHub manually first");
     expect(overlayShadow().textContent).toContain("Existing repo");
