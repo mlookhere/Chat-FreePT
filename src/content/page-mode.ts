@@ -15,7 +15,11 @@ export function chatGptPageMode(href: string): ChatGptPageMode {
   }
 
   if (url.pathname === "/plugins" || url.pathname.startsWith("/plugins/")) return "plugins";
-  if (UTILITY_PATH_PREFIXES.some((prefix) => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))) {
+  if (
+    UTILITY_PATH_PREFIXES.some(
+      (prefix) => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`),
+    )
+  ) {
     return "utility";
   }
   return "composer";
