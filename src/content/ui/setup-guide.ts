@@ -286,66 +286,76 @@ export class SetupGuide {
   }
 
   private advanceCompletedStep(): boolean {
-    if (this.step === "security" && queryGuideTarget("developerModeToggle")) {
+    return this.advanceSettingsStep() || this.advancePluginStep();
+  }
+
+  private advanceSettingsStep(): boolean {
+    const toggle = queryGuideTarget("developerModeToggle");
+    if (this.step === "security" && toggle) {
       void this.setStep("developer");
       return true;
     }
-
-    if (this.step === "developer" || this.step === "developer-toggle") {
-      const toggle = queryGuideTarget("developerModeToggle");
-      if (toggle && isControlEnabled(toggle)) {
+    if ((this.step === "developer" || this.step === "developer-toggle") && toggle) {
+      if (isControlEnabled(toggle)) {
         void this.setStep("plugins");
         return true;
       }
     }
+    return false;
+  }
 
-    if (this.step === "plugin-search" || this.step === "plugin-add") {
-      if (queryGuideTarget("githubMcpPluginResult")) {
-        this.returnToChat();
-        return true;
-      }
-    }
+  private advancePluginStep(): boolean {
+    if (this.existingPluginCompletesCreation()) return true;
+    return this.advancePluginFormStep();
+  }
 
-    if (this.step === "plugin-search") {
-      const search = queryGuideTarget("pluginSearchInput");
-      if (fieldValue(search).trim().toLowerCase() === SEARCH_VALUE.toLowerCase()) {
-        void this.setStep("plugin-add");
-        return true;
-      }
-    }
+  private existingPluginCompletesCreation(): boolean {
+    if (this.step !== "plugin-search" && this.step !== "plugin-add") return false;
+    if (!queryGuideTarget("githubMcpPluginResult")) return false;
+    this.returnToChat();
+    return true;
+  }
 
-    if (this.step === "plugin-name") {
-      const name = queryGuideTarget("pluginNameInput");
-      if (fieldValue(name).trim().toLowerCase() === SEARCH_VALUE.toLowerCase()) {
-        void this.setStep("plugin-server");
-        return true;
-      }
-    }
-
-    if (this.step === "plugin-server") {
-      const server = queryGuideTarget("pluginServerInput");
-      if (fieldValue(server).trim().replace(/\/$/, "") === MCP_URL.replace(/\/$/, "")) {
-        void this.setStep("plugin-auth");
-        return true;
-      }
-    }
-
-    if (this.step === "plugin-auth") {
-      const auth = queryGuideTarget("pluginAuthControl");
-      if (controlValue(auth).includes("oauth")) {
+  private advancePluginFormStep(): boolean {
+    switch (this.step) {
+      case "plugin-search":
+        return this.advanceWhenFieldMatches("pluginSearchInput", SEARCH_VALUE, "plugin-add");
+      case "plugin-name":
+        return this.advanceWhenFieldMatches("pluginNameInput", SEARCH_VALUE, "plugin-server");
+      case "plugin-server":
+        return this.advanceWhenFieldMatches("pluginServerInput", MCP_URL, "plugin-auth", true);
+      case "plugin-auth": {
+        const auth = queryGuideTarget("pluginAuthControl");
+        if (!controlValue(auth).includes("oauth")) return false;
         void this.setStep("plugin-risk");
         return true;
       }
-    }
-
-    if (this.step === "plugin-risk") {
-      const risk = queryGuideTarget("pluginRiskCheckbox");
-      if (risk && isControlEnabled(risk)) {
+      case "plugin-risk": {
+        const risk = queryGuideTarget("pluginRiskCheckbox");
+        if (!risk || !isControlEnabled(risk)) return false;
         void this.setStep("plugin-create");
         return true;
       }
+      default:
+        return false;
     }
-    return false;
+  }
+
+  private advanceWhenFieldMatches(
+    id: GuideTargetId,
+    expected: string,
+    next: SetupGuideStep,
+    ignoreTrailingSlash = false,
+  ): boolean {
+    let actual = fieldValue(queryGuideTarget(id)).trim();
+    let target = expected;
+    if (ignoreTrailingSlash) {
+      actual = actual.replace(/\/$/, "");
+      target = target.replace(/\/$/, "");
+    }
+    if (actual.toLowerCase() !== target.toLowerCase()) return false;
+    void this.setStep(next);
+    return true;
   }
 
   private hide(): void {
