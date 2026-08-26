@@ -1,0 +1,40 @@
+name: Prettier PR63 follow-along diagnostic
+
+on:
+  pull_request:
+    branches:
+      - work/62-mcp-setup-accessibility
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: work/62-mcp-setup-accessibility
+          fetch-depth: 0
+      - run: npm ci --no-audit --no-fund
+      - name: Apply repository Prettier
+        run: >-
+          npx prettier --write
+          src/common/prompts.ts
+          src/content/selectors.ts
+          src/content/ui/setup-guide.ts
+          tests/prompts.test.ts
+          tests/selectors.test.ts
+          tests/setup-guide.test.ts
+      - name: Commit exact formatter output to feature branch
+        run: |
+          if git diff --quiet; then
+            echo "Prettier already clean"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/common/prompts.ts src/content/selectors.ts src/content/ui/setup-guide.ts tests/prompts.test.ts tests/selectors.test.ts tests/setup-guide.test.ts
+          git commit -m "style: apply exact Prettier output for PR 63"
+          git push origin HEAD:work/62-mcp-setup-accessibility
