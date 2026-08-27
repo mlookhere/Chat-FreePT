@@ -63,7 +63,7 @@ describe("parseGitHubActionFence", () => {
 
   it("rejects oversized payloads", () => {
     const huge = "x".repeat(256_001);
-    const text = `\`\`\`chatfreept_action\n${huge}\n\`\`\``;
+    const text = ["```chatfreept_action", huge, "```"].join("\n");
     expect(parseGitHubActionFence(text)).toEqual({
       ok: false,
       error: "action payload exceeds size limit",
