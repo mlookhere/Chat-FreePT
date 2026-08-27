@@ -62,7 +62,9 @@ function findPendingSetup(): PendingSetup | null {
     const key = window.sessionStorage.key(index);
     if (!key?.startsWith(SETUP_KEY_PREFIX)) continue;
     try {
-      const state = JSON.parse(window.sessionStorage.getItem(key) ?? "null") as StoredGuide | null;
+      const state = JSON.parse(window.sessionStorage.getItem(key) ?? "null") as
+        | StoredGuide
+        | null;
       if (state?.active === true && state.step === "done") return { key, state };
     } catch {
       // Ignore stale/corrupt walkthrough state and let the normal setup guide recover.
