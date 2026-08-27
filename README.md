@@ -29,10 +29,22 @@ and UI.
 ## Requirements
 
 - Chrome (Manifest V3).
-- A ChatGPT account with **Developer Mode connectors** enabled and a **GitHub MCP connector**
-  configured with write access (Settings → Connectors → Advanced → Developer mode; connect
-  GitHub's remote MCP server `https://api.githubcopilot.com/mcp/`). The skill runs a
-  preflight in the conversation and stops with `NEEDS_INPUT` if the tools are missing.
+- A ChatGPT account/workspace where Developer Mode can use a write-capable custom MCP app.
+- The dedicated custom app must be configured as:
+  - **Name:** `Chat FreePT GitHub MCP`
+  - **Server URL:** `https://api.githubcopilot.com/mcp/x/all`
+  - **Authentication:** OAuth
+
+Chat FreePT's **Follow along** setup guides the ChatGPT-side flow through **Settings → Security
+and login → Developer mode → Plugins**, then returns to the originating conversation and
+selects **Developer mode** plus the exact **Chat FreePT GitHub MCP** app before setup is marked
+complete. The extension may fill safe app-configuration fields, but it never approves
+ChatGPT's elevated-risk acknowledgement and never completes or bypasses GitHub OAuth on the
+user's behalf.
+
+The injected skill performs its own GitHub capability preflight in the conversation and stops
+with `NEEDS_INPUT` if the required repository, branch/file, Issue/label, PR/merge, or Actions
+capabilities are unavailable.
 
 ## Install (unpacked)
 
@@ -43,8 +55,8 @@ npm run build
 
 Then Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → select `dist/`.
 
-Open a ChatGPT conversation, click the Chat FreePT launcher in the bottom-right corner,
-describe your idea, and start the plan.
+Open a ChatGPT conversation and click the Chat FreePT airplane launcher beside the native
+composer **Plus** control. Describe your idea and start the plan.
 
 ## Development
 
