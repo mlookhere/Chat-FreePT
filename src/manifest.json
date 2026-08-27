@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chat FreePT",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Turns a ChatGPT conversation into an autonomous CI-pipeline dev loop driven through ChatGPT's GitHub MCP connector.",
   "permissions": ["storage", "notifications"],
   "content_scripts": [
