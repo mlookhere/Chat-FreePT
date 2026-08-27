@@ -27,4 +27,4 @@ jobs:
       - name: Deterministic sleep/wake regression tests
         run: npx vitest run tests/stream-watch.test.ts tests/run-controller.test.ts tests/panel.test.ts tests/developer-mode-activation.test.ts
       - name: Real Chromium MV3 smoke
-        run: xvfb-run -a node scripts/browser-validation.mjs
+        run: xvfb-run -a node scripts/browser-validation-v2.mjs
