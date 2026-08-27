@@ -148,4 +148,28 @@ describe("StreamWatcher", () => {
     expect(onStart).toHaveBeenCalledTimes(1);
     expect(onStuck).toHaveBeenCalledTimes(1);
   });
+
+  it("does not count a long browser sleep gap toward the generation timeout", async () => {
+    const onStart = vi.fn();
+    const onComplete = vi.fn();
+    const onStuck = vi.fn();
+    watcher = new StreamWatcher(
+      { onStart, onComplete, onStuck },
+      { ...SETTINGS, maxStreamMinutes: 0.001 },
+    );
+    watcher.start();
+    watcher.expectReply();
+    main().appendChild(assistant("new", "Reply resumed after sleep"));
+
+    await advance(800);
+    expect(onStart).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    await advance(800);
+
+    expect(onStuck).not.toHaveBeenCalled();
+    await advance(2_400);
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onStuck).not.toHaveBeenCalled();
+  });
 });
