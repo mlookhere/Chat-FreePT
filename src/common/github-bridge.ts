@@ -107,15 +107,20 @@ export function parseGitHubActionFence(text: string): GitHubActionParseResult {
 }
 
 export function formatGitHubActionResult(result: GitHubActionResult): string {
-  return `\`\`\`chatfreept_result\n${JSON.stringify(result)}\n\`\`\``;
+  return "```chatfreept_result\n" + JSON.stringify(result) + "\n```";
 }
 
 function extractLastFence(text: string, language: string): string | null {
-  const pattern = new RegExp(`\\\\`\\\\`\\\\`${language}\\s*\\n([\\s\\S]*?)\\n?\\\\`\\\\`\\\\``, "g");
-  let match: RegExpExecArray | null;
-  let last: string | null = null;
-  while ((match = pattern.exec(text)) !== null) last = match[1] ?? "";
-  return last;
+  const open = "```" + language;
+  const start = text.lastIndexOf(open);
+  if (start < 0) return null;
+
+  const contentStart = text.indexOf("\n", start + open.length);
+  if (contentStart < 0) return null;
+
+  const end = text.indexOf("```", contentStart + 1);
+  if (end < 0) return null;
+  return text.slice(contentStart + 1, end).trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
