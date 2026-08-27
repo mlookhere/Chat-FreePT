@@ -134,6 +134,7 @@ export class StreamWatcher {
   private tickSettling(now: number, stopVisible: boolean): void {
     this.checkStuck(now);
     if (stopVisible) {
+      if (this.replyObserved && this.streamStartedAt === 0) this.streamStartedAt = now;
       this.state = "streaming";
       return;
     }
@@ -196,6 +197,7 @@ export class StreamWatcher {
       this.settleStartedAt = 0;
       return;
     }
+    this.streamStartedAt = 0;
     this.state = "settling";
     this.settleStartedAt = now;
   }
