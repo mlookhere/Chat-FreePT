@@ -11,6 +11,7 @@ import {
 } from "../common/storage";
 import type { RunState, Settings } from "../common/types";
 import type { ContentRequest } from "../common/types";
+import { activateDeveloperModeSetup } from "./developer-mode-activation";
 import { createExtensionContextGuard } from "./extension-context";
 import { conversationIdFromUrl, watchNavigation } from "./navigation";
 import { chatGptPageMode, type ChatGptPageMode } from "./page-mode";
@@ -225,6 +226,18 @@ async function activateComposerPage(): Promise<void> {
     return;
   }
   if (contextGuard.invalidated || chatGptPageMode(location.href) !== "composer" || panel) return;
+
+  try {
+    const activation = await activateDeveloperModeSetup();
+    if (activation === "activated")
+      log.info("Chat FreePT GitHub MCP activated for this conversation");
+    else if (activation !== "not-needed") {
+      log.warn(`developer MCP conversation activation incomplete: ${activation}`);
+    }
+  } catch (error) {
+    reportAsyncFailure("developer MCP conversation activation failed", error);
+  }
+  if (contextGuard.invalidated || panel) return;
 
   panel = new Panel({
     onEvent: (event) => controller?.dispatch(event),
