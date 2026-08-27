@@ -229,7 +229,8 @@ async function activateComposerPage(): Promise<void> {
 
   try {
     const activation = await activateDeveloperModeSetup();
-    if (activation === "activated") log.info("Chat FreePT GitHub MCP activated for this conversation");
+    if (activation === "activated")
+      log.info("Chat FreePT GitHub MCP activated for this conversation");
     else if (activation !== "not-needed") {
       log.warn(`developer MCP conversation activation incomplete: ${activation}`);
     }
