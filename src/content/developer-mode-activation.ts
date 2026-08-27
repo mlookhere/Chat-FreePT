@@ -2,9 +2,14 @@ import { queryGuideTarget, type GuideTargetId } from "./selectors";
 
 const SETUP_KEY_PREFIX = "cfpt:setup-guide:";
 const APP_NAME = "Chat FreePT GitHub MCP";
+const COMPOSER_PLUS_TARGET: GuideTargetId = "composerPlusButton";
+const DEVELOPER_MODE_TARGET: GuideTargetId = "conversationDeveloperMode";
+const APP_TARGET: GuideTargetId = "conversationGitHubMcp";
 const DEFAULT_TIMEOUT_MS = 5000;
 const DEFAULT_POLL_MS = 50;
 const APP_REOPEN_DELAY_MS = 900;
+
+type GuideElement = HTMLElement | null;
 
 interface StoredGuide {
   active?: boolean;
@@ -36,11 +41,11 @@ export async function activateDeveloperModeSetup(
   const pending = findPendingSetup();
   if (!pending) return "not-needed";
 
-  const plus = await waitForTarget("composerPlusButton", timeoutMs, pollMs);
+  const plus = await waitForTarget(COMPOSER_PLUS_TARGET, timeoutMs, pollMs);
   if (!plus) return "missing-plus";
   plus.click();
 
-  const developerMode = await waitForTarget("conversationDeveloperMode", timeoutMs, pollMs);
+  const developerMode = await waitForTarget(DEVELOPER_MODE_TARGET, timeoutMs, pollMs);
   if (!developerMode) return "missing-developer-mode";
   developerMode.click();
 
@@ -61,16 +66,20 @@ function findPendingSetup(): PendingSetup | null {
   for (let index = 0; index < window.sessionStorage.length; index += 1) {
     const key = window.sessionStorage.key(index);
     if (!key?.startsWith(SETUP_KEY_PREFIX)) continue;
-    try {
-      const state = JSON.parse(
-        window.sessionStorage.getItem(key) ?? "null",
-      ) as StoredGuide | null;
-      if (state?.active === true && state.step === "done") return { key, state };
-    } catch {
-      // Ignore stale/corrupt walkthrough state and let the normal setup guide recover.
-    }
+
+    const state = parseStoredGuide(window.sessionStorage.getItem(key));
+    if (state?.active === true && state.step === "done") return { key, state };
   }
   return null;
+}
+
+function parseStoredGuide(raw: string | null): StoredGuide | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as StoredGuide;
+  } catch {
+    return null;
+  }
 }
 
 function finishPendingSetup(pending: PendingSetup): void {
@@ -89,10 +98,10 @@ function isSelected(element: HTMLElement): boolean {
   );
 }
 
-async function waitForExactApp(timeoutMs: number, pollMs: number): Promise<HTMLElement | null> {
+async function waitForExactApp(timeoutMs: number, pollMs: number): Promise<GuideElement> {
   const started = Date.now();
   while (Date.now() - started <= timeoutMs) {
-    const found = queryGuideTarget("conversationGitHubMcp");
+    const found = queryGuideTarget(APP_TARGET);
     if (found && (found.textContent ?? "").trim() === APP_NAME) return found;
     await delay(pollMs);
   }
@@ -103,7 +112,7 @@ async function waitForTarget(
   id: GuideTargetId,
   timeoutMs: number,
   pollMs: number,
-): Promise<HTMLElement | null> {
+): Promise<GuideElement> {
   const started = Date.now();
   while (Date.now() - started <= timeoutMs) {
     const found = queryGuideTarget(id);
