@@ -108,6 +108,19 @@ describe("activateDeveloperModeSetup", () => {
     expect(storedState()).toMatchObject({ active: true, step: "done" });
   });
 
+  it("rejects the generic legacy GitHub MCP label", async () => {
+    pendingSetup();
+    document.body.innerHTML = `
+      <form data-type="unified-composer">
+        <button id="plus" type="button" data-testid="composer-plus-btn">+</button>
+      </form>
+      <button id="developer-mode">Developer mode</button>
+      <button id="generic-app">GitHub MCP</button>`;
+
+    expect(await activateDeveloperModeSetup(5, 1)).toBe("missing-app");
+    expect(storedState()).toMatchObject({ active: true, step: "done" });
+  });
+
   it("does not click an app that ChatGPT already reports as selected", async () => {
     pendingSetup();
     document.body.innerHTML = `
