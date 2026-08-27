@@ -14,7 +14,11 @@ export type MachineEvent =
   | { type: "USER_PAUSE" }
   | { type: "USER_RESUME" }
   | { type: "USER_STOP" }
+  | { type: "USER_NEW_PROJECT" }
   | { type: "USER_REPLY"; text: string }
+  | { type: "USER_SET_AUTO_CONTINUE"; enabled: boolean }
+  | { type: "USER_QUEUE_NEXT"; text: string }
+  | { type: "USER_CLEAR_QUEUE" }
   | { type: "INSERT_OK" }
   | { type: "INSERT_FAIL"; detail: string }
   | { type: "SEND_OK" }
@@ -26,7 +30,7 @@ export type MachineEvent =
   | { type: "PAGE_SIGNAL"; signal: PageSignal };
 
 export type PromptKind =
-  "plan" | "develop" | "continue" | "contract_refresh" | "nudge" | "user_text";
+  "plan" | "develop" | "continue" | "contract_refresh" | "nudge" | "user_text" | "queued_user_text";
 
 export type Effect =
   | { do: "insertAndSend"; kind: PromptKind; text?: string }
@@ -57,11 +61,16 @@ type UserEvent = Extract<
       | "USER_PAUSE"
       | "USER_RESUME"
       | "USER_STOP"
-      | "USER_REPLY";
+      | "USER_NEW_PROJECT"
+      | "USER_REPLY"
+      | "USER_SET_AUTO_CONTINUE"
+      | "USER_QUEUE_NEXT"
+      | "USER_CLEAR_QUEUE";
   }
 >;
 type StartEvent = Extract<UserEvent, { type: "USER_START" }>;
 type UserReplyEvent = Extract<UserEvent, { type: "USER_REPLY" }>;
+type QueueEvent = Extract<UserEvent, { type: "USER_QUEUE_NEXT" }>;
 type SendEvent = Extract<
   MachineEvent,
   { type: "INSERT_OK" | "INSERT_FAIL" | "SEND_OK" | "SEND_FAIL" }
@@ -80,7 +89,11 @@ const USER_EVENTS = new Set<MachineEvent["type"]>([
   "USER_PAUSE",
   "USER_RESUME",
   "USER_STOP",
+  "USER_NEW_PROJECT",
   "USER_REPLY",
+  "USER_SET_AUTO_CONTINUE",
+  "USER_QUEUE_NEXT",
+  "USER_CLEAR_QUEUE",
 ]);
 const SEND_EVENTS = new Set<MachineEvent["type"]>([
   "INSERT_OK",
@@ -103,6 +116,7 @@ export function newRunState(conversationId: string, now: number): RunState {
     idea: "",
     repoMode: "new",
     repoName: "",
+    autoContinueEnabled: true,
     autoSends: 0,
     nudges: 0,
     repliesSinceContract: 0,
@@ -114,6 +128,19 @@ export function newRunState(conversationId: string, now: number): RunState {
 
 export function isActive(state: RunState): boolean {
   return ACTIVE_STATUSES.has(state.status);
+}
+
+export function autoContinueEnabled(state: RunState): boolean {
+  return state.autoContinueEnabled !== false;
+}
+
+export function isWaitingForManualContinue(state: RunState): boolean {
+  return (
+    state.status === "awaiting_user" &&
+    state.lastMarker?.status === "CONTINUE" &&
+    !autoContinueEnabled(state) &&
+    isContinuablePhase(state)
+  );
 }
 
 /** Remaining delay for a persisted cooldown. Legacy cooldowns without a deadline resume now. */
@@ -183,8 +210,16 @@ function reduceUserEvent(ctx: ReduceContext, event: UserEvent): boolean {
       return resumeRun(ctx);
     case "USER_STOP":
       return stopRun(ctx);
+    case "USER_NEW_PROJECT":
+      return newProject(ctx);
     case "USER_REPLY":
       return sendUserReply(ctx, event);
+    case "USER_SET_AUTO_CONTINUE":
+      return setAutoContinue(ctx, event.enabled);
+    case "USER_QUEUE_NEXT":
+      return queueNextMessage(ctx, event);
+    case "USER_CLEAR_QUEUE":
+      return clearQueuedMessage(ctx);
   }
 }
 
@@ -202,6 +237,7 @@ function startRun(ctx: ReduceContext, event: StartEvent): boolean {
   state.nudges = 0;
   state.repliesSinceContract = 0;
   state.startedAt = ctx.now;
+  delete state.queuedUserText;
   delete state.errorCode;
   delete state.pauseReason;
   note(ctx, "info", "Planning started");
@@ -243,10 +279,22 @@ function resumeRun(ctx: ReduceContext): boolean {
   return true;
 }
 
+function resetRun(ctx: ReduceContext, logText: string): void {
+  const enabled = autoContinueEnabled(ctx.state);
+  const reset = newRunState(ctx.state.conversationId, ctx.now);
+  reset.autoContinueEnabled = enabled;
+  reset.log = [{ at: ctx.now, kind: "info", text: logText }];
+  ctx.state = reset;
+}
+
 function stopRun(ctx: ReduceContext): boolean {
-  ctx.state.phase = "stopped";
-  ctx.state.status = "idle";
-  note(ctx, "info", "Stopped");
+  resetRun(ctx, "Stopped and reset");
+  ctx.effects.push({ do: "badge", text: "" });
+  return true;
+}
+
+function newProject(ctx: ReduceContext): boolean {
+  resetRun(ctx, "Ready for a new project");
   ctx.effects.push({ do: "badge", text: "" });
   return true;
 }
@@ -265,6 +313,53 @@ function sendUserReply(ctx: ReduceContext, event: UserReplyEvent): boolean {
     { do: "insertAndSend", kind: "user_text", text: event.text },
     { do: "badge", text: "RUN" },
   );
+  return true;
+}
+
+function setAutoContinue(ctx: ReduceContext, enabled: boolean): boolean {
+  const state = ctx.state;
+  if (autoContinueEnabled(state) === enabled && state.autoContinueEnabled !== undefined)
+    return false;
+  state.autoContinueEnabled = enabled;
+  note(ctx, "info", `Auto-continue ${enabled ? "enabled" : "disabled"}`);
+
+  if (!enabled && state.status === "cooldown" && !state.queuedUserText) {
+    waitForManualContinue(ctx);
+    return true;
+  }
+
+  if (
+    enabled &&
+    state.status === "awaiting_user" &&
+    state.lastMarker?.status === "CONTINUE" &&
+    isContinuablePhase(state)
+  ) {
+    delete state.pauseReason;
+    handleContinue(ctx);
+  }
+  return true;
+}
+
+function queueNextMessage(ctx: ReduceContext, event: QueueEvent): boolean {
+  const text = event.text.trim();
+  if (!text || !isContinuablePhase(ctx.state)) return false;
+  ctx.state.queuedUserText = text;
+  note(ctx, "info", "Queued next user message");
+
+  if (ctx.state.status === "awaiting_user" && ctx.state.lastMarker?.status === "CONTINUE") {
+    delete ctx.state.pauseReason;
+    scheduleContinuation(ctx);
+  }
+  return true;
+}
+
+function clearQueuedMessage(ctx: ReduceContext): boolean {
+  if (!ctx.state.queuedUserText) return false;
+  delete ctx.state.queuedUserText;
+  note(ctx, "info", "Cleared queued user message");
+  if (!autoContinueEnabled(ctx.state) && ctx.state.status === "cooldown") {
+    waitForManualContinue(ctx);
+  }
   return true;
 }
 
@@ -310,21 +405,40 @@ function reduceStreamEvent(ctx: ReduceContext, event: StreamEvent): boolean {
 
 function reduceSystemEvent(ctx: ReduceContext, event: SystemEvent): boolean {
   switch (event.type) {
-    case "COOLDOWN_ELAPSED": {
-      if (ctx.state.status !== "cooldown") return false;
-      ctx.state.status = "inserting";
-      ctx.state.autoSends += 1;
-      const refresh = ctx.state.repliesSinceContract >= ctx.settings.contractRefreshEvery;
-      if (refresh) ctx.state.repliesSinceContract = 0;
-      note(ctx, "send", refresh ? "Auto-continue (with contract refresh)" : "Auto-continue");
-      ctx.effects.push({ do: "insertAndSend", kind: refresh ? "contract_refresh" : "continue" });
-      return true;
-    }
+    case "COOLDOWN_ELAPSED":
+      return finishCooldown(ctx);
     case "PAGE_SIGNAL":
       if (!isActive(ctx.state) && ctx.state.status !== "awaiting_user") return false;
       handlePageSignal(ctx, event.signal);
       return true;
   }
+}
+
+function finishCooldown(ctx: ReduceContext): boolean {
+  const state = ctx.state;
+  if (state.status !== "cooldown") return false;
+
+  if (state.queuedUserText) {
+    const text = state.queuedUserText;
+    delete state.queuedUserText;
+    state.status = "inserting";
+    note(ctx, "send", "Sending queued user message");
+    ctx.effects.push({ do: "insertAndSend", kind: "queued_user_text", text });
+    return true;
+  }
+
+  if (!autoContinueEnabled(state)) {
+    waitForManualContinue(ctx);
+    return true;
+  }
+
+  state.status = "inserting";
+  state.autoSends += 1;
+  const refresh = state.repliesSinceContract >= ctx.settings.contractRefreshEvery;
+  if (refresh) state.repliesSinceContract = 0;
+  note(ctx, "send", refresh ? "Auto-continue (with contract refresh)" : "Auto-continue");
+  ctx.effects.push({ do: "insertAndSend", kind: refresh ? "contract_refresh" : "continue" });
+  return true;
 }
 
 function handlePageSignal(ctx: ReduceContext, signal: PageSignal): void {
@@ -424,8 +538,16 @@ function handleMarker(ctx: ReduceContext, marker: Marker, text: string): void {
 function handleContinue(ctx: ReduceContext): void {
   const state = ctx.state;
   if (state.phase === "plan_ready") state.phase = "planning";
-  if (state.phase !== "planning" && state.phase !== "developing") {
+  if (!isContinuablePhase(state)) {
     state.status = "awaiting_user";
+    return;
+  }
+  if (state.queuedUserText) {
+    scheduleContinuation(ctx);
+    return;
+  }
+  if (!autoContinueEnabled(state)) {
+    waitForManualContinue(ctx);
     return;
   }
   if (state.autoSends >= ctx.settings.autoContinueCap) {
@@ -436,9 +558,24 @@ function handleContinue(ctx: ReduceContext): void {
     );
     return;
   }
-  state.status = "cooldown";
-  state.cooldownUntil = ctx.now + ctx.settings.sendDelayMs;
+  scheduleContinuation(ctx);
+}
+
+function isContinuablePhase(state: RunState): boolean {
+  return state.phase === "planning" || state.phase === "developing";
+}
+
+function scheduleContinuation(ctx: ReduceContext): void {
+  ctx.state.status = "cooldown";
+  ctx.state.cooldownUntil = ctx.now + ctx.settings.sendDelayMs;
   ctx.effects.push({ do: "startCooldown", ms: ctx.settings.sendDelayMs });
+}
+
+function waitForManualContinue(ctx: ReduceContext): void {
+  ctx.state.status = "awaiting_user";
+  ctx.state.pauseReason = "Auto-continue is off.";
+  note(ctx, "info", "Waiting because auto-continue is off");
+  ctx.effects.push({ do: "badge", text: "II" });
 }
 
 function excerpt(text: string): string {

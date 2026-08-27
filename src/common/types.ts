@@ -65,6 +65,10 @@ export interface RunState {
   planSummary?: string;
   pauseReason?: string;
   errorCode?: ErrorCode;
+  /** Defaults to true for legacy persisted runs where the field is absent. */
+  autoContinueEnabled?: boolean;
+  /** One user-authored message that takes precedence over the next automatic continue. */
+  queuedUserText?: string;
   /** Auto-sends used in the current phase (cap enforced per phase). */
   autoSends: number;
   /** Marker-recovery nudges since the last successful marker parse. Max 1. */

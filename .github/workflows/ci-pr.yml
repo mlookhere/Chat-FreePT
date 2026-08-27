@@ -118,6 +118,13 @@ jobs:
           cache-dependency-path: ci/requirements-ci.txt
       - run: ./scripts/bootstrap --ci
       - run: ./ci/run pr
+      - name: Upload installable extension package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: chat-freept-pr-${{ github.event.pull_request.number || github.sha }}
+          path: artifacts/chat-freept.zip
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload PR gate report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

@@ -14,6 +14,7 @@ type WatchState = "idle" | "waiting" | "streaming" | "settling";
 
 const TICK_MS = 800;
 const MARKER_FAST_PATH_MS = 1200;
+const SUSPEND_GAP_MS = TICK_MS * 4;
 
 /**
  * Streaming detection composed from independent signals: an explicit expectation after
@@ -25,6 +26,7 @@ export class StreamWatcher {
   private lastMutationAt = 0;
   private settleStartedAt = 0;
   private streamStartedAt = 0;
+  private lastTickAt = 0;
   private stuckReported = false;
   private replyObserved = false;
   private baselineElement: HTMLElement | null = null;
@@ -47,6 +49,7 @@ export class StreamWatcher {
       characterData: true,
       subtree: true,
     });
+    this.lastTickAt = Date.now();
     this.timer = setInterval(() => this.tick(), TICK_MS);
   }
 
@@ -64,8 +67,8 @@ export class StreamWatcher {
     this.baselineElement = message?.el ?? null;
     this.baselineText = message?.text ?? "";
     this.state = "waiting";
-    this.streamStartedAt = Date.now();
-    this.lastMutationAt = this.streamStartedAt;
+    this.streamStartedAt = 0;
+    this.lastMutationAt = Date.now();
     this.settleStartedAt = 0;
     this.stuckReported = false;
     this.replyObserved = false;
@@ -80,9 +83,23 @@ export class StreamWatcher {
     return query("stopButton") !== null;
   }
 
+  /** Rebase elapsed-time watchdogs after browser/PC suspend so sleep never counts as generation. */
+  recoverFromWake(): void {
+    const now = Date.now();
+    this.recoverTiming(now, this.isStreaming());
+    this.lastTickAt = now;
+  }
+
   private tick(): void {
     const now = Date.now();
     const stopVisible = this.isStreaming();
+    if (this.lastTickAt > 0 && now - this.lastTickAt > SUSPEND_GAP_MS) {
+      this.recoverTiming(now, stopVisible);
+      this.lastTickAt = now;
+      return;
+    }
+    this.lastTickAt = now;
+
     switch (this.state) {
       case "idle":
         this.tickIdle(now, stopVisible);
@@ -104,7 +121,6 @@ export class StreamWatcher {
   }
 
   private tickWaiting(now: number, stopVisible: boolean): void {
-    this.checkStuck(now);
     if (stopVisible || this.assistantTurnChanged()) {
       this.observeReplyStart(now, stopVisible);
     }
@@ -118,6 +134,7 @@ export class StreamWatcher {
   private tickSettling(now: number, stopVisible: boolean): void {
     this.checkStuck(now);
     if (stopVisible) {
+      if (this.replyObserved && this.streamStartedAt === 0) this.streamStartedAt = now;
       this.state = "streaming";
       return;
     }
@@ -150,7 +167,7 @@ export class StreamWatcher {
   private observeReplyStart(now: number, stopVisible: boolean): void {
     if (!this.replyObserved) {
       this.replyObserved = true;
-      if (this.streamStartedAt === 0) this.streamStartedAt = now;
+      this.streamStartedAt = now;
       this.stuckReported = false;
       this.callbacks.onStart();
     }
@@ -167,9 +184,28 @@ export class StreamWatcher {
     this.lastMutationAt = now;
   }
 
+  private recoverTiming(now: number, stopVisible: boolean): void {
+    if (this.state === "idle") return;
+    log.debug("stream watcher resumed after a timer gap; rebasing elapsed time");
+    this.stuckReported = false;
+    this.lastMutationAt = now;
+    if (this.replyObserved) this.streamStartedAt = now;
+
+    if (this.state === "waiting") return;
+    if (stopVisible) {
+      this.state = "streaming";
+      this.settleStartedAt = 0;
+      return;
+    }
+    this.streamStartedAt = 0;
+    this.state = "settling";
+    this.settleStartedAt = now;
+  }
+
   private checkStuck(now: number): void {
     if (
       !this.stuckReported &&
+      this.replyObserved &&
       this.streamStartedAt > 0 &&
       now - this.streamStartedAt > this.settings.maxStreamMinutes * 60_000
     ) {
@@ -183,6 +219,7 @@ export class StreamWatcher {
     this.lastMutationAt = 0;
     this.settleStartedAt = 0;
     this.streamStartedAt = 0;
+    this.lastTickAt = 0;
     this.stuckReported = false;
     this.replyObserved = false;
     this.baselineElement = null;

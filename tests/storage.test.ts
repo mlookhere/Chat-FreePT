@@ -113,6 +113,28 @@ describe("run state", () => {
     expect(await storage.loadRun("c1")).toEqual(state);
   });
 
+  it("keeps simultaneous conversation state independent", async () => {
+    const first = {
+      ...newRunState("conversation-a", 1),
+      idea: "first project",
+      autoContinueEnabled: false,
+    };
+    const second = {
+      ...newRunState("conversation-b", 2),
+      idea: "second project",
+      queuedUserText: "second follow-up",
+    };
+
+    await storage.saveRun(first);
+    await storage.saveRun(second);
+
+    expect(await storage.loadRun("conversation-a")).toEqual(first);
+    expect(await storage.loadRun("conversation-b")).toEqual(second);
+    expect(stores.local[storage.runKey("conversation-a")]).not.toEqual(
+      stores.local[storage.runKey("conversation-b")],
+    );
+  });
+
   it("returns null for unknown conversations", async () => {
     expect(await storage.loadRun("nope")).toBeNull();
   });
@@ -138,6 +160,13 @@ describe("tab lock", () => {
   it("grants the lock to the first tab and refuses a live second tab", async () => {
     expect(await storage.acquireTabLock("c1", "tab-a")).toBe(true);
     expect(await storage.acquireTabLock("c1", "tab-b")).toBe(false);
+  });
+
+  it("allows different tabs to drive different conversations simultaneously", async () => {
+    expect(await storage.acquireTabLock("conversation-a", "tab-a")).toBe(true);
+    expect(await storage.acquireTabLock("conversation-b", "tab-b")).toBe(true);
+    expect(await storage.heartbeatTabLock("conversation-a", "tab-a")).toBe(true);
+    expect(await storage.heartbeatTabLock("conversation-b", "tab-b")).toBe(true);
   });
 
   it("is reentrant for the same nonce", async () => {

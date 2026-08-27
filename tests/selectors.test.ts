@@ -1,32 +1,52 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { healthCheck, query, queryAll, queryLast, resolve } from "../src/content/selectors";
+import {
+  healthCheck,
+  query,
+  queryAll,
+  queryGuideTarget,
+  queryLast,
+  resolve,
+} from "../src/content/selectors";
 
-/**
- * Synthetic fixture reflecting chatgpt.com's known structure (composer, send button,
- * message turns). Refresh against the live site when selectors drift — the registry's
- * candidate order encodes today's DOM first.
- */
 const CHATGPT_FIXTURE = `
-  <main>
-    <div role="presentation">
-      <article data-testid="conversation-turn-1">
-        <div data-message-author-role="user" data-message-id="u1">build me a thing</div>
-      </article>
-      <article data-testid="conversation-turn-2">
-        <div data-message-author-role="assistant" data-message-id="a1">
-          <div class="markdown">working on it</div>
-        </div>
-      </article>
-      <article data-testid="conversation-turn-3">
-        <div data-message-author-role="assistant" data-message-id="a2">
-          <div class="markdown">done<pre><code>CHATFREEPT_STATUS: CONTINUE</code></pre></div>
-        </div>
-      </article>
+  <main id="main">
+    <div id="thread">
+      <div data-turn-id-container="request-user-1">
+        <section data-testid="conversation-turn-1" data-turn="user">
+          <div class="user-turn">
+            <div data-message-author-role="user" data-message-id="u1">build me a thing</div>
+          </div>
+        </section>
+      </div>
+      <div data-turn-id-container="request-assistant-1">
+        <section data-testid="conversation-turn-2" data-turn="assistant">
+          <div class="agent-turn">
+            <div data-message-author-role="assistant" data-message-id="a1">working on it</div>
+          </div>
+        </section>
+      </div>
+      <div data-turn-id-container="request-assistant-2">
+        <section data-testid="conversation-turn-3" data-turn="assistant">
+          <div class="agent-turn">
+            <div data-message-author-role="assistant" data-message-id="a2">
+              done<pre><code>CHATFREEPT_STATUS: CONTINUE</code></pre>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div id="thread-bottom">
+        <div data-prompt-textarea-header></div>
+        <form data-type="unified-composer">
+          <div data-composer-surface="true">
+            <div class="left-controls">
+              <button data-testid="composer-plus-btn" aria-label="Add files">+</button>
+            </div>
+            <div id="prompt-textarea" class="ProseMirror" contenteditable="true"><p></p></div>
+            <button data-testid="send-button" aria-label="Send prompt"></button>
+          </div>
+        </form>
+      </div>
     </div>
-    <form>
-      <div id="prompt-textarea" class="ProseMirror" contenteditable="true"><p></p></div>
-      <button id="composer-submit-button" data-testid="send-button" aria-label="Send prompt"></button>
-    </form>
   </main>
 `;
 
@@ -34,21 +54,22 @@ beforeEach(() => {
   document.body.innerHTML = CHATGPT_FIXTURE;
 });
 
-describe("selector registry", () => {
-  it("resolves the primary candidates on the reference fixture", () => {
+describe("core selector resolution", () => {
+  it("resolves primary candidates on the current composer structure", () => {
     expect(resolve("composer")?.candidateIndex).toBe(0);
+    expect(resolve("composerHeader")?.candidateIndex).toBe(0);
+    expect(resolve("composerSurface")?.candidateIndex).toBe(0);
     expect(resolve("sendButton")?.candidateIndex).toBe(0);
     expect(resolve("conversationRoot")?.candidateIndex).toBe(0);
     expect(resolve("assistantMessage")?.candidateIndex).toBe(0);
     expect(resolve("userMessage")?.candidateIndex).toBe(0);
   });
 
-  it("queryLast returns the newest assistant message", () => {
-    const el = queryLast("assistantMessage");
-    expect(el?.getAttribute("data-message-id")).toBe("a2");
+  it("returns the newest assistant message", () => {
+    expect(queryLast("assistantMessage")?.getAttribute("data-message-id")).toBe("a2");
   });
 
-  it("queryAll returns all alert and toast matches", () => {
+  it("returns all alert and toast matches", () => {
     document.body.insertAdjacentHTML(
       "beforeend",
       '<div role="alert">one</div><div class="toast-banner">two</div>',
@@ -62,20 +83,37 @@ describe("selector registry", () => {
     expect(query("toolIndicator", turn)?.textContent).toBe("GitHub");
   });
 
-  it("falls back down the candidate list", () => {
+  it("treats an empty-composer Send button absence as healthy", () => {
+    document.querySelector('[data-testid="send-button"]')?.remove();
+    expect(query("sendButton")).toBeNull();
+    expect(healthCheck().missing).toEqual([]);
+  });
+});
+
+describe("selector fallbacks and health", () => {
+  it("falls back down the composer, header, and surface candidates", () => {
     document.getElementById("prompt-textarea")?.removeAttribute("id");
-    const res = resolve("composer");
-    expect(res).not.toBeNull();
-    expect(res?.candidateIndex).toBeGreaterThan(0);
+    document.getElementById("thread-bottom")?.removeAttribute("id");
+    expect(resolve("composer")?.candidateIndex).toBeGreaterThan(0);
+    expect(resolve("composerHeader")?.candidateIndex).toBeGreaterThan(0);
+    expect(resolve("composerSurface")?.candidateIndex).toBeGreaterThan(0);
   });
 
-  it("filters text-matched candidates", () => {
-    document.body.innerHTML = `<main><form>
-      <div id="prompt-textarea" contenteditable="true"></div>
-      <button>Cancel</button><button>Send</button>
-    </form></main>`;
-    const res = resolve("sendButton");
-    expect(res?.element.textContent).toBe("Send");
+  it("falls back to the unified form when the surface attribute disappears", () => {
+    document
+      .querySelector('[data-composer-surface="true"]')
+      ?.removeAttribute("data-composer-surface");
+    const surface = resolve("composerSurface");
+    expect(surface?.element.tagName).toBe("FORM");
+    expect(surface?.candidateIndex).toBe(3);
+  });
+
+  it("filters text-matched Send candidates", () => {
+    document.querySelector('[data-testid="send-button"]')?.remove();
+    document
+      .querySelector("form")
+      ?.insertAdjacentHTML("beforeend", "<button>Cancel</button><button>Send</button>");
+    expect(resolve("sendButton")?.element.textContent).toBe("Send");
   });
 
   it("reports stop button absence as no streaming", () => {
@@ -86,19 +124,108 @@ describe("selector registry", () => {
     expect(query("stopButton")).not.toBeNull();
   });
 
-  it("healthCheck passes on the fixture and fails when required targets vanish", () => {
-    expect(healthCheck().missing).toEqual([]);
-
+  it("fails health only when an automation-required target vanishes", () => {
     document.getElementById("prompt-textarea")?.remove();
-    document.querySelectorAll("button").forEach((b) => b.remove());
+    document.querySelectorAll('[contenteditable="true"]').forEach((el) => el.remove());
     const report = healthCheck();
     expect(report.missing).toContain("composer");
-    expect(report.missing).toContain("sendButton");
+    expect(report.missing).not.toContain("sendButton");
+    expect(report.missing).not.toContain("composerHeader");
+    expect(report.missing).not.toContain("composerSurface");
   });
 
-  it("healthCheck reports degradation when primaries drift", () => {
+  it("reports degradation when the primary composer drifts", () => {
     document.getElementById("prompt-textarea")?.removeAttribute("id");
-    const report = healthCheck();
-    expect(report.degraded.some((d) => d.id === "composer")).toBe(true);
+    expect(healthCheck().degraded.some((item) => item.id === "composer")).toBe(true);
+  });
+});
+
+describe("composer and guided-setup targets", () => {
+  it("resolves the native composer + button", () => {
+    expect(queryGuideTarget("composerPlusButton")?.dataset["testid"]).toBe("composer-plus-btn");
+  });
+
+  it("resolves Security and login, Developer mode row, and its semantic switch", () => {
+    document.body.innerHTML = `
+      <nav><button>Security and login</button></nav>
+      <section class="developer-row">
+        <div><strong>Developer mode</strong><span>Elevated Risk</span></div>
+        <div>Allows you to add unverified connectors that could modify or erase data permanently.</div>
+        <button role="switch" aria-checked="false" aria-label="Developer mode"></button>
+      </section>
+      <section>
+        <span>Enforce CSP in developer mode</span>
+        <button role="switch" aria-checked="true" aria-label="Enforce CSP in developer mode"></button>
+      </section>`;
+
+    expect(queryGuideTarget("settingsSecurity")?.textContent).toContain("Security and login");
+    expect(queryGuideTarget("developerModeRow")?.classList.contains("developer-row")).toBe(true);
+    expect(queryGuideTarget("developerModeToggle")?.getAttribute("aria-label")).toBe(
+      "Developer mode",
+    );
+  });
+
+  it("resolves Plugins controls and only the dedicated Chat FreePT GitHub MCP result", () => {
+    document.body.innerHTML = `
+      <input id="plugin-search" placeholder="Search plugins" aria-label="Search plugins" value="GitHub" />
+      <button aria-label="Create app"></button>
+      <article><a aria-label="Open GitHub" href="/plugins/public-github">GitHub</a></article>
+      <article><a aria-label="Open GitHub MCP" href="/plugins/custom-github-mcp">GitHub MCP</a></article>
+      <article><a aria-label="Open Chat FreePT GitHub MCP" href="/plugins/custom-chat-freept-github-mcp">Chat FreePT GitHub MCP</a></article>`;
+
+    expect(queryGuideTarget("pluginSearchInput")?.id).toBe("plugin-search");
+    expect(queryGuideTarget("pluginAddButton")?.getAttribute("aria-label")).toBe("Create app");
+    expect(queryGuideTarget("githubMcpPluginResult")?.getAttribute("aria-label")).toBe(
+      "Open Chat FreePT GitHub MCP",
+    );
+  });
+
+  it("does not mistake public or legacy GitHub entries for the dedicated app", () => {
+    document.body.innerHTML = `
+      <input id="plugin-search" aria-label="Search plugins" value="GitHub" />
+      <article><a aria-label="Open GitHub" href="/plugins/public-github">GitHub</a></article>
+      <article><a aria-label="Open GitHub MCP" href="/plugins/custom-github-mcp">GitHub MCP</a></article>`;
+
+    expect(queryGuideTarget("githubMcpPluginResult")).toBeNull();
+  });
+
+  it("prefers the exact current New Plugin form controls", () => {
+    document.body.innerHTML = `
+      <div id="modal-create-custom-connector">
+        <form>
+          <input id="custom-connector-name" aria-label="Name" placeholder="Custom Tool" />
+          <div role="radiogroup" aria-label="Connection">
+            <button type="button" role="radio" aria-checked="true" aria-label="Server URL">Server URL</button>
+            <button type="button" role="radio" aria-checked="false" aria-label="Tunnel">Tunnel</button>
+          </div>
+          <input id="custom-connector-url" inputmode="url" placeholder="https://example.com/sse" />
+          <button role="combobox" aria-label="Authentication">No Auth</button>
+          <div role="option">OAuth</div>
+          <label for="trust-checkbox"><input id="trust-checkbox" data-testid="trust-checkbox" type="checkbox" />I understand and want to continue</label>
+          <button type="submit" disabled><div>Create</div></button>
+        </form>
+      </div>`;
+
+    expect(queryGuideTarget("pluginNameInput")?.id).toBe("custom-connector-name");
+    expect(queryGuideTarget("pluginServerUrlOption")?.getAttribute("aria-label")).toBe(
+      "Server URL",
+    );
+    expect(queryGuideTarget("pluginServerInput")?.id).toBe("custom-connector-url");
+    expect(queryGuideTarget("pluginAuthControl")?.getAttribute("aria-label")).toBe(
+      "Authentication",
+    );
+    expect(queryGuideTarget("pluginOauthOption")?.textContent).toBe("OAuth");
+    expect(queryGuideTarget("pluginRiskCheckbox")?.id).toBe("trust-checkbox");
+    expect(queryGuideTarget("pluginCreateButton")?.getAttribute("type")).toBe("submit");
+  });
+
+  it("still resolves either dedicated or legacy MCP names if a conversation menu exposes one", () => {
+    document.body.innerHTML = `
+      <div role="menu">
+        <button role="menuitem">Developer mode</button>
+        <button role="menuitem">Chat FreePT GitHub MCP</button>
+      </div>`;
+    expect(queryGuideTarget("conversationDeveloperMode")?.textContent).toBe("Developer mode");
+    expect(queryGuideTarget("conversationGitHubMcp")?.textContent).toBe("Chat FreePT GitHub MCP");
   });
 });

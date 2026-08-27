@@ -2,7 +2,7 @@
   "version": 2,
   "branches": {
     "integration": "dev",
-    "production": "master"
+    "production": "main"
   },
   "worktrees": {
     "root": "../.worktrees",

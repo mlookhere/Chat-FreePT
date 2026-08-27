@@ -34,7 +34,7 @@ function toStreaming(state: RunState): RunState {
   return drive(state, [{ type: "INSERT_OK" }, { type: "SEND_OK" }]).state;
 }
 
-describe("state machine", () => {
+describe("state machine continuation lifecycle", () => {
   it("USER_START enters planning and requests the plan prompt", () => {
     const initial = newRunState("c1", 1000);
     const { state, effects } = reduce(
@@ -117,7 +117,9 @@ describe("state machine", () => {
     }
     expect(kinds).toContain("contract_refresh");
   });
+});
 
+describe("state machine marker transitions", () => {
   it("NEEDS_INPUT pauses for the user and notifies", () => {
     const streaming = toStreaming(start());
     const { state, effects } = reduce(
@@ -196,7 +198,9 @@ describe("state machine", () => {
     expect(done.status).toBe("complete");
     expect(effects.some((e) => e.do === "showModal")).toBe(true);
   });
+});
 
+describe("state machine recovery and user control", () => {
   it("missing marker nudges once, then pauses", () => {
     let state = toStreaming(start());
     const first = reduce(
@@ -238,9 +242,9 @@ describe("state machine", () => {
     expect(resumed.effects).toContainEqual({ do: "reconcile" });
   });
 
-  it("USER_STOP archives the run", () => {
+  it("USER_STOP resets the run", () => {
     const state = reduce(toStreaming(start()), { type: "USER_STOP" }, settings).state;
-    expect(state.phase).toBe("stopped");
+    expect(state.phase).toBe("idle");
     expect(state.status).toBe("idle");
   });
 

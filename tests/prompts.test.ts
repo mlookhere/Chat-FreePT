@@ -3,6 +3,7 @@ import {
   buildContinuePrompt,
   buildDevelopPrompt,
   buildHandoffPrompt,
+  buildMcpPreflight,
   buildPlanPrompt,
   buildUserReply,
   COMPACT_CONTRACT,
@@ -54,9 +55,51 @@ describe("plan prompt", () => {
     );
   });
 
+  it("uses mode-aware GitHub capability requirements", () => {
+    const newRepo = buildMcpPreflight("new", "cookie-cli");
+    expect(newRepo).toContain("NEW-REPOSITORY mode");
+    expect(newRepo).toContain("repository-creation capability");
+    expect(newRepo).toContain("label_write");
+
+    const existing = buildMcpPreflight("existing", "me/mine");
+    expect(existing).toContain("EXISTING-REPOSITORY mode for me/mine");
+    expect(existing).toMatch(/Do NOT\s+require repository creation/);
+    expect(existing).toMatch(/only for labels that are actually\s+missing/);
+  });
+
+  it("uses the automated full-toolset custom MCP flow and does not require default-branch mutation", () => {
+    const prompt = buildPlanPrompt(planInput);
+    expect(prompt).toContain("Settings → Security and login");
+    expect(prompt).toContain("https://chatgpt.com/plugins");
+    expect(prompt).toContain("Chat FreePT GitHub MCP");
+    expect(prompt).toContain("Server URL");
+    expect(prompt).toContain("https://api.githubcopilot.com/mcp/x/all");
+    expect(prompt).toContain("all available MCP toolsets");
+    expect(prompt).toContain("OAuth");
+    expect(prompt).toContain("press Create after I explicitly check");
+    expect(prompt).toContain("run this capability preflight again");
+    expect(prompt).not.toContain("open the Plus menu");
+    expect(prompt).not.toContain("choose Developer mode, and select");
+    expect(prompt).toContain("Repository default-branch mutation is NOT required");
+    expect(prompt).toContain("Do NOT require changing the repository default branch");
+    expect(prompt).not.toContain("set dev as the default branch");
+  });
+
+  it("uses main as production and dev as integration", () => {
+    const plan = buildPlanPrompt(planInput);
+    const develop = buildDevelopPrompt(DEFAULT_SETTINGS);
+
+    expect(plan).toContain("dev is integration; main is production");
+    expect(plan).toContain("release — PR dev into main");
+    expect(plan).toMatch(/name dev or main explicitly/);
+    expect(develop).toContain("dev → main");
+
+    expect(plan).not.toContain("master is production");
+    expect(plan).not.toContain("PR dev into master");
+    expect(develop).not.toContain("dev → master");
+  });
+
   it("does not itself parse as a status marker sent by the assistant", () => {
-    // The prompt necessarily quotes the CHATFREEPT_STATUS syntax; the parser must not
-    // treat the placeholder form as a real status.
     const prompt = buildPlanPrompt(planInput);
     const marker = parseMarker(prompt);
     expect(marker).toBeNull();
@@ -71,6 +114,7 @@ describe("develop prompt", () => {
     expect(prompt).toContain("self-audit");
     expect(prompt).toContain("COMPLETE");
     expect(prompt).toContain(String(Math.round(DEFAULT_SETTINGS.sendDelayMs / 1000)));
+    expect(prompt).toContain("Chat FreePT follow-up messages are your clock ticks");
   });
 });
 
@@ -101,6 +145,11 @@ describe("continue / nudge / reply / handoff", () => {
     expect(prompt).toContain("DEVELOPING");
     expect(prompt).toContain("Operating contract");
   });
+
+  it("handoff falls back when both repo fields are empty", () => {
+    const prompt = buildHandoffPrompt(newRunState("c1", 0));
+    expect(prompt).toContain("Repo: (see the plan conversation)");
+  });
 });
 
 describe("marker block", () => {
@@ -114,5 +163,11 @@ describe("marker block", () => {
       expect(count).toBe(1);
     }
     expect(MARKER_BLOCK).toContain("Never omit the block");
+  });
+
+  it("describes queued and controlled continuation instead of promising an automatic continue", () => {
+    expect(MARKER_BLOCK).toContain("queued next message");
+    expect(MARKER_BLOCK).toContain("depending on my controls");
+    expect(MARKER_BLOCK).not.toContain('I will reply "continue" automatically');
   });
 });
