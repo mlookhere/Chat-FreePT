@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
     stop: ReturnType<typeof vi.fn>;
     expectReply: ReturnType<typeof vi.fn>;
     cancelExpectedReply: ReturnType<typeof vi.fn>;
+    recoverFromWake: ReturnType<typeof vi.fn>;
     isStreaming: () => boolean;
   }>,
 }));
@@ -49,6 +50,7 @@ vi.mock("../src/content/stream-watch", () => ({
     stop = vi.fn();
     expectReply = vi.fn();
     cancelExpectedReply = vi.fn();
+    recoverFromWake = vi.fn();
 
     constructor(callbacks: (typeof mocks.watchers)[number]["callbacks"]) {
       this.callbacks = callbacks;
@@ -242,6 +244,41 @@ describe("RunController recovery and disposal", () => {
     expect(String(mocks.insertPrompt.mock.calls[0]?.[0])).toContain("Use SQLite.");
     expect(mocks.clickSend).toHaveBeenCalledTimes(1);
     expect(controller.state.status).toBe("streaming");
+    controller.dispose();
+  });
+
+  it("waits for a temporarily missing composer to restore before failing the send", async () => {
+    vi.useFakeTimers();
+    mocks.healthCheck
+      .mockReturnValueOnce({ missing: ["composer"], degraded: [] })
+      .mockReturnValueOnce({ missing: [], degraded: [] });
+    const controller = makeController();
+
+    controller.dispatch({ type: "USER_START", idea: "build it", repoMode: "new", repoName: "" });
+    await flushAsync();
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushAsync();
+
+    expect(mocks.healthCheck).toHaveBeenCalledTimes(2);
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.status).toBe("streaming");
+    controller.dispose();
+  });
+
+  it("rebases the watcher and reconciles the live reply when the page resumes", () => {
+    const controller = makeController(streamingState());
+    mocks.lastAssistantMessage.mockReturnValue({
+      el: document.createElement("div"),
+      text: "Done.\nCHATFREEPT_STATUS: CONTINUE\nV: 1",
+    });
+
+    window.dispatchEvent(new Event("pageshow"));
+
+    expect(watcher().recoverFromWake).toHaveBeenCalledTimes(1);
+    expect(controller.state.status).toBe("cooldown");
     controller.dispose();
   });
 
