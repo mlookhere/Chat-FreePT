@@ -1,0 +1,22 @@
+name: Prettier diagnostic
+
+on:
+  push:
+    branches:
+      - work/68-sleep-recovery-tooltip
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: npm ci --no-audit --no-fund
+      - run: npx prettier --write src/content/ui/panel.ts src/content/ui/styles.ts tests/panel.test.ts
+      - name: Print exact formatter diff
+        run: git diff -- src/content/ui/panel.ts src/content/ui/styles.ts tests/panel.test.ts
