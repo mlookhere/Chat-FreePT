@@ -55,6 +55,10 @@ npm run build
 
 Then Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → select `dist/`.
 
+For release-candidate testing, use the extension ZIP produced by the successful release gate
+instead of rebuilding locally. Extract `chat-freept.zip` to a folder first, then use **Load
+unpacked** on that extracted folder so the browser is testing the exact CI-built package.
+
 Open a ChatGPT conversation and click the Chat FreePT airplane launcher beside the native
 composer **Plus** control. Describe your idea and start the plan.
 
