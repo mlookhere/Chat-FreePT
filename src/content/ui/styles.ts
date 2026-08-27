@@ -60,6 +60,33 @@ button, textarea, input, select { font: inherit; }
 .cfpt-launcher:hover { background: var(--cfpt-hover); color: var(--cfpt-text); }
 .cfpt-launcher:active { transform: scale(0.95); }
 .cfpt-launcher:focus-visible { outline: 2px solid var(--cfpt-accent); outline-offset: 2px; }
+.cfpt-launcher-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 4;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--cfpt-border) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--cfpt-text) 94%, transparent);
+  color: var(--cfpt-surface);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, 2px);
+  transition: opacity 100ms ease, transform 100ms ease, visibility 100ms ease;
+}
+.cfpt-launcher:hover + .cfpt-launcher-tooltip,
+.cfpt-launcher:focus-visible + .cfpt-launcher-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
 .cfpt-airplane { width: 18px; height: 18px; display: block; fill: currentColor; }
 .cfpt-launcher[data-state="run"] {
   color: var(--cfpt-accent);
@@ -324,6 +351,7 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--cfpt-accent
 @media (prefers-reduced-motion: reduce) {
   .cfpt-launcher,
   :host([data-highlighted="true"]) .cfpt-launcher,
+  .cfpt-launcher-tooltip,
   .cfpt-spinner { animation: none; transition: none; }
 }
 `;
