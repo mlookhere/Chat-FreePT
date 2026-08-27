@@ -40,7 +40,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("StreamWatcher", () => {
+describe("StreamWatcher reply lifecycle", () => {
   it("starts and completes from a new assistant turn without a stop button", async () => {
     main().appendChild(assistant("old", "previous reply"));
     const onStart = vi.fn();
@@ -117,7 +117,9 @@ describe("StreamWatcher", () => {
     expect(onStart).not.toHaveBeenCalled();
     expect(onComplete).not.toHaveBeenCalled();
   });
+});
 
+describe("StreamWatcher timeout recovery", () => {
   it("does not age an expected reply into a false generation timeout before output starts", async () => {
     const onStuck = vi.fn();
     watcher = new StreamWatcher(
