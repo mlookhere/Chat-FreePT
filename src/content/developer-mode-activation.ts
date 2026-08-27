@@ -23,11 +23,7 @@ interface PendingSetup {
 }
 
 export type DeveloperModeActivationResult =
-  | "not-needed"
-  | "activated"
-  | "missing-plus"
-  | "missing-developer-mode"
-  | "missing-app";
+  "not-needed" | "activated" | "missing-plus" | "missing-developer-mode" | "missing-app";
 
 /**
  * Finishes the documented ChatGPT Developer mode flow after the setup guide returns
