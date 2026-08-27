@@ -123,8 +123,6 @@ export class Panel {
     this.host.dataset["status"] = state.status;
     this.host.dataset["phase"] = state.phase;
     this.launcher.dataset["state"] = visualState;
-    const status = passive ? "Active in another tab" : (STATUS_LABEL[state.status] ?? state.status);
-    this.launcher.title = `Chat FreePT · ${phaseLabel(state.phase)} · ${status}`;
 
     const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${autoContinueEnabled(state)}|${state.queuedUserText ?? ""}|${passive}`;
     if (viewKey !== this.lastViewKey) {
@@ -188,17 +186,25 @@ export class Panel {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "cfpt-launcher";
-    button.title = "Open Chat FreePT";
     button.setAttribute("aria-label", "Open Chat FreePT");
     button.setAttribute("aria-expanded", "false");
+    button.setAttribute("aria-describedby", "cfpt-launcher-tooltip");
     button.innerHTML = airplaneSvg();
+    button.addEventListener("pointerover", (event) => event.stopPropagation());
+    button.addEventListener("mouseover", (event) => event.stopPropagation());
     button.addEventListener("pointerdown", (event) => event.stopPropagation());
     button.addEventListener("mousedown", (event) => event.stopPropagation());
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       this.onLauncherClick();
     });
-    shadow.appendChild(button);
+
+    const tooltip = document.createElement("span");
+    tooltip.id = "cfpt-launcher-tooltip";
+    tooltip.className = "cfpt-launcher-tooltip";
+    tooltip.setAttribute("role", "tooltip");
+    tooltip.textContent = "Chat FreePT";
+    shadow.append(button, tooltip);
     return { host, shadow, button };
   }
 
@@ -460,12 +466,15 @@ export class Panel {
 
   private bodyHtml(state: RunState, passive: boolean): string {
     const health = healthCheck();
-    const warn =
-      health.missing.length > 0
-        ? `<div class="cfpt-warn">ChatGPT's page structure changed — missing: ${esc(
-            health.missing.join(", "),
-          )}. Auto-run cannot operate until the extension is updated.</div>`
-        : "";
+    const showHealthWarning =
+      state.status === "error" &&
+      state.errorCode === "composer-insert-failed" &&
+      health.missing.length > 0;
+    const warn = showHealthWarning
+      ? `<div class="cfpt-warn">ChatGPT's page structure changed — missing: ${esc(
+          health.missing.join(", "),
+        )}. Auto-run cannot operate until the extension is updated.</div>`
+      : "";
     if (passive) return warn + this.passiveHtml(state);
     const controls = this.automationControlsHtml(state);
     return warn + controls + this.statusBodyHtml(state);

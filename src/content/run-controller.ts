@@ -21,6 +21,8 @@ import { lastAssistantMessage } from "./transcript";
 const SIGNAL_POLL_MS = 5000;
 const COMPOSER_BUSY_RETRIES = 3;
 const COMPOSER_BUSY_WAIT_MS = 5000;
+const COMPOSER_RESTORE_RETRIES = 10;
+const COMPOSER_RESTORE_WAIT_MS = 500;
 
 export class RunController {
   state: RunState;
@@ -64,12 +66,16 @@ export class RunController {
       settings,
     );
     this.watcher.start();
+    document.addEventListener("visibilitychange", this.onVisibilityResume);
+    window.addEventListener("pageshow", this.onPageShow);
     this.signalTimer = setInterval(() => this.pollSignals(), SIGNAL_POLL_MS);
     this.restoreCooldown();
   }
 
   dispose(): void {
     this.disposed = true;
+    document.removeEventListener("visibilitychange", this.onVisibilityResume);
+    window.removeEventListener("pageshow", this.onPageShow);
     this.watcher.stop();
     this.clearCooldownTimer();
     if (this.signalTimer !== undefined) clearInterval(this.signalTimer);
@@ -114,6 +120,20 @@ export class RunController {
         text: message.text,
       });
     }
+  }
+
+  private readonly onVisibilityResume = (): void => {
+    if (document.visibilityState === "visible") this.recoverAfterWake();
+  };
+
+  private readonly onPageShow = (): void => {
+    this.recoverAfterWake();
+  };
+
+  private recoverAfterWake(): void {
+    if (this.disposed) return;
+    this.watcher.recoverFromWake();
+    if (isActive(this.state) || this.state.status === "awaiting_user") this.reconcile();
   }
 
   private pollSignals(): void {
@@ -204,7 +224,8 @@ export class RunController {
 
   private async insertAndSend(kind: PromptKind, text?: string): Promise<void> {
     if (this.disposed) return;
-    const health = healthCheck();
+    const health = await this.waitForComposerRestore();
+    if (this.disposed) return;
     if (health.missing.length > 0) {
       this.dispatch({
         type: "INSERT_FAIL",
@@ -250,6 +271,20 @@ export class RunController {
       return;
     }
     this.dispatch({ type: "SEND_OK" });
+  }
+
+  private async waitForComposerRestore(): Promise<ReturnType<typeof healthCheck>> {
+    let health = healthCheck();
+    for (
+      let retry = 0;
+      retry < COMPOSER_RESTORE_RETRIES && health.missing.includes("composer");
+      retry += 1
+    ) {
+      await sleep(COMPOSER_RESTORE_WAIT_MS);
+      if (this.disposed) return health;
+      health = healthCheck();
+    }
+    return health;
   }
 
   private sendToBackground(message: BgRequest): void {
