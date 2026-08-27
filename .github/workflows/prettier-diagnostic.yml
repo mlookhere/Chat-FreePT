@@ -6,7 +6,7 @@ on:
       - work/68-sleep-recovery-tooltip
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format:
@@ -14,9 +14,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
       - run: npm ci --no-audit --no-fund
       - run: npx prettier --write src/content/ui/panel.ts src/content/ui/styles.ts tests/panel.test.ts
-      - name: Print exact formatter diff
-        run: git diff -- src/content/ui/panel.ts src/content/ui/styles.ts tests/panel.test.ts
+      - name: Commit exact formatter output
+        run: |
+          if git diff --quiet -- src/content/ui/panel.ts src/content/ui/styles.ts tests/panel.test.ts; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/content/ui/panel.ts src/content/ui/styles.ts tests/panel.test.ts
+          git commit -m "style: apply exact prettier output"
+          git push origin HEAD:work/68-sleep-recovery-tooltip
