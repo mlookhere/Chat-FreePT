@@ -56,12 +56,17 @@ function overlayShadow(): ShadowRoot {
   return root;
 }
 
-function launcherButton(): HTMLButtonElement {
+function launcherShadow(): ShadowRoot {
   for (const root of shadows) {
-    const button = root.querySelector<HTMLButtonElement>(".cfpt-launcher");
-    if (button) return button;
+    if (root.querySelector(".cfpt-launcher")) return root;
   }
-  throw new Error("Chat FreePT launcher button missing");
+  throw new Error("Chat FreePT launcher shadow missing");
+}
+
+function launcherButton(): HTMLButtonElement {
+  const button = launcherShadow().querySelector<HTMLButtonElement>(".cfpt-launcher");
+  if (!button) throw new Error("Chat FreePT launcher button missing");
+  return button;
 }
 
 function nativeSurface(): HTMLElement {
@@ -118,6 +123,21 @@ describe("native composer launcher placement", () => {
     expect(host().parentElement).toBe(plus?.parentElement);
     expect(host().dataset["fallback"]).toBe("false");
     expect(document.querySelectorAll("#cfpt-root")).toHaveLength(1);
+  });
+
+  it("owns a Chat FreePT tooltip instead of using a browser-native title", () => {
+    onboardingDone();
+    makePanel().render(newRunState("conversation-1", 1));
+    const button = launcherButton();
+    const tooltip = launcherShadow().querySelector<HTMLElement>(".cfpt-launcher-tooltip");
+
+    expect(button.hasAttribute("title")).toBe(false);
+    expect(button.getAttribute("aria-describedby")).toBe("cfpt-launcher-tooltip");
+    expect(tooltip?.getAttribute("role")).toBe("tooltip");
+    expect(tooltip?.textContent).toBe("Chat FreePT");
+    expect(PANEL_CSS).toContain(".cfpt-launcher:hover + .cfpt-launcher-tooltip");
+    expect(PANEL_CSS).toContain("border-radius: 8px");
+    expect(PANEL_CSS).toContain("pointer-events: none");
   });
 
   it("keeps the expanded surface outside the native composer DOM", () => {
@@ -192,15 +212,42 @@ describe("composer takeover lifecycle", () => {
     onboardingDone();
     makePanel().render(newRunState("conversation-1", 1));
     const nativeHandler = vi.fn();
+    host().parentElement?.addEventListener("pointerover", nativeHandler);
+    host().parentElement?.addEventListener("mouseover", nativeHandler);
     host().parentElement?.addEventListener("pointerdown", nativeHandler);
     host().parentElement?.addEventListener("mousedown", nativeHandler);
     host().parentElement?.addEventListener("click", nativeHandler);
 
+    launcherButton().dispatchEvent(new Event("pointerover", { bubbles: true, composed: true }));
+    launcherButton().dispatchEvent(new MouseEvent("mouseover", { bubbles: true, composed: true }));
     launcherButton().dispatchEvent(new Event("pointerdown", { bubbles: true, composed: true }));
     launcherButton().dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true }));
     launcherButton().dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
 
     expect(nativeHandler).not.toHaveBeenCalled();
+  });
+
+  it("does not surface a transient missing-composer warning until a real insert error exists", () => {
+    onboardingDone();
+    const panel = makePanel();
+    nativeComposer().remove();
+    panel.render({
+      ...newRunState("conversation-1", 1),
+      phase: "developing",
+      status: "streaming",
+    });
+    panel.toggle(true);
+
+    expect(overlayShadow().textContent).not.toContain("page structure changed");
+
+    panel.render({
+      ...newRunState("conversation-1", 1),
+      phase: "developing",
+      status: "error",
+      errorCode: "composer-insert-failed",
+      pauseReason: "Could not write into the composer",
+    });
+    expect(overlayShadow().textContent).toContain("page structure changed");
   });
 
   it("closes when the user clicks outside the integrated panel", () => {
