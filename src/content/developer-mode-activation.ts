@@ -1,6 +1,7 @@
 import { queryGuideTarget, type GuideTargetId } from "./selectors";
 
 const SETUP_KEY_PREFIX = "cfpt:setup-guide:";
+const APP_NAME = "Chat FreePT GitHub MCP";
 const DEFAULT_TIMEOUT_MS = 5000;
 const DEFAULT_POLL_MS = 50;
 const APP_REOPEN_DELAY_MS = 900;
@@ -43,11 +44,11 @@ export async function activateDeveloperModeSetup(
   if (!developerMode) return "missing-developer-mode";
   developerMode.click();
 
-  let app = await waitForTarget("conversationGitHubMcp", APP_REOPEN_DELAY_MS, pollMs);
+  let app = await waitForExactApp(Math.min(APP_REOPEN_DELAY_MS, timeoutMs), pollMs);
   if (!app) {
     // Some ChatGPT layouts close the Plus menu after switching into Developer mode.
     plus.click();
-    app = await waitForTarget("conversationGitHubMcp", timeoutMs, pollMs);
+    app = await waitForExactApp(timeoutMs, pollMs);
   }
   if (!app) return "missing-app";
 
@@ -84,6 +85,16 @@ function isSelected(element: HTMLElement): boolean {
     element.getAttribute("data-state") === "checked" ||
     element.getAttribute("data-state") === "on"
   );
+}
+
+async function waitForExactApp(timeoutMs: number, pollMs: number): Promise<HTMLElement | null> {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    const found = queryGuideTarget("conversationGitHubMcp");
+    if (found && (found.textContent ?? "").trim() === APP_NAME) return found;
+    await delay(pollMs);
+  }
+  return null;
 }
 
 async function waitForTarget(
