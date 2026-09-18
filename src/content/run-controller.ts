@@ -202,10 +202,7 @@ export class RunController {
       return;
     }
 
-    if (
-      this.observedAssistantKey !== message.key ||
-      this.observedAssistantText !== message.text
-    ) {
+    if (this.observedAssistantKey !== message.key || this.observedAssistantText !== message.text) {
       this.observedAssistantKey = message.key;
       this.observedAssistantText = message.text;
       this.observedAssistantSince = now;
