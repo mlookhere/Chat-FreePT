@@ -276,9 +276,11 @@ describe("RunController recovery and disposal", () => {
 
   it("rebases the watcher and reconciles the live reply when the page resumes", () => {
     const controller = makeController(streamingState());
+    mocks.lastMessageRole.mockReturnValue("assistant");
     mocks.lastAssistantMessage.mockReturnValue({
       el: document.createElement("div"),
       text: "Done.\nCHATFREEPT_STATUS: CONTINUE\nV: 1",
+      key: "message:wake-reply",
     });
 
     window.dispatchEvent(new Event("pageshow"));
