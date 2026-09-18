@@ -209,7 +209,7 @@ export class SetupGuide {
     const clicked = event.target instanceof Node ? event.target : null;
     if (!target || !clicked || !target.contains(clicked)) return;
     setTimeout(() => {
-      if (isControlEnabled(target)) void this.setStep("plugin-create");
+      if (isControlEnabled(target)) this.setStep("plugin-create");
     }, 80);
   };
 
@@ -277,7 +277,7 @@ export class SetupGuide {
   private advanceSecurity(): boolean {
     const toggle = queryGuideTarget("developerModeToggle");
     if (toggle) {
-      void this.setStep("developer-toggle");
+      this.setStep("developer-toggle");
       return true;
     }
     const security = queryGuideTarget("settingsSecurity");
@@ -285,7 +285,7 @@ export class SetupGuide {
     this.runOnce("security", () => {
       security.click();
       setTimeout(() => {
-        if (this.step === "security") void this.setStep("developer");
+        if (this.step === "security") this.setStep("developer");
       }, 120);
     });
     return false;
@@ -294,7 +294,7 @@ export class SetupGuide {
   private advanceDeveloperRow(): boolean {
     const toggle = queryGuideTarget("developerModeToggle");
     if (!toggle) return false;
-    void this.setStep("developer-toggle");
+    this.setStep("developer-toggle");
     return true;
   }
 
@@ -340,7 +340,7 @@ export class SetupGuide {
   private advanceRiskApproval(): boolean {
     const risk = queryGuideTarget("pluginRiskCheckbox");
     if (!risk || !isControlEnabled(risk)) return false;
-    void this.setStep("plugin-create");
+    this.setStep("plugin-create");
     return true;
   }
 
@@ -363,7 +363,7 @@ export class SetupGuide {
     }
     this.runOnce("plugin-search", () => {
       setTimeout(() => {
-        if (this.step === "plugin-search") void this.setStep("plugin-add");
+        if (this.step === "plugin-search") this.setStep("plugin-add");
       }, SEARCH_SETTLE_MS);
     });
     return false;
@@ -375,7 +375,7 @@ export class SetupGuide {
     this.runOnce("plugin-add", () => {
       create.click();
       setTimeout(() => {
-        if (this.step === "plugin-add") void this.setStep("plugin-name");
+        if (this.step === "plugin-add") this.setStep("plugin-name");
       }, 120);
     });
     return false;
@@ -385,7 +385,7 @@ export class SetupGuide {
     const input = queryGuideTarget("pluginNameInput");
     if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) return false;
     if (fieldValue(input).trim() !== APP_NAME) setNativeValue(input, APP_NAME);
-    void this.setStep("plugin-server");
+    this.setStep("plugin-server");
     return true;
   }
 
@@ -401,7 +401,7 @@ export class SetupGuide {
     const input = queryGuideTarget("pluginServerInput");
     if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) return false;
     if (!sameUrl(fieldValue(input), MCP_URL)) setNativeValue(input, MCP_URL);
-    void this.setStep("plugin-auth");
+    this.setStep("plugin-auth");
     return true;
   }
 
@@ -410,11 +410,11 @@ export class SetupGuide {
     if (!auth) return false;
     if (auth instanceof HTMLSelectElement) {
       if (auth.value.toUpperCase() !== "OAUTH") setNativeSelectValue(auth, "OAUTH");
-      void this.setStep("plugin-risk");
+      this.setStep("plugin-risk");
       return true;
     }
     if (controlValue(auth).includes("oauth")) {
-      void this.setStep("plugin-risk");
+      this.setStep("plugin-risk");
       return true;
     }
     this.runOnce("plugin-auth", () => {
@@ -434,7 +434,7 @@ export class SetupGuide {
     this.runOnce("plugin-create", () => {
       create.click();
       setTimeout(() => {
-        if (this.step === "plugin-create") void this.setStep("oauth");
+        if (this.step === "plugin-create") this.setStep("oauth");
       }, 120);
     });
     return false;
@@ -509,7 +509,7 @@ export class SetupGuide {
     return false;
   }
 
-  private async setStep(step: SetupGuideStep): Promise<void> {
+  private setStep(step: SetupGuideStep): void {
     this.step = step;
     this.resetStepTracking();
     this.persist();
@@ -533,11 +533,13 @@ export class SetupGuide {
   }
 
   private openPlugins(): void {
-    void this.setStep("plugin-search").then(() => navigate(PLUGINS_URL));
+    this.setStep("plugin-search");
+    navigate(PLUGINS_URL);
   }
 
   private returnToChat(): void {
-    void this.setStep("done").then(() => navigate(this.returnUrl));
+    this.setStep("done");
+    navigate(this.returnUrl);
   }
 
   private async finish(): Promise<void> {

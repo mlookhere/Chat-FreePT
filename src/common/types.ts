@@ -77,6 +77,10 @@ export interface RunState {
   repliesSinceContract: number;
   /** Absolute epoch-ms deadline for a persisted auto-continue cooldown. */
   cooldownUntil?: number;
+  /** Durable identity of the assistant turn already consumed by the state machine. */
+  lastProcessedAssistantKey?: string;
+  /** Assistant turn present when the current reply was armed; never consume it as the new reply. */
+  replyBaselineAssistantKey?: string;
   startedAt: number;
   updatedAt: number;
   log: ActivityEntry[];

@@ -119,6 +119,96 @@ describe("state machine continuation lifecycle", () => {
   });
 });
 
+describe("state machine reply checkpoints", () => {
+  it("persists the assistant baseline when a reply is armed", () => {
+    const sending = drive(start(), [{ type: "INSERT_OK" }]).state;
+    const result = reduce(
+      sending,
+      { type: "REPLY_EXPECTED", baselineAssistantKey: "message:before-send" },
+      settings,
+    );
+    expect(result.state.replyBaselineAssistantKey).toBe("message:before-send");
+  });
+
+  it("rejects a stale reply that matches the pre-send assistant baseline", () => {
+    let state = toStreaming(start());
+    state = {
+      ...state,
+      replyBaselineAssistantKey: "message:before-send",
+    };
+    const result = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("CONTINUE"),
+        text: "",
+        assistantKey: "message:before-send",
+      },
+      settings,
+    );
+    expect(result.state).toBe(state);
+    expect(result.effects).toEqual([]);
+  });
+
+  it("consumes a fresh assistant turn only once", () => {
+    let state = toStreaming(start());
+    state = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("CONTINUE"),
+        text: "",
+        assistantKey: "message:fresh",
+      },
+      settings,
+    ).state;
+    expect(state.lastProcessedAssistantKey).toBe("message:fresh");
+    expect(state.status).toBe("cooldown");
+
+    state = { ...state, status: "streaming" };
+    const duplicate = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("CONTINUE"),
+        text: "",
+        assistantKey: "message:fresh",
+      },
+      settings,
+    );
+    expect(duplicate.state).toBe(state);
+    expect(duplicate.effects).toEqual([]);
+  });
+
+  it("accepts a fresh marker-bearing reply after the user answered directly in chat", () => {
+    let state = toStreaming(start());
+    state = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("NEEDS_INPUT"),
+        text: "",
+        assistantKey: "message:question",
+      },
+      settings,
+    ).state;
+    expect(state.status).toBe("awaiting_user");
+
+    const result = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("CONTINUE"),
+        text: "",
+        assistantKey: "message:manual-answer-reply",
+      },
+      settings,
+    );
+    expect(result.state.status).toBe("cooldown");
+    expect(result.state.lastProcessedAssistantKey).toBe("message:manual-answer-reply");
+  });
+});
+
 describe("state machine marker transitions", () => {
   it("NEEDS_INPUT pauses for the user and notifies", () => {
     const streaming = toStreaming(start());

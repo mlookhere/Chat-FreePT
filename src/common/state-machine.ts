@@ -23,8 +23,14 @@ export type MachineEvent =
   | { type: "INSERT_FAIL"; detail: string }
   | { type: "SEND_OK" }
   | { type: "SEND_FAIL"; detail: string }
+  | { type: "REPLY_EXPECTED"; baselineAssistantKey?: string }
   | { type: "STREAM_STARTED" }
-  | { type: "REPLY_COMPLETE"; marker: Marker | null; text: string }
+  | {
+      type: "REPLY_COMPLETE";
+      marker: Marker | null;
+      text: string;
+      assistantKey?: string;
+    }
   | { type: "STREAM_STUCK" }
   | { type: "COOLDOWN_ELAPSED" }
   | { type: "PAGE_SIGNAL"; signal: PageSignal };
@@ -73,7 +79,7 @@ type UserReplyEvent = Extract<UserEvent, { type: "USER_REPLY" }>;
 type QueueEvent = Extract<UserEvent, { type: "USER_QUEUE_NEXT" }>;
 type SendEvent = Extract<
   MachineEvent,
-  { type: "INSERT_OK" | "INSERT_FAIL" | "SEND_OK" | "SEND_FAIL" }
+  { type: "INSERT_OK" | "INSERT_FAIL" | "SEND_OK" | "SEND_FAIL" | "REPLY_EXPECTED" }
 >;
 type StreamEvent = Extract<
   MachineEvent,
@@ -100,6 +106,7 @@ const SEND_EVENTS = new Set<MachineEvent["type"]>([
   "INSERT_FAIL",
   "SEND_OK",
   "SEND_FAIL",
+  "REPLY_EXPECTED",
 ]);
 const STREAM_EVENTS = new Set<MachineEvent["type"]>([
   "STREAM_STARTED",
@@ -379,6 +386,14 @@ function reduceSendEvent(ctx: ReduceContext, event: SendEvent): boolean {
     case "SEND_FAIL":
       fail(ctx, "send-failed", `Could not send the message: ${event.detail}`);
       return true;
+    case "REPLY_EXPECTED":
+      if (ctx.state.status !== "sending") return false;
+      if (event.baselineAssistantKey) {
+        ctx.state.replyBaselineAssistantKey = event.baselineAssistantKey;
+      } else {
+        delete ctx.state.replyBaselineAssistantKey;
+      }
+      return true;
   }
 }
 
@@ -388,11 +403,27 @@ function reduceStreamEvent(ctx: ReduceContext, event: StreamEvent): boolean {
       if (ctx.state.status === "paused" || ctx.state.status === "idle") return false;
       ctx.state.status = "streaming";
       return true;
-    case "REPLY_COMPLETE":
-      if (ctx.state.status !== "streaming" && ctx.state.status !== "sending") return false;
+    case "REPLY_COMPLETE": {
+      const canConsume =
+        ctx.state.status === "streaming" ||
+        ctx.state.status === "sending" ||
+        (ctx.state.status === "awaiting_user" &&
+          event.marker !== null &&
+          isContinuablePhase(ctx.state));
+      if (!canConsume) return false;
+      if (
+        event.assistantKey &&
+        (event.assistantKey === ctx.state.lastProcessedAssistantKey ||
+          event.assistantKey === ctx.state.replyBaselineAssistantKey)
+      ) {
+        return false;
+      }
+      if (event.assistantKey) ctx.state.lastProcessedAssistantKey = event.assistantKey;
+      delete ctx.state.replyBaselineAssistantKey;
       ctx.state.repliesSinceContract += 1;
       handleReply(ctx, event.marker, event.text);
       return true;
+    }
     case "STREAM_STUCK":
       fail(
         ctx,
