@@ -111,7 +111,7 @@ export class RunController {
 
   /** Re-derive the machine's position from the live DOM (resume, reload, manual resume). */
   reconcile(): void {
-    this.reconcileLiveState(Date.now(), true);
+    this.reconcileLiveState(Date.now());
   }
 
   private readonly onVisibilityResume = (): void => {
@@ -126,7 +126,7 @@ export class RunController {
     if (this.disposed) return;
     this.watcher.recoverFromWake();
     if (isActive(this.state) || this.state.status === "awaiting_user") {
-      this.reconcileLiveState(Date.now(), true);
+      this.reconcileLiveState(Date.now());
     }
   }
 
@@ -134,7 +134,7 @@ export class RunController {
     if (this.disposed) return;
     if (!isActive(this.state) && this.state.status !== "awaiting_user") return;
     this.pollSignals();
-    this.reconcileLiveState(Date.now(), false);
+    this.reconcileLiveState(Date.now());
   }
 
   private pollSignals(): void {
@@ -149,7 +149,7 @@ export class RunController {
     this.dispatch({ type: "PAGE_SIGNAL", signal });
   }
 
-  private reconcileLiveState(now: number, forceQuietCheck: boolean): void {
+  private reconcileLiveState(now: number): void {
     if (this.state.status === "cooldown") {
       this.repairCooldown();
       return;
@@ -215,7 +215,7 @@ export class RunController {
     const quietMs = toolCallIndicatorVisible()
       ? this.settings.toolQuietMs
       : this.settings.quietMs;
-    if (forceQuietCheck || now - this.observedAssistantSince >= quietMs) {
+    if (now - this.observedAssistantSince >= quietMs) {
       this.resetObservedAssistant();
       this.dispatch({
         type: "REPLY_COMPLETE",
