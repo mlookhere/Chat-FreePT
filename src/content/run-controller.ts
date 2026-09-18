@@ -209,9 +209,7 @@ export class RunController {
       return;
     }
 
-    const quietMs = toolCallIndicatorVisible()
-      ? this.settings.toolQuietMs
-      : this.settings.quietMs;
+    const quietMs = toolCallIndicatorVisible() ? this.settings.toolQuietMs : this.settings.quietMs;
     if (now - this.observedAssistantSince >= quietMs) {
       this.resetObservedAssistant();
       this.dispatch({
