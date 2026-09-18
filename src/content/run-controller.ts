@@ -230,7 +230,7 @@ export class RunController {
       type: "REPLY_COMPLETE",
       marker: parseMarker(text),
       text,
-      assistantKey,
+      ...(assistantKey ? { assistantKey } : {}),
     });
   }
 
@@ -365,7 +365,11 @@ export class RunController {
     this.dispatch({ type: "INSERT_OK" });
 
     const baselineAssistantKey = lastAssistantMessage()?.key;
-    this.dispatch({ type: "REPLY_EXPECTED", baselineAssistantKey });
+    this.dispatch(
+      baselineAssistantKey
+        ? { type: "REPLY_EXPECTED", baselineAssistantKey }
+        : { type: "REPLY_EXPECTED" },
+    );
     this.watcher.expectReply();
     const sent = await clickSend(
       () => this.watcher.isStreaming(),
