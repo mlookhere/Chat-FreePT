@@ -15,8 +15,9 @@ contract, translated for ChatGPT — and then orchestrates the conversation end 
    the plan: one Issue → one `work/<n>-slug` branch → one PR into `dev` → GitHub Actions
    gates → merge on green. No protected branches, so the loop runs unattended on free
    private repositories.
-3. **Orchestrate.** The extension watches the conversation. When ChatGPT stops streaming, it
-   reads a machine-readable status marker from the reply:
+3. **Orchestrate.** The extension watches the conversation through ChatGPT lifecycle signals
+   plus a self-healing runtime reconciliation loop. Once a completed assistant turn is
+   confirmed, it reads a machine-readable status marker from the reply:
    - `CONTINUE` — more work remains; the extension sends "continue" automatically.
    - `NEEDS_INPUT` — ChatGPT needs a decision; the extension pauses and notifies you.
    - `PLAN_READY` — the master plan is finished; the panel offers **Start development**.
