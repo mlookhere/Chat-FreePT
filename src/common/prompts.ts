@@ -53,12 +53,14 @@ tell me to configure GitHub's official remote MCP in ChatGPT:
 3. The extension may fill the safe fields and press Create after I explicitly check
    ChatGPT's custom-MCP risk acknowledgement. It must never check that acknowledgement for me
    or bypass GitHub OAuth. Complete the GitHub authorization myself.
-4. Return to this conversation and resume. Do not require a separate composer attachment
-   or a Developer mode → GitHub MCP menu item when the current ChatGPT UI does not expose
-   one; instead, run this capability preflight again and trust the tools actually available.
-5. If the remote MCP still does not expose the required repository/workflow write
-   capabilities after OAuth, report the exact missing capability classes rather than
-   substituting the ordinary GitHub plugin or pretending setup succeeded.
+4. Return to the originating conversation. Chat FreePT should open the composer Plus menu,
+   choose Developer mode, and select the exact Chat FreePT GitHub MCP app for this conversation.
+   Do not treat a generic/built-in GitHub integration as equivalent to this dedicated custom MCP.
+5. Only after that conversation-level activation succeeds, run this capability preflight again.
+   If the Developer mode/app controls are unavailable, the exact app cannot be selected, or the
+   activated remote MCP still lacks required repository/workflow write capabilities, report
+   NEEDS_INPUT with the exact missing activation/capability class rather than pretending setup
+   succeeded or substituting another GitHub integration.
 
 Do not ask me to run shell commands or click GitHub controls. End with NEEDS_INPUT so I can
 finish only the explicit ChatGPT/GitHub consent step and then resume.`;
