@@ -44,7 +44,6 @@ export function conversationRootEl(): HTMLElement {
   return (query("conversationRoot") as HTMLElement | null) ?? document.body;
 }
 
-
 function assistantMessageKey(el: HTMLElement, text: string): string {
   const directId = el.getAttribute("data-message-id");
   if (directId) return `message:${directId}`;
