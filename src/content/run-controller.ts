@@ -23,6 +23,7 @@ import {
   type AssistantMessage,
 } from "./transcript";
 
+// StreamWatcher is the fast path; this heartbeat only repairs missed runtime transitions.
 const RUNTIME_CHECK_MS = 2000;
 const COMPOSER_BUSY_RETRIES = 3;
 const COMPOSER_BUSY_WAIT_MS = 5000;
