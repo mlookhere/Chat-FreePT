@@ -77,9 +77,12 @@ describe("plan prompt", () => {
     expect(prompt).toContain("all available MCP toolsets");
     expect(prompt).toContain("OAuth");
     expect(prompt).toContain("press Create after I explicitly check");
-    expect(prompt).toContain("run this capability preflight again");
-    expect(prompt).not.toContain("open the Plus menu");
-    expect(prompt).not.toContain("choose Developer mode, and select");
+    expect(prompt).toContain("open the composer Plus menu");
+    expect(prompt).toContain("choose Developer mode");
+    expect(prompt).toContain("select the exact Chat FreePT GitHub MCP app");
+    expect(prompt).toContain("generic/built-in GitHub integration");
+    expect(prompt).toContain("Only after that conversation-level activation succeeds");
+    expect(prompt).toContain("NEEDS_INPUT");
     expect(prompt).toContain("Repository default-branch mutation is NOT required");
     expect(prompt).toContain("Do NOT require changing the repository default branch");
     expect(prompt).not.toContain("set dev as the default branch");
