@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   healthCheck: vi.fn(),
   scanPageSignals: vi.fn(),
   lastAssistantMessage: vi.fn(),
+  lastMessageRole: vi.fn(),
+  toolCallIndicatorVisible: vi.fn(),
   watchers: [] as Array<{
     callbacks: {
       onStart: () => void;
@@ -40,6 +42,8 @@ vi.mock("../src/content/page-signals", () => ({
 
 vi.mock("../src/content/transcript", () => ({
   lastAssistantMessage: mocks.lastAssistantMessage,
+  lastMessageRole: mocks.lastMessageRole,
+  toolCallIndicatorVisible: mocks.toolCallIndicatorVisible,
 }));
 
 vi.mock("../src/content/stream-watch", () => ({
@@ -116,6 +120,8 @@ beforeEach(() => {
   mocks.healthCheck.mockReset().mockReturnValue({ missing: [], degraded: [] });
   mocks.scanPageSignals.mockReset().mockReturnValue(null);
   mocks.lastAssistantMessage.mockReset().mockReturnValue(null);
+  mocks.lastMessageRole.mockReset().mockReturnValue(null);
+  mocks.toolCallIndicatorVisible.mockReset().mockReturnValue(false);
   mocks.watchers.length = 0;
 });
 
@@ -354,6 +360,99 @@ describe("RunController recovery and disposal", () => {
     expect(mocks.clickSend).not.toHaveBeenCalled();
     expect(controller.state.status).toBe("error");
     expect(controller.state.errorCode).toBe("composer-insert-failed");
+    controller.dispose();
+  });
+});
+
+describe("RunController runtime reconciliation", () => {
+  it("self-heals a missed completion event and auto-continues from the live marker", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(40_000);
+    const controller = makeController(streamingState());
+    mocks.lastMessageRole.mockReturnValue("assistant");
+    mocks.lastAssistantMessage.mockReturnValue({
+      el: document.createElement("div"),
+      text: "Finished.\nCHATFREEPT_STATUS: CONTINUE\nV: 1",
+      key: "message:new-reply",
+    });
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(controller.state.status).toBe("cooldown");
+
+    await vi.advanceTimersByTimeAsync(100);
+    await flushAsync();
+
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.autoSends).toBe(1);
+    controller.dispose();
+  });
+
+  it("never consumes the pre-send assistant turn as the expected reply", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(45_000);
+    const initial = {
+      ...streamingState(),
+      replyBaselineAssistantKey: "message:old-reply",
+    };
+    const controller = makeController(initial);
+    mocks.lastMessageRole.mockReturnValue("assistant");
+    mocks.lastAssistantMessage.mockReturnValue({
+      el: document.createElement("div"),
+      text: "Old.\nCHATFREEPT_STATUS: CONTINUE\nV: 1",
+      key: "message:old-reply",
+    });
+
+    await vi.advanceTimersByTimeAsync(6_000);
+    await flushAsync();
+
+    expect(controller.state.status).toBe("streaming");
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it("settles a fresh marker-less reply through the existing recovery nudge path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(50_000);
+    const controller = makeController(streamingState());
+    mocks.lastMessageRole.mockReturnValue("assistant");
+    mocks.lastAssistantMessage.mockReturnValue({
+      el: document.createElement("div"),
+      text: "I finished, but forgot the protocol footer.",
+      key: "message:no-marker",
+    });
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(controller.state.status).toBe("streaming");
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushAsync();
+
+    expect(controller.state.nudges).toBe(1);
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.status).toBe("streaming");
+    controller.dispose();
+  });
+
+  it("repairs an expired persisted cooldown immediately", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(60_000);
+    const initial = {
+      ...streamingState(),
+      phase: "developing" as const,
+      status: "cooldown" as const,
+      cooldownUntil: 59_000,
+    };
+
+    const controller = makeController(initial);
+    await flushAsync();
+
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.autoSends).toBe(1);
+    expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
 });
