@@ -16,9 +16,14 @@ import { isExtensionContextInvalidated } from "./extension-context";
 import { scanPageSignals } from "./page-signals";
 import { healthCheck } from "./selectors";
 import { StreamWatcher } from "./stream-watch";
-import { lastAssistantMessage } from "./transcript";
+import {
+  lastAssistantMessage,
+  lastMessageRole,
+  toolCallIndicatorVisible,
+  type AssistantMessage,
+} from "./transcript";
 
-const SIGNAL_POLL_MS = 5000;
+const RUNTIME_CHECK_MS = 2000;
 const COMPOSER_BUSY_RETRIES = 3;
 const COMPOSER_BUSY_WAIT_MS = 5000;
 const COMPOSER_RESTORE_RETRIES = 10;
@@ -29,8 +34,11 @@ export class RunController {
   readonly settings: Settings;
   private readonly watcher: StreamWatcher;
   private cooldownTimer: ReturnType<typeof setTimeout> | undefined;
-  private signalTimer: ReturnType<typeof setInterval> | undefined;
+  private runtimeTimer: ReturnType<typeof setInterval> | undefined;
   private lastSignal: string | null = null;
+  private observedAssistantKey: string | undefined;
+  private observedAssistantText = "";
+  private observedAssistantSince = 0;
   private readonly onChange: (state: RunState) => void;
   private readonly onShowModal: () => void;
   private readonly onContextInvalidated: () => void;
@@ -57,8 +65,7 @@ export class RunController {
             this.dispatch({ type: "STREAM_STARTED" });
           }
         },
-        onComplete: (text) =>
-          this.dispatch({ type: "REPLY_COMPLETE", marker: parseMarker(text), text }),
+        onComplete: (text) => this.consumeCompletedReply(text),
         onStuck: () => {
           if (this.state.status === "streaming") this.dispatch({ type: "STREAM_STUCK" });
         },
@@ -68,8 +75,8 @@ export class RunController {
     this.watcher.start();
     document.addEventListener("visibilitychange", this.onVisibilityResume);
     window.addEventListener("pageshow", this.onPageShow);
-    this.signalTimer = setInterval(() => this.pollSignals(), SIGNAL_POLL_MS);
-    this.restoreCooldown();
+    this.runtimeTimer = setInterval(() => this.checkRuntime(), RUNTIME_CHECK_MS);
+    this.repairCooldown();
   }
 
   dispose(): void {
@@ -78,8 +85,8 @@ export class RunController {
     window.removeEventListener("pageshow", this.onPageShow);
     this.watcher.stop();
     this.clearCooldownTimer();
-    if (this.signalTimer !== undefined) clearInterval(this.signalTimer);
-    this.signalTimer = undefined;
+    if (this.runtimeTimer !== undefined) clearInterval(this.runtimeTimer);
+    this.runtimeTimer = undefined;
   }
 
   /** A brand-new chat gets its real /c/<uuid> id after the first reply; adopt it in place. */
@@ -104,22 +111,7 @@ export class RunController {
 
   /** Re-derive the machine's position from the live DOM (resume, reload, manual resume). */
   reconcile(): void {
-    if (this.state.status === "cooldown") {
-      this.restoreCooldown();
-      return;
-    }
-    if (this.watcher.isStreaming()) {
-      this.dispatch({ type: "STREAM_STARTED" });
-      return;
-    }
-    const message = lastAssistantMessage();
-    if (message) {
-      this.dispatch({
-        type: "REPLY_COMPLETE",
-        marker: parseMarker(message.text),
-        text: message.text,
-      });
-    }
+    this.reconcileLiveState(Date.now(), true);
   }
 
   private readonly onVisibilityResume = (): void => {
@@ -133,7 +125,16 @@ export class RunController {
   private recoverAfterWake(): void {
     if (this.disposed) return;
     this.watcher.recoverFromWake();
-    if (isActive(this.state) || this.state.status === "awaiting_user") this.reconcile();
+    if (isActive(this.state) || this.state.status === "awaiting_user") {
+      this.reconcileLiveState(Date.now(), true);
+    }
+  }
+
+  private checkRuntime(): void {
+    if (this.disposed) return;
+    if (!isActive(this.state) && this.state.status !== "awaiting_user") return;
+    this.pollSignals();
+    this.reconcileLiveState(Date.now(), false);
   }
 
   private pollSignals(): void {
@@ -146,6 +147,108 @@ export class RunController {
     if (signal === this.lastSignal) return;
     this.lastSignal = signal;
     this.dispatch({ type: "PAGE_SIGNAL", signal });
+  }
+
+  private reconcileLiveState(now: number, forceQuietCheck: boolean): void {
+    if (this.state.status === "cooldown") {
+      this.repairCooldown();
+      return;
+    }
+
+    const canObserveReply =
+      this.state.status === "sending" ||
+      this.state.status === "streaming" ||
+      this.state.status === "awaiting_user";
+    if (!canObserveReply) {
+      this.resetObservedAssistant();
+      return;
+    }
+
+    if (this.watcher.isStreaming()) {
+      this.resetObservedAssistant();
+      if (this.state.status === "sending" || this.state.status === "streaming") {
+        this.dispatch({ type: "STREAM_STARTED" });
+      }
+      return;
+    }
+
+    if (lastMessageRole() !== "assistant") {
+      this.resetObservedAssistant();
+      return;
+    }
+
+    const message = lastAssistantMessage();
+    if (!message || !this.isFreshAssistant(message)) {
+      this.resetObservedAssistant();
+      return;
+    }
+
+    const marker = parseMarker(message.text);
+    if (marker) {
+      this.resetObservedAssistant();
+      this.dispatch({
+        type: "REPLY_COMPLETE",
+        marker,
+        text: message.text,
+        assistantKey: message.key,
+      });
+      return;
+    }
+
+    // While explicitly waiting for the user, only a fresh protocol-bearing reply can
+    // resume automation. Plain assistant prose should not create a recovery nudge.
+    if (this.state.status === "awaiting_user") {
+      this.resetObservedAssistant();
+      return;
+    }
+
+    if (
+      this.observedAssistantKey !== message.key ||
+      this.observedAssistantText !== message.text
+    ) {
+      this.observedAssistantKey = message.key;
+      this.observedAssistantText = message.text;
+      this.observedAssistantSince = now;
+      return;
+    }
+
+    const quietMs = toolCallIndicatorVisible()
+      ? this.settings.toolQuietMs
+      : this.settings.quietMs;
+    if (forceQuietCheck || now - this.observedAssistantSince >= quietMs) {
+      this.resetObservedAssistant();
+      this.dispatch({
+        type: "REPLY_COMPLETE",
+        marker: null,
+        text: message.text,
+        assistantKey: message.key,
+      });
+    }
+  }
+
+  private consumeCompletedReply(text: string): void {
+    const live = lastAssistantMessage();
+    const assistantKey = live?.text === text ? live.key : undefined;
+    this.resetObservedAssistant();
+    this.dispatch({
+      type: "REPLY_COMPLETE",
+      marker: parseMarker(text),
+      text,
+      assistantKey,
+    });
+  }
+
+  private isFreshAssistant(message: AssistantMessage): boolean {
+    return (
+      message.key !== this.state.lastProcessedAssistantKey &&
+      message.key !== this.state.replyBaselineAssistantKey
+    );
+  }
+
+  private resetObservedAssistant(): void {
+    this.observedAssistantKey = undefined;
+    this.observedAssistantText = "";
+    this.observedAssistantSince = 0;
   }
 
   private async execute(effect: Effect): Promise<void> {
@@ -178,9 +281,15 @@ export class RunController {
     }
   }
 
-  private restoreCooldown(): void {
-    if (this.state.status !== "cooldown" || this.cooldownTimer !== undefined) return;
-    this.scheduleCooldown(cooldownRemainingMs(this.state));
+  private repairCooldown(): void {
+    if (this.state.status !== "cooldown") return;
+    const remaining = cooldownRemainingMs(this.state);
+    if (remaining <= 0) {
+      this.clearCooldownTimer();
+      this.dispatch({ type: "COOLDOWN_ELAPSED" });
+      return;
+    }
+    if (this.cooldownTimer === undefined) this.scheduleCooldown(remaining);
   }
 
   private scheduleCooldown(ms: number): void {
@@ -259,6 +368,8 @@ export class RunController {
     }
     this.dispatch({ type: "INSERT_OK" });
 
+    const baselineAssistantKey = lastAssistantMessage()?.key;
+    this.dispatch({ type: "REPLY_EXPECTED", baselineAssistantKey });
     this.watcher.expectReply();
     const sent = await clickSend(
       () => this.watcher.isStreaming(),
