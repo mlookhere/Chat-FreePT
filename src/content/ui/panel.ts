@@ -4,6 +4,7 @@ import {
   type MachineEvent,
 } from "../../common/state-machine";
 import type { RunState } from "../../common/types";
+import type { DiagnosticsStatus } from "../diagnostics";
 import { healthCheck, query, queryGuideTarget } from "../selectors";
 import { SetupGuide } from "./setup-guide";
 import { PANEL_CSS } from "./styles";
@@ -11,6 +12,10 @@ import { PANEL_CSS } from "./styles";
 export interface PanelHooks {
   onEvent: (event: MachineEvent) => void;
   getHandoffPrompt: () => string;
+  getDiagnosticsStatus?: () => DiagnosticsStatus;
+  onDiagnosticsStart?: () => void;
+  onDiagnosticsStop?: () => void;
+  onDiagnosticsExport?: () => void;
 }
 
 interface OnboardingState {
@@ -80,8 +85,10 @@ export class Panel {
   private disposed = false;
   private onboarding = { ...DEFAULT_ONBOARDING };
   private nativeSurface: NativeSurfaceSnapshot | null = null;
+  private diagnosticsStatus: DiagnosticsStatus = { recording: false, records: 0, dropped: 0 };
 
   constructor(private readonly hooks: PanelHooks) {
+    this.diagnosticsStatus = hooks.getDiagnosticsStatus?.() ?? this.diagnosticsStatus;
     const launcherParts = this.createLauncher();
     this.host = launcherParts.host;
     this.launcherShadow = launcherParts.shadow;
@@ -100,6 +107,11 @@ export class Panel {
     this.mountObserver.observe(document.documentElement, { childList: true, subtree: true });
     this.mount();
     void this.initOnboarding();
+  }
+
+  setDiagnosticsStatus(status: DiagnosticsStatus): void {
+    this.diagnosticsStatus = status;
+    this.updateDiagnosticsDom();
   }
 
   toggle(force?: boolean): void {
@@ -475,9 +487,9 @@ export class Panel {
           health.missing.join(", "),
         )}. Auto-run cannot operate until the extension is updated.</div>`
       : "";
-    if (passive) return warn + this.passiveHtml(state);
+    if (passive) return warn + this.passiveHtml(state) + this.diagnosticsHtml();
     const controls = this.automationControlsHtml(state);
-    return warn + controls + this.statusBodyHtml(state);
+    return warn + controls + this.statusBodyHtml(state) + this.diagnosticsHtml();
   }
 
   private statusBodyHtml(state: RunState): string {
@@ -515,6 +527,19 @@ export class Panel {
         </label>
         <p class="cfpt-note">When off, Chat FreePT waits instead of sending its next automatic continue. A queued user message still sends once.</p>
         ${queueControls}
+      </div>
+    `;
+  }
+
+  private diagnosticsHtml(): string {
+    return `
+      <div class="cfpt-field">
+        <strong>State diagnostics</strong>
+        <p class="cfpt-note" data-ref="diagnostics-status"></p>
+        <button class="cfpt-btn" type="button" data-action="diagnostics-start">Start recording</button>
+        <button class="cfpt-btn" type="button" data-action="diagnostics-stop">Stop recording</button>
+        <button class="cfpt-btn" type="button" data-action="diagnostics-export">Export JSON</button>
+        <p class="cfpt-note">Captures page, DOM, lifecycle, extension state, and redacted network structure. It does not save chat text, typed prompts, cookies, OAuth data, or authorization headers.</p>
       </div>
     `;
   }
@@ -660,6 +685,27 @@ export class Panel {
     }
     const statusLine = this.panelEl.querySelector('[data-ref="statusline"]');
     if (statusLine) statusLine.textContent = STATUS_LABEL[state.status] ?? state.status;
+    this.updateDiagnosticsDom();
+  }
+
+  private updateDiagnosticsDom(): void {
+    const status = this.diagnosticsStatus;
+    const line = this.panelEl.querySelector<HTMLElement>('[data-ref="diagnostics-status"]');
+    if (line) {
+      line.textContent = status.recording
+        ? `Recording · ${status.records} events${status.dropped ? ` · ${status.dropped} trimmed` : ""}`
+        : status.records > 0
+          ? `Stopped · ${status.records} events ready to export`
+          : "Not recording";
+    }
+    const start = this.panelEl.querySelector<HTMLButtonElement>('[data-action="diagnostics-start"]');
+    const stop = this.panelEl.querySelector<HTMLButtonElement>('[data-action="diagnostics-stop"]');
+    const exportButton = this.panelEl.querySelector<HTMLButtonElement>(
+      '[data-action="diagnostics-export"]',
+    );
+    if (start) start.disabled = status.recording;
+    if (stop) stop.disabled = !status.recording;
+    if (exportButton) exportButton.disabled = status.records === 0;
   }
 
   private onClick(event: Event): void {
@@ -730,6 +776,15 @@ export class Panel {
         break;
       case "setup-done":
         void this.acknowledgeSetup();
+        break;
+      case "diagnostics-start":
+        this.hooks.onDiagnosticsStart?.();
+        break;
+      case "diagnostics-stop":
+        this.hooks.onDiagnosticsStop?.();
+        break;
+      case "diagnostics-export":
+        this.hooks.onDiagnosticsExport?.();
         break;
     }
   }
