@@ -303,17 +303,8 @@ export class DiagnosticsRecorder {
 
   private onPageMessage(event: MessageEvent): void {
     if (!this.active || event.source !== window) return;
-    const data = event.data as Record<string, unknown> | null;
-    if (
-      !data ||
-      data["source"] !== BRIDGE_SOURCE ||
-      data["channel"] !== this.channel ||
-      !data["payload"] ||
-      typeof data["payload"] !== "object"
-    ) {
-      return;
-    }
-    const payload = data["payload"] as Record<string, unknown>;
+    const payload = parsePageBridgePayload(event.data, this.channel);
+    if (!payload) return;
     const type = typeof payload["type"] === "string" ? payload["type"] : "page-event";
     this.record(type.startsWith("network") ? "network" : "page", payload);
     if (type === "history") this.captureSnapshot("history", true);
@@ -383,6 +374,23 @@ export class DiagnosticsRecorder {
       note: "Free-form chat text, typed text, cookies, authorization material, tokens, and query values are omitted or summarized.",
     };
   }
+}
+
+export function parsePageBridgePayload(
+  data: unknown,
+  channel: string,
+): Record<string, unknown> | null {
+  if (!data || typeof data !== "object") return null;
+  const record = data as Record<string, unknown>;
+  if (
+    record["source"] !== BRIDGE_SOURCE ||
+    record["channel"] !== channel ||
+    !record["payload"] ||
+    typeof record["payload"] !== "object"
+  ) {
+    return null;
+  }
+  return record["payload"] as Record<string, unknown>;
 }
 
 function buildSemanticSnapshot(run: RunState | null): Record<string, unknown> {
@@ -562,7 +570,8 @@ function summarizeMutations(mutations: MutationRecord[]): Record<string, unknown
     if (mutation.type === "characterData") text += 1;
     if (mutation.attributeName) attributes.add(mutation.attributeName);
     if (targets.length < 12 && mutation.target instanceof Element) {
-      targets.push(describeElement(mutation.target));
+      const target = describeElement(mutation.target);
+      if (target) targets.push(target);
     }
   }
   return {
