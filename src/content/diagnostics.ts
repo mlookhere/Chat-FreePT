@@ -504,6 +504,13 @@ function sanitizeControllerEvent(event: ControllerDiagnosticEvent): Record<strin
 }
 
 function machineEventDetail(event: MachineEvent): Record<string, unknown> {
+  if ("marker" in event) {
+    return {
+      marker: sanitizeMarker(event.marker),
+      assistantKey: event.assistantKey ? summarizeString(event.assistantKey) : undefined,
+      text: summarizeString(event.text),
+    };
+  }
   if ("text" in event && typeof event.text === "string") return { text: summarizeString(event.text) };
   if ("idea" in event) {
     return {
@@ -517,13 +524,6 @@ function machineEventDetail(event: MachineEvent): Record<string, unknown> {
   if ("enabled" in event) return { enabled: event.enabled };
   if ("baselineAssistantKey" in event && event.baselineAssistantKey) {
     return { baselineAssistantKey: summarizeString(event.baselineAssistantKey) };
-  }
-  if ("marker" in event) {
-    return {
-      marker: sanitizeMarker(event.marker),
-      assistantKey: event.assistantKey ? summarizeString(event.assistantKey) : undefined,
-      text: summarizeString(event.text),
-    };
   }
   return {};
 }
