@@ -144,22 +144,21 @@ describe("diagnostics event correlation", () => {
       );
     expect(control).toBeDefined();
 
-    window.dispatchEvent(
-      new MessageEvent("message", {
-        source: window,
-        data: {
-          source: "cfpt-diagnostics-bridge",
-          channel: control?.["channel"],
-          payload: {
-            type: "network-response",
-            transport: "fetch",
-            id: "fetch-1",
-            url: "https://chatgpt.com/backend-api/conversation?token=[redacted]",
-            status: 200,
-          },
+    const bridgeEvent = new MessageEvent("message", {
+      data: {
+        source: "cfpt-diagnostics-bridge",
+        channel: control?.["channel"],
+        payload: {
+          type: "network-response",
+          transport: "fetch",
+          id: "fetch-1",
+          url: "https://chatgpt.com/backend-api/conversation?token=[redacted]",
+          status: 200,
         },
-      }),
-    );
+      },
+    });
+    Object.defineProperty(bridgeEvent, "source", { value: window });
+    window.dispatchEvent(bridgeEvent);
     recorder.recordControllerEvent({
       kind: "state-transition",
       event: { type: "STREAM_STARTED" },
