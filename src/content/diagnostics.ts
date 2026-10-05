@@ -8,7 +8,7 @@ import {
   summarizeString,
   summarizeUnknown,
 } from "../diagnostics/sanitize";
-import { healthCheck, query, queryAll, resolve, type TargetId } from "./selectors";
+import { healthCheck, queryAll, resolve, type TargetId } from "./selectors";
 import { lastAssistantMessage, lastMessageRole, toolCallIndicatorVisible } from "./transcript";
 
 const CONTENT_SOURCE = "cfpt-diagnostics-content";
