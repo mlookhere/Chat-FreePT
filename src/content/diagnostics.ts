@@ -1,7 +1,13 @@
 import { parseMarker } from "../common/marker";
 import type { Effect, MachineEvent } from "../common/state-machine";
 import type { Marker, RunState } from "../common/types";
-import { hashText, redactUrl, safeError, summarizeString, summarizeUnknown } from "../diagnostics/sanitize";
+import {
+  hashText,
+  redactUrl,
+  safeError,
+  summarizeString,
+  summarizeUnknown,
+} from "../diagnostics/sanitize";
 import { healthCheck, query, queryAll, resolve, type TargetId } from "./selectors";
 import { lastAssistantMessage, lastMessageRole, toolCallIndicatorVisible } from "./transcript";
 
@@ -496,7 +502,10 @@ function sanitizeControllerEvent(event: ControllerDiagnosticEvent): Record<strin
       do: event.effect.do,
       kind: "kind" in event.effect ? event.effect.kind : undefined,
       ms: "ms" in event.effect ? event.effect.ms : undefined,
-      text: "text" in event.effect && event.effect.text ? summarizeString(event.effect.text) : undefined,
+      text:
+        "text" in event.effect && event.effect.text
+          ? summarizeString(event.effect.text)
+          : undefined,
     };
   }
   if (event.detail) out["detail"] = summarizeDetail(event.detail);
@@ -511,7 +520,8 @@ function machineEventDetail(event: MachineEvent): Record<string, unknown> {
       text: summarizeString(event.text),
     };
   }
-  if ("text" in event && typeof event.text === "string") return { text: summarizeString(event.text) };
+  if ("text" in event && typeof event.text === "string")
+    return { text: summarizeString(event.text) };
   if ("idea" in event) {
     return {
       idea: summarizeString(event.idea),
@@ -533,7 +543,8 @@ function summarizeDetail(detail: Record<string, unknown>): Record<string, unknow
   for (const [key, value] of Object.entries(detail)) {
     if (typeof value === "string" && /url|route/i.test(key)) out[key] = redactUrl(value);
     else if (typeof value === "string") out[key] = summarizeString(value);
-    else if (value === null || typeof value === "number" || typeof value === "boolean") out[key] = value;
+    else if (value === null || typeof value === "number" || typeof value === "boolean")
+      out[key] = value;
     else out[key] = summarizeUnknown(value);
   }
   return out;

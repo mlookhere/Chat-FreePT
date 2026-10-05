@@ -698,7 +698,9 @@ export class Panel {
           ? `Stopped · ${status.records} events ready to export`
           : "Not recording";
     }
-    const start = this.panelEl.querySelector<HTMLButtonElement>('[data-action="diagnostics-start"]');
+    const start = this.panelEl.querySelector<HTMLButtonElement>(
+      '[data-action="diagnostics-start"]',
+    );
     const stop = this.panelEl.querySelector<HTMLButtonElement>('[data-action="diagnostics-stop"]');
     const exportButton = this.panelEl.querySelector<HTMLButtonElement>(
       '[data-action="diagnostics-export"]',

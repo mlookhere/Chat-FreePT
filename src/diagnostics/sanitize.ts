@@ -40,7 +40,10 @@ export function redactUrl(input: string): string {
     .map((segment) => (ID_SEGMENT_RE.test(segment) ? "[id]" : segment))
     .join("/");
   const keys = Array.from(parsed.searchParams.keys());
-  const query = keys.length > 0 ? `?${keys.map((key) => `${encodeURIComponent(key)}=[redacted]`).join("&")}` : "";
+  const query =
+    keys.length > 0
+      ? `?${keys.map((key) => `${encodeURIComponent(key)}=[redacted]`).join("&")}`
+      : "";
   return `${parsed.origin}${path}${query}`;
 }
 

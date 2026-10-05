@@ -235,7 +235,12 @@ function installWebSocket(): void {
         url: redactUrl(String(url)),
       });
       this.addEventListener("open", () =>
-        emit({ type: "network-state", transport: "websocket", id: this.diagnosticId, state: "open" }),
+        emit({
+          type: "network-state",
+          transport: "websocket",
+          id: this.diagnosticId,
+          state: "open",
+        }),
       );
       this.addEventListener("message", (event) =>
         emit({
@@ -291,7 +296,12 @@ function installEventSource(): void {
         url: redactUrl(String(url)),
       });
       this.addEventListener("open", () =>
-        emit({ type: "network-state", transport: "eventsource", id: this.diagnosticId, state: "open" }),
+        emit({
+          type: "network-state",
+          transport: "eventsource",
+          id: this.diagnosticId,
+          state: "open",
+        }),
       );
       this.addEventListener("message", (event) =>
         emit({

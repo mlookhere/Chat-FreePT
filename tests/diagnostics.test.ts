@@ -2,11 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newRunState } from "../src/common/state-machine";
 import type { RunState } from "../src/common/types";
 import { DiagnosticsRecorder } from "../src/content/diagnostics";
-import {
-  redactUrl,
-  summarizeResponseText,
-  summarizeString,
-} from "../src/diagnostics/sanitize";
+import { redactUrl, summarizeResponseText, summarizeString } from "../src/diagnostics/sanitize";
 import { installChromeMock } from "./chrome-mock";
 
 const recorders: DiagnosticsRecorder[] = [];
