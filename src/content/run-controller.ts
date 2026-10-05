@@ -12,6 +12,7 @@ import { cooldownRemainingMs, isActive, reduce } from "../common/state-machine";
 import { saveRun } from "../common/storage";
 import type { BgRequest, RunState, Settings } from "../common/types";
 import { clickSend, composerIsEmpty, insertPrompt } from "./composer";
+import type { ControllerDiagnosticEvent } from "./diagnostics";
 import { isExtensionContextInvalidated } from "./extension-context";
 import { scanPageSignals } from "./page-signals";
 import { healthCheck } from "./selectors";
@@ -43,6 +44,7 @@ export class RunController {
   private readonly onChange: (state: RunState) => void;
   private readonly onShowModal: () => void;
   private readonly onContextInvalidated: () => void;
+  private readonly onDiagnosticEvent: (event: ControllerDiagnosticEvent) => void;
   private disposed = false;
 
   constructor(
@@ -52,6 +54,7 @@ export class RunController {
       onChange: (state: RunState) => void;
       onShowModal: () => void;
       onContextInvalidated?: () => void;
+      onDiagnosticEvent?: (event: ControllerDiagnosticEvent) => void;
     },
   ) {
     this.state = initial;
@@ -59,15 +62,24 @@ export class RunController {
     this.onChange = hooks.onChange;
     this.onShowModal = hooks.onShowModal;
     this.onContextInvalidated = hooks.onContextInvalidated ?? (() => undefined);
+    this.onDiagnosticEvent = hooks.onDiagnosticEvent ?? (() => undefined);
     this.watcher = new StreamWatcher(
       {
         onStart: () => {
+          this.onDiagnosticEvent({ kind: "watcher", detail: { event: "start" } });
           if (this.state.status === "sending" || this.state.status === "streaming") {
             this.dispatch({ type: "STREAM_STARTED" });
           }
         },
-        onComplete: (text) => this.consumeCompletedReply(text),
+        onComplete: (text) => {
+          this.onDiagnosticEvent({
+            kind: "watcher",
+            detail: { event: "complete", textLength: text.length },
+          });
+          this.consumeCompletedReply(text);
+        },
         onStuck: () => {
+          this.onDiagnosticEvent({ kind: "watcher", detail: { event: "stuck" } });
           if (this.state.status === "streaming") this.dispatch({ type: "STREAM_STUCK" });
         },
       },
@@ -98,11 +110,23 @@ export class RunController {
 
   dispatch(event: MachineEvent): void {
     if (this.disposed) return;
-    const previousStatus = this.state.status;
+    const previous = this.state;
+    this.onDiagnosticEvent({ kind: "machine-event", event });
     const { state, effects } = reduce(this.state, event, this.settings);
     if (state === this.state) return;
     this.state = state;
-    if (previousStatus === "cooldown" && state.status !== "cooldown") {
+    this.onDiagnosticEvent({
+      kind: "state-transition",
+      event,
+      detail: {
+        fromPhase: previous.phase,
+        fromStatus: previous.status,
+        toPhase: state.phase,
+        toStatus: state.status,
+        effects: effects.map((effect) => effect.do),
+      },
+    });
+    if (previous.status === "cooldown" && state.status !== "cooldown") {
       this.clearCooldownTimer();
     }
     void saveRun(state).catch((err) => this.handleChromeFailure("state save failed", err));
@@ -151,6 +175,19 @@ export class RunController {
   }
 
   private reconcileLiveState(now: number): void {
+    const liveAssistant = lastAssistantMessage();
+    this.onDiagnosticEvent({
+      kind: "reconcile",
+      detail: {
+        status: this.state.status,
+        phase: this.state.phase,
+        watcherStreaming: this.watcher.isStreaming(),
+        lastRole: lastMessageRole() ?? "none",
+        assistantKey: liveAssistant?.key ?? "",
+        assistantLength: liveAssistant?.text.length ?? 0,
+        toolVisible: toolCallIndicatorVisible(),
+      },
+    });
     if (this.state.status === "cooldown") {
       this.repairCooldown();
       return;
@@ -248,6 +285,7 @@ export class RunController {
   }
 
   private async execute(effect: Effect): Promise<void> {
+    this.onDiagnosticEvent({ kind: "effect", effect });
     switch (effect.do) {
       case "insertAndSend": {
         await this.insertAndSend(effect.kind, effect.text);
