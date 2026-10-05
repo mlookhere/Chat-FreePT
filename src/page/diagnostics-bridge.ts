@@ -274,7 +274,7 @@ function installWebSocket(): void {
         direction: "send",
         data: socketDataSummary(data),
       });
-      super.send(data);
+      super.send(data as string | Blob | BufferSource);
     }
   }
   window.WebSocket = DiagnosticWebSocket;
@@ -321,14 +321,17 @@ function installEventSource(): void {
 }
 
 function installHistory(): void {
-  for (const name of ["pushState", "replaceState"] as const) {
-    const original = history[name].bind(history);
-    history[name] = ((...args: Parameters<History[typeof name]>) => {
-      const result = original(...args);
-      emit({ type: "history", action: name, url: redactUrl(location.href) });
-      return result;
-    }) as History[typeof name];
-  }
+  const pushState = history.pushState.bind(history);
+  const replaceState = history.replaceState.bind(history);
+
+  history.pushState = (data: unknown, unused: string, url?: string | URL | null): void => {
+    pushState(data, unused, url);
+    emit({ type: "history", action: "pushState", url: redactUrl(location.href) });
+  };
+  history.replaceState = (data: unknown, unused: string, url?: string | URL | null): void => {
+    replaceState(data, unused, url);
+    emit({ type: "history", action: "replaceState", url: redactUrl(location.href) });
+  };
 }
 
 function install(): void {
