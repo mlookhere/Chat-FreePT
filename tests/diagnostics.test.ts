@@ -123,7 +123,7 @@ describe("diagnostics sanitization", () => {
 });
 
 describe("diagnostics event correlation", () => {
-  it("accepts page-bridge network events into the same monotonic timeline", () => {
+  it("accepts page-bridge network events into the same monotonic timeline", async () => {
     const recorder = makeRecorder(stateWithSecrets());
     const postMessage = vi.spyOn(window, "postMessage");
     recorder.start();
@@ -140,8 +140,8 @@ describe("diagnostics event correlation", () => {
       );
     expect(control).toBeDefined();
 
-    const bridgeEvent = new MessageEvent("message", {
-      data: {
+    window.postMessage(
+      {
         source: "cfpt-diagnostics-bridge",
         channel: control?.["channel"],
         payload: {
@@ -152,9 +152,9 @@ describe("diagnostics event correlation", () => {
           status: 200,
         },
       },
-    });
-    Object.defineProperty(bridgeEvent, "source", { value: window });
-    window.dispatchEvent(bridgeEvent);
+      "*",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
     recorder.recordControllerEvent({
       kind: "state-transition",
       event: { type: "STREAM_STARTED" },
