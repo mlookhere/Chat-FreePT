@@ -12,6 +12,7 @@ import {
 import type { RunState, Settings } from "../common/types";
 import type { ContentRequest } from "../common/types";
 import { activateDeveloperModeSetup } from "./developer-mode-activation";
+import { DiagnosticsRecorder } from "./diagnostics";
 import { createExtensionContextGuard } from "./extension-context";
 import { conversationIdFromUrl, watchNavigation } from "./navigation";
 import { chatGptPageMode, type ChatGptPageMode } from "./page-mode";
@@ -31,6 +32,11 @@ let currentConvId = "";
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 let takeoverTimer: ReturnType<typeof setTimeout> | undefined;
 let stopNavigation: (() => void) | undefined;
+
+const diagnostics = new DiagnosticsRecorder({
+  getRunState: () => controller?.state ?? null,
+  onStatus: (status) => panel?.setDiagnosticsStatus(status),
+});
 
 const contextGuard = createExtensionContextGuard(() => shutdownInvalidatedContext());
 
@@ -59,6 +65,7 @@ function shutdownInvalidatedContext(): void {
   panel = null;
   standaloneGuide?.dispose();
   standaloneGuide = null;
+  diagnostics.dispose();
 }
 
 function reportAsyncFailure(message: string, error: unknown): void {
@@ -97,11 +104,15 @@ function startController(state: RunState, settings: Settings): void {
   stopTakeoverRetry();
   startHeartbeat();
   const ctl = new RunController(state, settings, {
-    onChange: (next) => panel?.render(next),
+    onChange: (next) => {
+      panel?.render(next);
+      diagnostics.captureSnapshot("controller-change", true);
+    },
     onShowModal: () => {
       if (controller) panel?.showCompletionModal(controller.state);
     },
     onContextInvalidated: () => contextGuard.invalidate(),
+    onDiagnosticEvent: (event) => diagnostics.recordControllerEvent(event),
   });
   controller = ctl;
   panel?.render(state);
@@ -242,6 +253,10 @@ async function activateComposerPage(): Promise<void> {
   panel = new Panel({
     onEvent: (event) => controller?.dispatch(event),
     getHandoffPrompt: () => (controller ? buildHandoffPrompt(controller.state) : ""),
+    getDiagnosticsStatus: () => diagnostics.status,
+    onDiagnosticsStart: () => diagnostics.start(),
+    onDiagnosticsStop: () => diagnostics.stop(),
+    onDiagnosticsExport: () => diagnostics.exportFile(),
   });
   await initConversation(conversationKeyFromLocation());
   if (!contextGuard.invalidated) log.info("Chat FreePT ready");
