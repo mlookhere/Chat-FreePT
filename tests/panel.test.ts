@@ -301,9 +301,7 @@ describe("new repository guide", () => {
     expect(overlayShadow().textContent).toContain("brand-new");
     expect(overlayShadow().textContent).toContain("private");
 
-    const idea = overlayShadow().querySelector<HTMLTextAreaElement>(
-      '[data-ref="repo-guide-idea"]',
-    );
+    const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="repo-guide-idea"]');
     const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="repo-guide-name"]');
     if (!idea || !repo) throw new Error("repo guide inputs missing");
     idea.value = "Build a tiny weather dashboard";
@@ -326,9 +324,7 @@ describe("new repository guide", () => {
     overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-next"]')?.click();
     expect(overlayShadow().textContent).toContain("New private repo · 4 of 4");
     expect(overlayShadow().textContent).toContain("weather-board");
-    overlayShadow()
-      .querySelector<HTMLButtonElement>('[data-action="repo-guide-launch"]')
-      ?.click();
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-launch"]')?.click();
 
     expect(onEvent).toHaveBeenCalledWith({
       type: "USER_START",
@@ -360,16 +356,12 @@ describe("new repository guide", () => {
     panel.toggle(true);
 
     overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-open"]')?.click();
-    const idea = overlayShadow().querySelector<HTMLTextAreaElement>(
-      '[data-ref="repo-guide-idea"]',
-    );
+    const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="repo-guide-idea"]');
     const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="repo-guide-name"]');
     if (!idea || !repo) throw new Error("repo guide inputs missing");
     idea.value = "Keep this draft";
     repo.value = "draft-repo";
-    overlayShadow()
-      .querySelector<HTMLButtonElement>('[data-action="repo-guide-cancel"]')
-      ?.click();
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-cancel"]')?.click();
 
     expect(overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]')?.value).toBe(
       "Keep this draft",
