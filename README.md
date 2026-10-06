@@ -63,6 +63,19 @@ unpacked** on that extracted folder so the browser is testing the exact CI-built
 Open a ChatGPT conversation and click the Chat FreePT airplane launcher beside the native
 composer **Plus** control. Describe your idea and start the plan.
 
+## New repository guide
+
+From an idle Chat FreePT panel, choose **New repo guide** for a four-step walkthrough. It
+collects the project idea and optional repository name, explains the exact GitHub MCP
+capabilities that are checked before mutation, shows how Chat FreePT vendors and adapts the
+CI-Pipline, and finishes with **Create repo + start planning**.
+
+The final button uses the normal Chat FreePT `USER_START` flow in new-repository mode; the
+guide does not create a parallel automation path. ChatGPT must create a private repository,
+seed `main` and `dev`, install the required labels and control Issue, and verify that Actions
+actually run before planning can be considered ready. Missing capabilities stop with
+`NEEDS_INPUT` rather than silently skipping setup.
+
 ## Development
 
 This repository dogfoods the same CI-Pipline control plane the skill installs for users
