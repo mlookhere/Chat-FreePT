@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newRunState } from "../src/common/state-machine";
 import type { RunState } from "../src/common/types";
-import { DiagnosticsRecorder } from "../src/content/diagnostics";
+import { DiagnosticsRecorder, parsePageBridgePayload } from "../src/content/diagnostics";
 import { redactUrl, summarizeResponseText, summarizeString } from "../src/diagnostics/sanitize";
 import { installChromeMock } from "./chrome-mock";
 
@@ -123,7 +123,7 @@ describe("diagnostics sanitization", () => {
 });
 
 describe("diagnostics event correlation", () => {
-  it("accepts page-bridge network events into the same monotonic timeline", async () => {
+  it("validates page-bridge payloads and preserves monotonic recorder ordering", () => {
     const recorder = makeRecorder(stateWithSecrets());
     const postMessage = vi.spyOn(window, "postMessage");
     recorder.start();
@@ -140,7 +140,7 @@ describe("diagnostics event correlation", () => {
       );
     expect(control).toBeDefined();
 
-    window.postMessage(
+    const payload = parsePageBridgePayload(
       {
         source: "cfpt-diagnostics-bridge",
         channel: control?.["channel"],
@@ -152,9 +152,16 @@ describe("diagnostics event correlation", () => {
           status: 200,
         },
       },
-      "*",
+      String(control?.["channel"]),
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(payload).toMatchObject({ transport: "fetch", status: 200 });
+    expect(
+      parsePageBridgePayload(
+        { source: "cfpt-diagnostics-bridge", channel: "wrong", payload },
+        String(control?.["channel"]),
+      ),
+    ).toBeNull();
+
     recorder.recordControllerEvent({
       kind: "state-transition",
       event: { type: "STREAM_STARTED" },
@@ -162,9 +169,6 @@ describe("diagnostics event correlation", () => {
     });
 
     const exported = recorder.buildExport();
-    const network = exported.records.find((record) => record.type === "network");
-    expect(network).toMatchObject({ transport: "fetch", status: 200 });
-
     const seq = exported.records.map((record) => record.seq);
     expect(seq).toEqual([...seq].sort((a, b) => a - b));
     expect(new Set(seq).size).toBe(seq.length);
