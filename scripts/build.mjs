@@ -12,6 +12,7 @@ await build({
     content: "src/content/index.ts",
     background: "src/background/index.ts",
     options: "src/options/options.ts",
+    "diagnostics-bridge": "src/page/diagnostics-bridge.ts",
   },
   outdir,
   bundle: true,

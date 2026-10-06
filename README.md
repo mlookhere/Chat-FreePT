@@ -88,6 +88,31 @@ npm run typecheck      # tsc --noEmit
 npm run format:check   # prettier
 ```
 
+## State diagnostics
+
+When auto-continue or another ChatGPT lifecycle transition behaves incorrectly, open the
+Chat FreePT airplane panel and use **State diagnostics → Start recording** before reproducing
+the problem. After the failure, choose **Stop recording → Export JSON**.
+
+The export is one chronological timeline containing semantic DOM snapshots, UI/lifecycle
+events, selector health, Chat FreePT reducer events/state transitions/effects, storage changes,
+and page-world fetch/XHR/WebSocket/EventSource metadata. It also records safe response-state
+signals such as status/end-turn fields when they can be parsed.
+
+Diagnostics are off by default and session-scoped. The exporter stores hashes, lengths,
+field names, route shapes, and safe enums instead of raw chat/prompt text. Query values,
+cookies, authorization headers, OAuth material, tokens, passwords, and credentials are
+omitted or redacted.
+
+For a useful auto-continue capture:
+
+1. Start recording before sending the message that should trigger the next continuation.
+2. Leave the Chat FreePT panel open or closed as normal; do not open DevTools or alter the page.
+3. Wait until the assistant visibly finishes and the expected continuation does not send.
+4. Stop recording immediately and export the JSON.
+5. Attach that JSON when reporting the failure. The shared sequence numbers let DOM, network,
+   and extension-state decisions be compared in exact order.
+
 ## Safety limits
 
 Auto-continue is capped (default 50 sends per phase, configurable in options), throttled with
