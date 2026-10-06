@@ -1,0 +1,32 @@
+name: Temporary source-map audit repair
+
+on:
+  push:
+    branches:
+      - work/117-refresh-source-map-audit
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: work/117-refresh-source-map-audit
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm audit fix
+      - run: npm audit --audit-level=high
+      - name: Commit repaired lockfile and remove temporary workflow
+        run: |
+          rm .github/workflows/source-map-audit-repair.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json .github/workflows/source-map-audit-repair.yml
+          git commit -m "chore: refresh source-map-js transitive dependency"
+          git push origin HEAD:work/117-refresh-source-map-audit
