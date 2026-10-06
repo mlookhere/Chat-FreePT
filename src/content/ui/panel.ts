@@ -1056,7 +1056,7 @@ function repoGuideHtml(draft: RepoGuideDraft): string {
       ? '<button class="cfpt-btn cfpt-btn-primary" type="button" data-action="repo-guide-next">Next</button>'
       : '<button class="cfpt-btn cfpt-btn-primary" type="button" data-action="repo-guide-launch">Create repo + start planning</button>';
 
-  let body = "";
+  let body: string;
   if (draft.step === 1) {
     body = `
       <h2>Tell Chat FreePT what to create</h2>
