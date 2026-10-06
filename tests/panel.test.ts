@@ -28,10 +28,11 @@ function fixture(): void {
     </main>`;
 }
 
-function makePanel(): Panel {
+function makePanel(overrides: Partial<PanelHooks> = {}): Panel {
   const hooks: PanelHooks = {
     onEvent: vi.fn(),
     getHandoffPrompt: vi.fn(() => "handoff"),
+    ...overrides,
   };
   const panel = new Panel(hooks);
   panels.push(panel);
@@ -284,6 +285,102 @@ describe("composer takeover lifecycle", () => {
     idea?.focus();
     expect(overlayShadow().activeElement).toBe(idea);
     expect(nativeFocus).not.toHaveBeenCalled();
+  });
+});
+
+describe("new repository guide", () => {
+  it("walks through GitHub and CI setup then launches the existing new-repo flow", () => {
+    onboardingDone();
+    const onEvent = vi.fn();
+    const panel = makePanel({ onEvent });
+    panel.render(newRunState("conversation-1", 1));
+    panel.toggle(true);
+
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-open"]')?.click();
+    expect(overlayShadow().textContent).toContain("New private repo · 1 of 4");
+    expect(overlayShadow().textContent).toContain("brand-new");
+    expect(overlayShadow().textContent).toContain("private");
+
+    const idea = overlayShadow().querySelector<HTMLTextAreaElement>(
+      '[data-ref="repo-guide-idea"]',
+    );
+    const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="repo-guide-name"]');
+    if (!idea || !repo) throw new Error("repo guide inputs missing");
+    idea.value = "Build a tiny weather dashboard";
+    repo.value = "weather-board";
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-next"]')?.click();
+
+    expect(overlayShadow().textContent).toContain("New private repo · 2 of 4");
+    expect(overlayShadow().textContent).toContain("Chat FreePT GitHub MCP");
+    expect(overlayShadow().textContent).toContain("Repository creation");
+    expect(overlayShadow().textContent).toContain("Actions status");
+
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-next"]')?.click();
+    expect(overlayShadow().textContent).toContain("New private repo · 3 of 4");
+    expect(overlayShadow().textContent).toContain("CI pipeline is prepared automatically");
+    expect(overlayShadow().textContent).toContain("main");
+    expect(overlayShadow().textContent).toContain("dev");
+    expect(overlayShadow().textContent).toContain("[CONTROL] Current repository state");
+    expect(overlayShadow().textContent).toContain("Zero checks never counts as green");
+
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-next"]')?.click();
+    expect(overlayShadow().textContent).toContain("New private repo · 4 of 4");
+    expect(overlayShadow().textContent).toContain("weather-board");
+    overlayShadow()
+      .querySelector<HTMLButtonElement>('[data-action="repo-guide-launch"]')
+      ?.click();
+
+    expect(onEvent).toHaveBeenCalledWith({
+      type: "USER_START",
+      idea: "Build a tiny weather dashboard",
+      repoMode: "new",
+      repoName: "weather-board",
+    });
+  });
+
+  it("keeps the user on step one when the project idea is missing", () => {
+    onboardingDone();
+    const panel = makePanel();
+    panel.render(newRunState("conversation-1", 1));
+    panel.toggle(true);
+
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-open"]')?.click();
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-next"]')?.click();
+
+    expect(overlayShadow().textContent).toContain("New private repo · 1 of 4");
+    expect(overlayShadow().textContent).toContain(
+      "Describe what you want ChatGPT to build before continuing.",
+    );
+  });
+
+  it("returns guide edits to the main form when cancelled", () => {
+    onboardingDone();
+    const panel = makePanel();
+    panel.render(newRunState("conversation-1", 1));
+    panel.toggle(true);
+
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-open"]')?.click();
+    const idea = overlayShadow().querySelector<HTMLTextAreaElement>(
+      '[data-ref="repo-guide-idea"]',
+    );
+    const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="repo-guide-name"]');
+    if (!idea || !repo) throw new Error("repo guide inputs missing");
+    idea.value = "Keep this draft";
+    repo.value = "draft-repo";
+    overlayShadow()
+      .querySelector<HTMLButtonElement>('[data-action="repo-guide-cancel"]')
+      ?.click();
+
+    expect(overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]')?.value).toBe(
+      "Keep this draft",
+    );
+    expect(overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]')?.value).toBe(
+      "draft-repo",
+    );
+    expect(
+      overlayShadow().querySelector<HTMLInputElement>('input[name="repomode"][value="new"]')
+        ?.checked,
+    ).toBe(true);
   });
 });
 
