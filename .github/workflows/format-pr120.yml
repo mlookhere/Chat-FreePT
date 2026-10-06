@@ -1,0 +1,32 @@
+name: Temporary PR 120 formatter
+
+on:
+  push:
+    branches:
+      - work/119-new-repo-guide
+
+permissions:
+  contents: write
+
+jobs:
+  prettier:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: work/119-new-repo-guide
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx prettier --write tests/panel.test.ts
+      - name: Commit formatted test and remove temporary workflow
+        run: |
+          rm .github/workflows/format-pr120.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/panel.test.ts .github/workflows/format-pr120.yml
+          git commit -m "style: format new repository guide tests"
+          git push origin HEAD:work/119-new-repo-guide
