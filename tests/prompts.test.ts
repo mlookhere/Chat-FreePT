@@ -81,7 +81,7 @@ describe("develop and follow-up prompts", () => {
     expect(prompt).toContain("self-audit");
     expect(prompt).toContain(String(Math.round(DEFAULT_SETTINGS.sendDelayMs / 1000)));
     expect(prompt).toContain(ULTRA_CODE_CONTRACT);
-    expect(prompt).toContain("never idle waiting for CI");
+    expect(prompt).toContain("Never idle waiting for CI");
   });
 
   it("continue always reinforces the locked repo", () => {
