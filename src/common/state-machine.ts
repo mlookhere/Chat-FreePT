@@ -402,37 +402,11 @@ function reduceSendEvent(ctx: ReduceContext, event: SendEvent): boolean {
 function reduceStreamEvent(ctx: ReduceContext, event: StreamEvent): boolean {
   switch (event.type) {
     case "STREAM_STARTED":
-      if (ctx.state.status === "paused" || ctx.state.status === "idle") return false;
-      ctx.state.status = "streaming";
-      return true;
-    case "REPLY_COMPLETE": {
-      const canConsume =
-        ctx.state.status === "streaming" ||
-        ctx.state.status === "sending" ||
-        (ctx.state.status === "awaiting_user" &&
-          event.marker !== null &&
-          isContinuablePhase(ctx.state));
-      if (!canConsume) return false;
-      if (
-        event.assistantKey &&
-        (event.assistantKey === ctx.state.lastProcessedAssistantKey ||
-          event.assistantKey === ctx.state.replyBaselineAssistantKey)
-      ) {
-        return false;
-      }
-      if (event.assistantKey) ctx.state.lastProcessedAssistantKey = event.assistantKey;
-      delete ctx.state.replyBaselineAssistantKey;
-      ctx.state.repliesSinceContract += 1;
-      handleReply(ctx, event.marker, event.text);
-      return true;
-    }
+      return startStream(ctx);
+    case "REPLY_COMPLETE":
+      return completeReply(ctx, event);
     case "STREAM_INTERRUPTED":
-      if (ctx.state.status === "idle" || ctx.state.status === "paused" || ctx.state.status === "complete") return false;
-      ctx.state.status = "paused";
-      ctx.state.pauseReason = event.reason ?? "Generation stopped in ChatGPT";
-      note(ctx, "info", "Generation interrupted — automation paused");
-      ctx.effects.push({ do: "badge", text: "II" });
-      return true;
+      return interruptStream(ctx, event.reason);
     case "STREAM_STUCK":
       fail(
         ctx,
@@ -441,6 +415,57 @@ function reduceStreamEvent(ctx: ReduceContext, event: StreamEvent): boolean {
       );
       return true;
   }
+}
+
+function startStream(ctx: ReduceContext): boolean {
+  if (ctx.state.status === "paused" || ctx.state.status === "idle") return false;
+  ctx.state.status = "streaming";
+  return true;
+}
+
+function completeReply(
+  ctx: ReduceContext,
+  event: Extract<StreamEvent, { type: "REPLY_COMPLETE" }>,
+): boolean {
+  if (!canConsumeReply(ctx.state, event.marker)) return false;
+  if (isDuplicateReply(ctx.state, event.assistantKey)) return false;
+
+  if (event.assistantKey) ctx.state.lastProcessedAssistantKey = event.assistantKey;
+  delete ctx.state.replyBaselineAssistantKey;
+  ctx.state.repliesSinceContract += 1;
+  handleReply(ctx, event.marker, event.text);
+  return true;
+}
+
+function canConsumeReply(state: RunState, marker: Marker | null): boolean {
+  return (
+    state.status === "streaming" ||
+    state.status === "sending" ||
+    (state.status === "awaiting_user" && marker !== null && isContinuablePhase(state))
+  );
+}
+
+function isDuplicateReply(state: RunState, assistantKey: string | undefined): boolean {
+  return Boolean(
+    assistantKey &&
+      (assistantKey === state.lastProcessedAssistantKey ||
+        assistantKey === state.replyBaselineAssistantKey),
+  );
+}
+
+function interruptStream(ctx: ReduceContext, reason?: string): boolean {
+  if (
+    ctx.state.status === "idle" ||
+    ctx.state.status === "paused" ||
+    ctx.state.status === "complete"
+  ) {
+    return false;
+  }
+  ctx.state.status = "paused";
+  ctx.state.pauseReason = reason ?? "Generation stopped in ChatGPT";
+  note(ctx, "info", "Generation interrupted — automation paused");
+  ctx.effects.push({ do: "badge", text: "II" });
+  return true;
 }
 
 function reduceSystemEvent(ctx: ReduceContext, event: SystemEvent): boolean {
