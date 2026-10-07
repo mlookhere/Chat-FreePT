@@ -224,7 +224,9 @@ export class RunController {
         if (this.state.status === "sending" || this.state.status === "streaming") {
           this.dispatch({
             type: "STREAM_INTERRUPTED",
-            reason: event.reason ? `Generation interrupted (${event.reason})` : "Generation interrupted",
+            reason: event.reason
+              ? `Generation interrupted (${event.reason})`
+              : "Generation interrupted",
           });
         }
         return;
@@ -233,19 +235,22 @@ export class RunController {
 
   private scheduleNetworkSettleFallback(requestId: string): void {
     if (this.networkSettleTimer !== undefined) return;
-    this.networkSettleTimer = setTimeout(() => {
-      this.networkSettleTimer = undefined;
-      if (this.disposed) return;
-      if (this.state.status !== "sending" && this.state.status !== "streaming") return;
-      this.reconcileLiveState(Date.now());
-      if (this.state.status !== "sending" && this.state.status !== "streaming") return;
-      this.dispatch({
-        type: "REPLY_COMPLETE",
-        marker: null,
-        text: "",
-        assistantKey: `network-status:${requestId}`,
-      });
-    }, Math.max(this.settings.quietMs, 1500));
+    this.networkSettleTimer = setTimeout(
+      () => {
+        this.networkSettleTimer = undefined;
+        if (this.disposed) return;
+        if (this.state.status !== "sending" && this.state.status !== "streaming") return;
+        this.reconcileLiveState(Date.now());
+        if (this.state.status !== "sending" && this.state.status !== "streaming") return;
+        this.dispatch({
+          type: "REPLY_COMPLETE",
+          marker: null,
+          text: "",
+          assistantKey: `network-status:${requestId}`,
+        });
+      },
+      Math.max(this.settings.quietMs, 1500),
+    );
   }
 
   private clearNetworkSettleTimer(): void {

@@ -10,14 +10,21 @@ const mocks = vi.hoisted(() => ({
   lastAssistantMessage: vi.fn(),
   lastMessageRole: vi.fn(),
   toolCallIndicatorVisible: vi.fn(),
-  chatStateListeners: [] as Array<(event: {
-    version: number;
-    event: "generation-start" | "generation-complete" | "generation-interrupted" | "generation-aborted" | "stream-status";
-    requestId?: string;
-    marker?: { status: string; version: number; text: string } | null;
-    status?: string;
-    reason?: string;
-  }) => void>,
+  chatStateListeners: [] as Array<
+    (event: {
+      version: number;
+      event:
+        | "generation-start"
+        | "generation-complete"
+        | "generation-interrupted"
+        | "generation-aborted"
+        | "stream-status";
+      requestId?: string;
+      marker?: { status: string; version: number; text: string } | null;
+      status?: string;
+      reason?: string;
+    }) => void
+  >,
   watchers: [] as Array<{
     callbacks: {
       onStart: () => void;
@@ -445,7 +452,6 @@ describe("RunController network lifecycle", () => {
     expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
     controller.dispose();
   });
-
 });
 
 describe("RunController manual network lifecycle", () => {

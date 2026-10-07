@@ -448,8 +448,8 @@ function canConsumeReply(state: RunState, marker: Marker | null): boolean {
 function isDuplicateReply(state: RunState, assistantKey: string | undefined): boolean {
   return Boolean(
     assistantKey &&
-      (assistantKey === state.lastProcessedAssistantKey ||
-        assistantKey === state.replyBaselineAssistantKey),
+    (assistantKey === state.lastProcessedAssistantKey ||
+      assistantKey === state.replyBaselineAssistantKey),
   );
 }
 

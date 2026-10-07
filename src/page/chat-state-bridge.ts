@@ -17,7 +17,12 @@ interface MarkerPayload {
 
 interface ChatStatePayload {
   version: number;
-  event: "generation-start" | "generation-complete" | "generation-interrupted" | "generation-aborted" | "stream-status";
+  event:
+    | "generation-start"
+    | "generation-complete"
+    | "generation-interrupted"
+    | "generation-aborted"
+    | "stream-status";
   requestId?: string;
   marker?: MarkerPayload | null;
   status?: string;
@@ -31,7 +36,10 @@ declare global {
 }
 
 function emit(payload: Omit<ChatStatePayload, "version">): void {
-  window.postMessage({ source: BRIDGE_SOURCE, payload: { version: EVENT_VERSION, ...payload } }, "*");
+  window.postMessage(
+    { source: BRIDGE_SOURCE, payload: { version: EVENT_VERSION, ...payload } },
+    "*",
+  );
 }
 
 function nextRequestId(): string {
@@ -147,10 +155,7 @@ function buildMarkerPayload(status: string, fields: Record<string, string>): Mar
   };
 }
 
-function assignOptionalMarkerFields(
-  payload: MarkerPayload,
-  fields: Record<string, string>,
-): void {
+function assignOptionalMarkerFields(payload: MarkerPayload, fields: Record<string, string>): void {
   if (fields["PHASE"]) payload.phase = fields["PHASE"];
   if (fields["REPO"]) payload.repo = fields["REPO"];
   if (fields["ITEM"]) payload.item = fields["ITEM"];
@@ -194,7 +199,8 @@ function install(): void {
     const requestId = nextRequestId();
     const isConversation = verb === "POST" && path === "/backend-api/f/conversation";
     const isStop = verb === "POST" && path === "/backend-api/stop_conversation";
-    const isStreamStatus = verb === "GET" && /\/backend-api\/conversation\/[^/]+\/stream_status$/.test(path);
+    const isStreamStatus =
+      verb === "GET" && /\/backend-api\/conversation\/[^/]+\/stream_status$/.test(path);
 
     if (isConversation) emit({ event: "generation-start", requestId });
     if (isStop) emit({ event: "generation-interrupted", requestId, reason: "stop_conversation" });
