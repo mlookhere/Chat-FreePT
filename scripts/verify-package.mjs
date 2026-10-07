@@ -4,6 +4,8 @@ import { join, relative, sep } from "node:path";
 const EXPECTED_FILES = [
   "background.js",
   "content.js",
+  "diagnostics-bridge.js",
+  "chat-state-bridge.js",
   "icons/icon16.png",
   "icons/icon48.png",
   "icons/icon128.png",
@@ -43,6 +45,11 @@ function referencedFiles(manifest) {
   }
   for (const file of Object.values(manifest.icons ?? {})) {
     if (typeof file === "string") references.push(file);
+  }
+  for (const entry of manifest.web_accessible_resources ?? []) {
+    for (const file of entry.resources ?? []) {
+      if (typeof file === "string") references.push(file);
+    }
   }
   return references;
 }

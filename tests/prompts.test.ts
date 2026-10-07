@@ -4,21 +4,24 @@ import {
   buildDevelopPrompt,
   buildHandoffPrompt,
   buildMcpPreflight,
+  buildNudgePrompt,
   buildPlanPrompt,
   buildUserReply,
   COMPACT_CONTRACT,
   MARKER_BLOCK,
-  NUDGE_PROMPT,
   renderTemplate,
+  repositoryLockBlock,
+  ULTRA_CODE_COMPACT,
+  ULTRA_CODE_CONTRACT,
 } from "../src/common/prompts";
 import { parseMarker } from "../src/common/marker";
 import { newRunState } from "../src/common/state-machine";
 import { DEFAULT_SETTINGS } from "../src/common/types";
 
+const REPO = "owner/cookie-cli";
 const planInput = {
   idea: "A CLI that prints fortune cookies",
-  repoMode: "new" as const,
-  repoName: "",
+  repo: REPO,
   templateRepo: "mlookhere/CI-Pipline",
 };
 
@@ -32,142 +35,101 @@ describe("renderTemplate", () => {
   });
 });
 
-describe("plan prompt", () => {
-  it("contains the idea, preflight, vendor recipe, contract, and marker spec", () => {
+describe("repository-locked prompts", () => {
+  it("binds planning to the selected repository and exact-repo preflight", () => {
     const prompt = buildPlanPrompt(planInput);
     expect(prompt).toContain(planInput.idea);
-    expect(prompt).toContain("GitHub MCP preflight");
+    expect(prompt).toContain(`permanently bound to **${REPO}**`);
+    expect(prompt).toContain(`exact locked repository **${REPO}**`);
     expect(prompt).toContain("mlookhere/CI-Pipline");
     expect(prompt).toContain("Operating contract (CI-Pipline)");
-    expect(prompt).toContain("CHATFREEPT_STATUS");
     expect(prompt).toContain("PLAN_READY");
+    expect(prompt).not.toContain("Create a new PRIVATE repository");
   });
 
-  it("varies repository instructions by mode", () => {
-    expect(buildPlanPrompt(planInput)).toContain(
-      "Create a new PRIVATE repository under my account",
-    );
-    expect(buildPlanPrompt({ ...planInput, repoName: "cookie-cli" })).toContain(
-      'named "cookie-cli"',
-    );
-    expect(buildPlanPrompt({ ...planInput, repoMode: "existing", repoName: "me/mine" })).toContain(
-      "Use my existing repository me/mine",
-    );
-  });
-
-  it("uses mode-aware GitHub capability requirements", () => {
-    const newRepo = buildMcpPreflight("new", "cookie-cli");
-    expect(newRepo).toContain("NEW-REPOSITORY mode");
-    expect(newRepo).toContain("repository-creation capability");
-    expect(newRepo).toContain("label_write");
-
-    const existing = buildMcpPreflight("existing", "me/mine");
-    expect(existing).toContain("EXISTING-REPOSITORY mode for me/mine");
-    expect(existing).toMatch(/Do NOT\s+require repository creation/);
-    expect(existing).toMatch(/only for labels that are actually\s+missing/);
-  });
-
-  it("uses the automated full-toolset custom MCP flow and does not require default-branch mutation", () => {
-    const prompt = buildPlanPrompt(planInput);
-    expect(prompt).toContain("Settings → Security and login");
-    expect(prompt).toContain("https://chatgpt.com/plugins");
-    expect(prompt).toContain("Chat FreePT GitHub MCP");
-    expect(prompt).toContain("Server URL");
-    expect(prompt).toContain("https://api.githubcopilot.com/mcp/x/all");
-    expect(prompt).toContain("all available MCP toolsets");
-    expect(prompt).toContain("OAuth");
-    expect(prompt).toContain("press Create after I explicitly check");
-    expect(prompt).toContain("run this capability preflight again");
-    expect(prompt).not.toContain("open the Plus menu");
-    expect(prompt).not.toContain("choose Developer mode, and select");
-    expect(prompt).toContain("Repository default-branch mutation is NOT required");
-    expect(prompt).toContain("Do NOT require changing the repository default branch");
-    expect(prompt).not.toContain("set dev as the default branch");
+  it("preflights the exact repo without Developer Mode setup instructions", () => {
+    const prompt = buildMcpPreflight(REPO);
+    expect(prompt).toContain(REPO);
+    expect(prompt).toContain("Do not create a repository");
+    expect(prompt).toContain("do not switch repositories");
+    expect(prompt).toContain("NEEDS_INPUT");
+    expect(prompt).not.toContain("Settings → Security and login");
+    expect(prompt).not.toContain("Developer mode");
+    expect(prompt).not.toContain("Chat FreePT GitHub MCP");
   });
 
   it("uses main as production and dev as integration", () => {
     const plan = buildPlanPrompt(planInput);
-    const develop = buildDevelopPrompt(DEFAULT_SETTINGS);
-
+    const develop = buildDevelopPrompt(DEFAULT_SETTINGS, REPO);
     expect(plan).toContain("dev is integration; main is production");
     expect(plan).toContain("release — PR dev into main");
-    expect(plan).toMatch(/name dev or main explicitly/);
     expect(develop).toContain("dev → main");
-
     expect(plan).not.toContain("master is production");
-    expect(plan).not.toContain("PR dev into master");
-    expect(develop).not.toContain("dev → master");
   });
 
-  it("does not itself parse as a status marker sent by the assistant", () => {
-    const prompt = buildPlanPrompt(planInput);
-    const marker = parseMarker(prompt);
-    expect(marker).toBeNull();
+  it("does not itself parse as an assistant status marker", () => {
+    expect(parseMarker(buildPlanPrompt(planInput))).toBeNull();
   });
 });
 
-describe("develop prompt", () => {
-  it("contains the per-item loop, pacing, and completion self-audit", () => {
-    const prompt = buildDevelopPrompt(DEFAULT_SETTINGS);
+describe("develop and follow-up prompts", () => {
+  it("develop prompt includes the locked repo and per-item loop", () => {
+    const prompt = buildDevelopPrompt(DEFAULT_SETTINGS, REPO);
+    expect(prompt).toContain(repositoryLockBlock(REPO));
     expect(prompt).toContain("work/<issue-number>-<slug>");
     expect(prompt).toContain("Refs #<issue>");
     expect(prompt).toContain("self-audit");
-    expect(prompt).toContain("COMPLETE");
     expect(prompt).toContain(String(Math.round(DEFAULT_SETTINGS.sendDelayMs / 1000)));
-    expect(prompt).toContain("Chat FreePT follow-up messages are your clock ticks");
-  });
-});
-
-describe("continue / nudge / reply / handoff", () => {
-  it("plain continue is the settings message", () => {
-    expect(buildContinuePrompt(DEFAULT_SETTINGS, false)).toBe(DEFAULT_SETTINGS.continueMessage);
+    expect(prompt).toContain(ULTRA_CODE_CONTRACT);
+    expect(prompt).toContain("Never idle waiting for CI");
   });
 
-  it("refresh variant appends the compact contract", () => {
-    const prompt = buildContinuePrompt(DEFAULT_SETTINGS, true);
-    expect(prompt).toContain(DEFAULT_SETTINGS.continueMessage);
-    expect(prompt).toContain(COMPACT_CONTRACT);
+  it("continue always reinforces the locked repo", () => {
+    const plain = buildContinuePrompt(DEFAULT_SETTINGS, false, REPO);
+    expect(plain).toContain(repositoryLockBlock(REPO));
+    expect(plain).toContain(DEFAULT_SETTINGS.continueMessage);
+    expect(plain).toContain(ULTRA_CODE_COMPACT);
+
+    const refresh = buildContinuePrompt(DEFAULT_SETTINGS, true, REPO);
+    expect(refresh).toContain(COMPACT_CONTRACT);
+    expect(refresh).toContain(ULTRA_CODE_CONTRACT);
+    expect(refresh).toContain(REPO);
   });
 
-  it("nudge demands only the status block", () => {
-    expect(NUDGE_PROMPT).toContain("chatfreept");
+  it("nudge and user replies reinforce the locked repo", () => {
+    expect(buildNudgePrompt(REPO)).toContain(REPO);
+    expect(buildNudgePrompt(REPO)).toContain("ONLY");
+    expect(buildUserReply("use sqlite", REPO)).toContain("use sqlite");
+    expect(buildUserReply("use sqlite", REPO)).toContain(REPO);
+    expect(buildUserReply("use sqlite", REPO)).toContain(ULTRA_CODE_COMPACT);
+    expect(buildUserReply("use sqlite", REPO)).toContain("CHATFREEPT status block");
   });
 
-  it("user replies re-arm the marker", () => {
-    expect(buildUserReply("use sqlite")).toContain("use sqlite");
-    expect(buildUserReply("use sqlite")).toContain("CHATFREEPT status block");
-  });
-
-  it("handoff embeds repo and phase and the contract", () => {
-    const state = { ...newRunState("c1", 0), repo: "o/r", phase: "developing" as const };
+  it("handoff embeds the locked repo and phase", () => {
+    const state = { ...newRunState("c1", 0), repo: REPO, phase: "developing" as const };
     const prompt = buildHandoffPrompt(state);
-    expect(prompt).toContain("o/r");
+    expect(prompt).toContain(REPO);
     expect(prompt).toContain("DEVELOPING");
     expect(prompt).toContain("Operating contract");
-  });
-
-  it("handoff falls back when both repo fields are empty", () => {
-    const prompt = buildHandoffPrompt(newRunState("c1", 0));
-    expect(prompt).toContain("Repo: (see the plan conversation)");
+    expect(prompt).toContain(ULTRA_CODE_CONTRACT);
   });
 });
 
 describe("marker block", () => {
-  it("appears exactly once per prompt", () => {
+  it("appears exactly once in full protocol prompts", () => {
+    const state = { ...newRunState("c1", 0), repo: REPO };
     for (const prompt of [
       buildPlanPrompt(planInput),
-      buildDevelopPrompt(DEFAULT_SETTINGS),
-      buildHandoffPrompt(newRunState("c1", 0)),
+      buildDevelopPrompt(DEFAULT_SETTINGS, REPO),
+      buildHandoffPrompt(state),
     ]) {
-      const count = prompt.split("Status marker (mandatory)").length - 1;
-      expect(count).toBe(1);
+      expect(prompt.split("Status marker (mandatory)").length - 1).toBe(1);
     }
     expect(MARKER_BLOCK).toContain("Never omit the block");
   });
 
-  it("describes queued and controlled continuation instead of promising an automatic continue", () => {
+  it("requires the locked repository in every marker", () => {
+    expect(MARKER_BLOCK).toContain("locked owner/name");
     expect(MARKER_BLOCK).toContain("queued next message");
-    expect(MARKER_BLOCK).toContain("depending on my controls");
-    expect(MARKER_BLOCK).not.toContain('I will reply "continue" automatically');
   });
 });

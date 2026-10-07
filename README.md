@@ -10,41 +10,65 @@ contract, translated for ChatGPT — and then orchestrates the conversation end 
    Issues, a repo layout, and the CI stages the project needs. The extension auto-continues
    the conversation until the plan is complete, then waits for you to press
    **Start development**.
-2. **Develop.** ChatGPT — using its own **GitHub MCP connector**, not this extension — creates
-   or reuses the project repository, vendors the CI-Pipline control plane into it, and works
-   the plan: one Issue → one `work/<n>-slug` branch → one PR into `dev` → GitHub Actions
-   gates → merge on green. No protected branches, so the loop runs unattended on free
-   private repositories.
-3. **Orchestrate.** The extension watches the conversation. When ChatGPT stops streaming, it
-   reads a machine-readable status marker from the reply:
+2. **Develop.** ChatGPT — using the GitHub-capable tools available in the conversation,
+   not this extension — works only in the repository locked to that conversation, vendors
+   the CI-Pipline control plane into it, and executes the plan: one Issue →
+   one `work/<n>-slug` branch → one PR into `dev` → GitHub Actions gates → merge on green.
+3. **Orchestrate.** The extension watches the conversation through ChatGPT lifecycle signals
+   plus a self-healing runtime reconciliation loop. Once a completed assistant turn is
+   confirmed, it reads a machine-readable status marker from the reply:
    - `CONTINUE` — more work remains; the extension sends "continue" automatically.
    - `NEEDS_INPUT` — ChatGPT needs a decision; the extension pauses and notifies you.
    - `PLAN_READY` — the master plan is finished; the panel offers **Start development**.
    - `COMPLETE` — everything is merged and green; a completion modal takes over the screen.
 
-The extension never talks to GitHub and never holds credentials. ChatGPT's MCP connector owns
-every repository operation; Chat FreePT is the prompt injector, conversation orchestrator,
-and UI.
+The extension never talks to GitHub and never holds GitHub credentials. ChatGPT's available
+GitHub tools own every repository operation; Chat FreePT is the prompt injector, conversation
+orchestrator, repository lock, and UI.
 
 ## Requirements
 
 - Chrome (Manifest V3).
-- A ChatGPT account/workspace where Developer Mode can use a write-capable custom MCP app.
-- The dedicated custom app must be configured as:
-  - **Name:** `Chat FreePT GitHub MCP`
-  - **Server URL:** `https://api.githubcopilot.com/mcp/x/all`
-  - **Authentication:** OAuth
+- A GitHub repository selected before planning begins.
+- ChatGPT must have GitHub-capable tools with the read/write, Issue, PR, merge, workflow,
+  and Actions access required by the CI contract.
 
-Chat FreePT's **Follow along** setup guides the ChatGPT-side flow through **Settings → Security
-and login → Developer mode → Plugins**, then returns to the originating conversation and
-selects **Developer mode** plus the exact **Chat FreePT GitHub MCP** app before setup is marked
-complete. The extension may fill safe app-configuration fields, but it never approves
-ChatGPT's elevated-risk acknowledgement and never completes or bypasses GitHub OAuth on the
-user's behalf.
+Chat FreePT does not configure ChatGPT Developer Mode, plugins, custom apps, OAuth, or other
+account-level integration settings. It checks capabilities against the exact repository
+selected for the conversation and stops with `NEEDS_INPUT` if access is missing.
 
-The injected skill performs its own GitHub capability preflight in the conversation and stops
-with `NEEDS_INPUT` if the required repository, branch/file, Issue/label, PR/merge, or Actions
-capabilities are unavailable.
+### One conversation, one repository
+
+Before the first plan starts, enter either `owner/repo` or the repository's root GitHub URL.
+For a new project, create a private repository at GitHub first, then return to Chat FreePT and
+paste its repository name or URL.
+
+The repository is normalized to `owner/repo`, persisted with the conversation, and locked.
+The lock follows a new chat from its temporary ID to ChatGPT's permanent conversation ID.
+Once locked, the field is read-only. To work in a different repository, start a new ChatGPT
+conversation.
+
+Every plan, development, continuation, recovery, queued-user, and direct-user prompt repeats
+the repository lock. If ChatGPT reports or attempts to use a different repository, Chat FreePT
+pauses instead of silently switching.
+
+### Ultra Code sessions
+
+During planning and development, Chat FreePT uses an Ultra Code operating contract designed
+for long-running autonomous work. ChatGPT is told to reconstruct repository state from Issues,
+branches, PRs, the control Issue, and Actions before acting; resume stale work instead of
+duplicating it; make meaningful progress each turn; never idle waiting for CI; minimize
+unnecessary questions; and never weaken gates or treat zero/missing checks as green.
+
+The panel includes an ordered message queue. You can add multiple instructions while ChatGPT
+is working, inspect them, move individual items up or down, remove one item, or clear the
+queue. Messages are persisted with the conversation and sent FIFO, one per safe turn boundary,
+before a generic auto-continue. A manually typed ChatGPT composer draft is never overwritten. The ordered queue and checkpoint survive normal extension state persistence and conversation-ID migration.
+
+The **Ultra Code checkpoint** summarizes the durable session state: locked repository, phase,
+current plan item, last status marker, latest CI/PR URL, queue depth, and last lifecycle signal.
+Pause or Stop immediately cancels pending automatic sends. Resume reconciles the live network
+and DOM state before Chat FreePT sends anything else.
 
 ## Install (unpacked)
 
@@ -60,7 +84,7 @@ instead of rebuilding locally. Extract `chat-freept.zip` to a folder first, then
 unpacked** on that extracted folder so the browser is testing the exact CI-built package.
 
 Open a ChatGPT conversation and click the Chat FreePT airplane launcher beside the native
-composer **Plus** control. Describe your idea and start the plan.
+composer **Plus** control. Select the repository, describe your idea, and start the plan.
 
 ## Development
 
@@ -87,9 +111,35 @@ npm run typecheck      # tsc --noEmit
 npm run format:check   # prettier
 ```
 
+## State diagnostics
+
+When auto-continue or another ChatGPT lifecycle transition behaves incorrectly, open the
+Chat FreePT airplane panel and use **State diagnostics → Start recording** before reproducing
+the problem. After the failure, choose **Stop recording → Export JSON**.
+
+The export is one chronological timeline containing semantic DOM snapshots, UI/lifecycle
+events, selector health, Chat FreePT reducer events/state transitions/effects, storage changes,
+and page-world fetch/XHR/WebSocket/EventSource metadata. It also records safe response-state
+signals such as status/end-turn fields when they can be parsed.
+
+Diagnostics are off by default and session-scoped. The exporter stores hashes, lengths,
+field names, route shapes, and safe enums instead of raw chat/prompt text. Query values,
+cookies, authorization headers, OAuth material, tokens, passwords, and credentials are
+omitted or redacted.
+
+For a useful auto-continue capture:
+
+1. Start recording before sending the message that should trigger the next continuation.
+2. Leave the Chat FreePT panel open or closed as normal; do not open DevTools or alter the page.
+3. Wait until the assistant visibly finishes and the expected continuation does not send.
+4. Stop recording immediately and export the JSON.
+5. Attach that JSON when reporting the failure. The shared sequence numbers let DOM, network,
+   and extension-state decisions be compared in exact order.
+
 ## Safety limits
 
 Auto-continue is capped (default 50 sends per phase, configurable in options), throttled with
 a configurable delay, and pauses immediately on ChatGPT error banners, missing status
-markers (after one nudge), rate-limit notices, or a logged-out composer. The panel always
-shows a Pause/Stop control while a run is active.
+markers (after one nudge), rate-limit notices, or a logged-out composer. Queued user messages
+take priority over generic auto-continue. The panel always shows Pause/Stop controls while a
+run is active, and either action suppresses pending automatic sends immediately.

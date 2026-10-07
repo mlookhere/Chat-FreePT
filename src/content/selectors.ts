@@ -18,23 +18,7 @@ export type TargetId =
   | "pageAlert"
   | "toolIndicator";
 
-export type GuideTargetId =
-  | "composerPlusButton"
-  | "settingsSecurity"
-  | "developerModeRow"
-  | "developerModeToggle"
-  | "pluginSearchInput"
-  | "pluginAddButton"
-  | "githubMcpPluginResult"
-  | "pluginNameInput"
-  | "pluginServerUrlOption"
-  | "pluginServerInput"
-  | "pluginAuthControl"
-  | "pluginOauthOption"
-  | "pluginRiskCheckbox"
-  | "pluginCreateButton"
-  | "conversationDeveloperMode"
-  | "conversationGitHubMcp";
+export type GuideTargetId = "composerPlusButton";
 
 export interface Candidate {
   css: string;
@@ -93,7 +77,9 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: 'button[data-testid="stop-button"]' },
       { css: 'button[aria-label="Stop streaming"]' },
       { css: 'button[aria-label="Stop generating"]' },
-      { css: 'button[aria-label*="Stop"]' },
+      // Keep broad label fallbacks inside the composer so unrelated page controls cannot match.
+      { css: '#thread-bottom form button[aria-label*="Stop"]' },
+      { css: 'form[data-type="unified-composer"] button[aria-label*="Stop"]' },
     ],
   },
   assistantMessage: {
@@ -236,21 +222,6 @@ export function healthCheck(root: ParentNode = document): HealthReport {
 /** Optional, text-aware targets used only by the composer integration and opt-in setup guide. */
 const GUIDE_RESOLVERS: Record<GuideTargetId, () => HTMLElement | null> = {
   composerPlusButton,
-  settingsSecurity: () => clickableText(/^Security and login$/i),
-  developerModeRow,
-  developerModeToggle,
-  pluginSearchInput,
-  pluginAddButton,
-  githubMcpPluginResult,
-  pluginNameInput,
-  pluginServerUrlOption,
-  pluginServerInput,
-  pluginAuthControl,
-  pluginOauthOption,
-  pluginRiskCheckbox,
-  pluginCreateButton,
-  conversationDeveloperMode: () => clickableText(/^Developer mode$/i),
-  conversationGitHubMcp: () => clickableText(/^(Chat FreePT GitHub MCP|GitHub MCP)$/i),
 };
 
 export function queryGuideTarget(id: GuideTargetId): HTMLElement | null {
@@ -274,158 +245,6 @@ function composerPlusButton(): HTMLElement | null {
     document.querySelector('form[data-type="unified-composer"]');
   if (!form) return null;
   return textElement(/^\+$/i, form, "button") as HTMLElement | null;
-}
-
-function developerModeToggle(): HTMLElement | null {
-  const semantic = document.querySelector<HTMLElement>(
-    'button[role="switch"][aria-label="Developer mode"], [role="switch"][aria-label="Developer mode"]',
-  );
-  if (semantic) return semantic;
-  return controlNearText(
-    /^Developer mode$/i,
-    'button[role="switch"], [role="switch"], input[type="checkbox"]',
-  );
-}
-
-function developerModeRow(): HTMLElement | null {
-  const toggle = developerModeToggle();
-  if (toggle) {
-    let node: HTMLElement | null = toggle;
-    for (let depth = 0; node && depth < 7; depth += 1) {
-      const text = node.textContent ?? "";
-      if (/Allows you to add unverified connectors/i.test(text)) return node;
-      node = node.parentElement;
-    }
-  }
-
-  const label = textElement(/^Developer mode$/i);
-  if (!(label instanceof HTMLElement)) return toggle;
-  let node: HTMLElement | null = label;
-  for (let depth = 0; node && depth < 7; depth += 1) {
-    if (toggle && node.contains(toggle)) return node;
-    if (node.querySelector('button[role="switch"], [role="switch"], input[type="checkbox"]')) {
-      return node;
-    }
-    node = node.parentElement;
-  }
-  return label.parentElement ?? label;
-}
-
-function pluginSearchInput(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(
-    '#plugin-search, input[aria-label="Search plugins"], input[placeholder="Search plugins"]',
-  );
-}
-
-function pluginAddButton(): HTMLElement | null {
-  const labeled = document.querySelector<HTMLElement>(
-    'button[aria-label="Create app"], button[aria-label*="Add plugin" i], button[aria-label*="Create plugin" i], button[title*="Add plugin" i]',
-  );
-  if (labeled) return labeled;
-  const plus = textElement(/^\+$/, document, "button");
-  if (plus instanceof HTMLElement) return plus;
-  const search = pluginSearchInput();
-  const container = search?.parentElement?.parentElement;
-  const buttons = container ? Array.from(container.querySelectorAll<HTMLElement>("button")) : [];
-  return buttons.at(-1) ?? null;
-}
-
-function githubMcpPluginResult(): HTMLElement | null {
-  const labeled = document.querySelector<HTMLElement>(
-    'a[aria-label="Open Chat FreePT GitHub MCP"], button[aria-label="Open Chat FreePT GitHub MCP"]',
-  );
-  if (labeled) return labeled;
-  return clickableText(/^Chat FreePT GitHub MCP$/i);
-}
-
-function pluginNameInput(): HTMLElement | null {
-  return (document.getElementById("custom-connector-name") ??
-    fieldNearLabel(/^(Name|Plugin name)$/i, "input")) as HTMLElement | null;
-}
-
-function pluginServerUrlOption(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(
-    '[role="radio"][aria-label="Server URL"], button[aria-label="Server URL"]',
-  );
-}
-
-function pluginServerInput(): HTMLElement | null {
-  return (document.getElementById("custom-connector-url") ??
-    fieldNearLabel(
-      /(Server URL|Remote MCP|MCP server URL)/i,
-      'input[type="url"], input',
-    )) as HTMLElement | null;
-}
-
-function pluginAuthControl(): HTMLElement | null {
-  return (document.getElementById("custom-connector-auth") ??
-    document.querySelector<HTMLElement>(
-      'select[aria-label*="Authentication" i], [role="combobox"][aria-label*="Authentication" i], button[aria-label*="Authentication" i]',
-    ) ??
-    fieldNearLabel(/Authentication/i, 'select, [role="combobox"], button')) as HTMLElement | null;
-}
-
-function pluginOauthOption(): HTMLElement | null {
-  const candidates = Array.from(
-    document.querySelectorAll<HTMLElement>(
-      '[role="option"], [role="menuitem"], [role="menuitemradio"], button',
-    ),
-  );
-  const exact = candidates.filter((element) => /^OAuth$/i.test((element.textContent ?? "").trim()));
-  exact.sort((a, b) => a.children.length - b.children.length);
-  return exact[0] ?? null;
-}
-
-function pluginRiskCheckbox(): HTMLElement | null {
-  return (document.getElementById("trust-checkbox") ??
-    controlNearText(
-      /I understand.*continue/i,
-      'input[type="checkbox"], [role="checkbox"]',
-    )) as HTMLElement | null;
-}
-
-function pluginCreateButton(): HTMLElement | null {
-  const modal = document.getElementById("modal-create-custom-connector");
-  const submit = modal?.querySelector<HTMLElement>('button[type="submit"]');
-  return submit ?? clickableText(/^Create$/i);
-}
-
-function clickableText(pattern: RegExp): HTMLElement | null {
-  const text = textElement(pattern);
-  if (!(text instanceof HTMLElement)) return null;
-  return (
-    text.closest<HTMLElement>(
-      'button, a, [role="button"], [role="tab"], [role="menuitem"], [role="option"]',
-    ) ?? text
-  );
-}
-
-function fieldNearLabel(pattern: RegExp, selector: string): HTMLElement | null {
-  const label = textElement(pattern, document, "label, span, div, p");
-  if (!(label instanceof HTMLElement)) return null;
-  if (label instanceof HTMLLabelElement && label.htmlFor) {
-    const linked = document.getElementById(label.htmlFor);
-    if (linked instanceof HTMLElement) return linked;
-  }
-  let node: HTMLElement | null = label;
-  for (let depth = 0; node && depth < 5; depth += 1) {
-    const control = node.querySelector<HTMLElement>(selector);
-    if (control) return control;
-    node = node.parentElement;
-  }
-  return null;
-}
-
-function controlNearText(pattern: RegExp, selector: string): HTMLElement | null {
-  const label = textElement(pattern);
-  if (!(label instanceof HTMLElement)) return null;
-  let node: HTMLElement | null = label;
-  for (let depth = 0; node && depth < 7; depth += 1) {
-    const control = node.querySelector<HTMLElement>(selector);
-    if (control) return control;
-    node = node.parentElement;
-  }
-  return null;
 }
 
 function textElement(

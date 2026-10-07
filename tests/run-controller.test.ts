@@ -8,6 +8,23 @@ const mocks = vi.hoisted(() => ({
   healthCheck: vi.fn(),
   scanPageSignals: vi.fn(),
   lastAssistantMessage: vi.fn(),
+  lastMessageRole: vi.fn(),
+  toolCallIndicatorVisible: vi.fn(),
+  chatStateListeners: [] as Array<
+    (event: {
+      version: number;
+      event:
+        | "generation-start"
+        | "generation-complete"
+        | "generation-interrupted"
+        | "generation-aborted"
+        | "stream-status";
+      requestId?: string;
+      marker?: { status: string; version: number; text: string } | null;
+      status?: string;
+      reason?: string;
+    }) => void
+  >,
   watchers: [] as Array<{
     callbacks: {
       onStart: () => void;
@@ -22,6 +39,16 @@ const mocks = vi.hoisted(() => ({
     recoverFromWake: ReturnType<typeof vi.fn>;
     isStreaming: () => boolean;
   }>,
+}));
+
+vi.mock("../src/content/chat-state", () => ({
+  subscribeChatState: (listener: (typeof mocks.chatStateListeners)[number]) => {
+    mocks.chatStateListeners.push(listener);
+    return () => {
+      const index = mocks.chatStateListeners.indexOf(listener);
+      if (index >= 0) mocks.chatStateListeners.splice(index, 1);
+    };
+  },
 }));
 
 vi.mock("../src/content/composer", () => ({
@@ -40,6 +67,8 @@ vi.mock("../src/content/page-signals", () => ({
 
 vi.mock("../src/content/transcript", () => ({
   lastAssistantMessage: mocks.lastAssistantMessage,
+  lastMessageRole: mocks.lastMessageRole,
+  toolCallIndicatorVisible: mocks.toolCallIndicatorVisible,
 }));
 
 vi.mock("../src/content/stream-watch", () => ({
@@ -82,7 +111,7 @@ function streamingState(): ReturnType<typeof newRunState> {
   let state = newRunState("c1", Date.now());
   state = reduce(
     state,
-    { type: "USER_START", idea: "build it", repoMode: "new", repoName: "" },
+    { type: "USER_START", idea: "build it", repoMode: "existing", repoName: "owner/project" },
     settings,
   ).state;
   state = reduce(state, { type: "INSERT_OK" }, settings).state;
@@ -94,6 +123,10 @@ function makeController(initial = newRunState("c1", Date.now())): Controller {
     onChange: vi.fn(),
     onShowModal: vi.fn(),
   });
+}
+
+function emitChatState(event: Parameters<(typeof mocks.chatStateListeners)[number]>[0]): void {
+  for (const listener of [...mocks.chatStateListeners]) listener(event);
 }
 
 function watcher(): (typeof mocks.watchers)[number] {
@@ -116,7 +149,10 @@ beforeEach(() => {
   mocks.healthCheck.mockReset().mockReturnValue({ missing: [], degraded: [] });
   mocks.scanPageSignals.mockReset().mockReturnValue(null);
   mocks.lastAssistantMessage.mockReset().mockReturnValue(null);
+  mocks.lastMessageRole.mockReset().mockReturnValue(null);
+  mocks.toolCallIndicatorVisible.mockReset().mockReturnValue(false);
   mocks.watchers.length = 0;
+  mocks.chatStateListeners.length = 0;
 });
 
 afterEach(() => {
@@ -130,8 +166,8 @@ describe("RunController sends and continuation controls", () => {
     controller.dispatch({
       type: "USER_START",
       idea: "build a compact extension",
-      repoMode: "new",
-      repoName: "freept-test",
+      repoMode: "existing",
+      repoName: "owner/freept-test",
     });
     await flushAsync();
 
@@ -184,6 +220,36 @@ describe("RunController sends and continuation controls", () => {
     controller.dispose();
   });
 
+  it("pause and stop suppress a pending automatic send immediately", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(16_000);
+    const paused = makeController(streamingState());
+
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    expect(paused.state.status).toBe("cooldown");
+    paused.dispatch({ type: "USER_PAUSE" });
+    expect(paused.state.status).toBe("paused");
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushAsync();
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    paused.dispose();
+
+    mocks.insertPrompt.mockClear();
+    mocks.clickSend.mockClear();
+    const stopped = makeController(streamingState());
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    stopped.dispatch({ type: "USER_STOP" });
+    expect(stopped.state.status).toBe("idle");
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushAsync();
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    stopped.dispose();
+  });
+
   it("sends queued user text once while auto-continue is disabled", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(17_000);
@@ -203,6 +269,7 @@ describe("RunController sends and continuation controls", () => {
     expect(mocks.clickSend).toHaveBeenCalledTimes(1);
     expect(controller.state.autoSends).toBe(0);
     expect(controller.state.queuedUserText).toBeUndefined();
+    expect(controller.state.queuedUserTexts).toBeUndefined();
     expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
@@ -254,7 +321,12 @@ describe("RunController recovery and disposal", () => {
       .mockReturnValueOnce({ missing: [], degraded: [] });
     const controller = makeController();
 
-    controller.dispatch({ type: "USER_START", idea: "build it", repoMode: "new", repoName: "" });
+    controller.dispatch({
+      type: "USER_START",
+      idea: "build it",
+      repoMode: "existing",
+      repoName: "owner/project",
+    });
     await flushAsync();
     expect(mocks.insertPrompt).not.toHaveBeenCalled();
 
@@ -270,9 +342,11 @@ describe("RunController recovery and disposal", () => {
 
   it("rebases the watcher and reconciles the live reply when the page resumes", () => {
     const controller = makeController(streamingState());
+    mocks.lastMessageRole.mockReturnValue("assistant");
     mocks.lastAssistantMessage.mockReturnValue({
       el: document.createElement("div"),
       text: "Done.\nCHATFREEPT_STATUS: CONTINUE\nV: 1",
+      key: "message:wake-reply",
     });
 
     window.dispatchEvent(new Event("pageshow"));
@@ -321,7 +395,12 @@ describe("RunController recovery and disposal", () => {
     );
     const controller = makeController();
 
-    controller.dispatch({ type: "USER_START", idea: "build it", repoMode: "new", repoName: "" });
+    controller.dispatch({
+      type: "USER_START",
+      idea: "build it",
+      repoMode: "existing",
+      repoName: "owner/project",
+    });
     await flushAsync();
     expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
 
@@ -354,6 +433,238 @@ describe("RunController recovery and disposal", () => {
     expect(mocks.clickSend).not.toHaveBeenCalled();
     expect(controller.state.status).toBe("error");
     expect(controller.state.errorCode).toBe("composer-insert-failed");
+    controller.dispose();
+  });
+});
+
+describe("RunController network lifecycle", () => {
+  it("uses network completion with a marker even when transcript selectors see nothing", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(35_000);
+    const controller = makeController(streamingState());
+
+    emitChatState({
+      version: 1,
+      event: "generation-complete",
+      requestId: "turn-1",
+      marker: {
+        status: "CONTINUE",
+        version: 1,
+        text: "CHATFREEPT_STATUS: CONTINUE\nV: 1",
+      },
+    });
+
+    expect(controller.state.status).toBe("cooldown");
+    expect(controller.state.lastProcessedAssistantKey).toBe("network:turn-1");
+    expect(controller.state.lastLifecycleSignal).toBe("generation-complete");
+    controller.dispose();
+  });
+
+  it("pauses automation when ChatGPT stop_conversation is observed", () => {
+    const controller = makeController(streamingState());
+
+    emitChatState({
+      version: 1,
+      event: "generation-interrupted",
+      requestId: "turn-stop",
+      reason: "stop_conversation",
+    });
+
+    expect(controller.state.status).toBe("paused");
+    expect(controller.state.pauseReason).toContain("stopped");
+    expect(controller.state.lastLifecycleSignal).toBe("generation-interrupted");
+    controller.dispose();
+  });
+
+  it("uses COMPLETE stream_status only as a delayed missing-marker fallback", async () => {
+    vi.useFakeTimers();
+    const controller = makeController(streamingState());
+
+    emitChatState({
+      version: 1,
+      event: "stream-status",
+      requestId: "status-1",
+      status: "COMPLETE",
+    });
+    expect(controller.state.status).toBe("streaming");
+
+    await vi.advanceTimersByTimeAsync(1_500);
+    await flushAsync();
+
+    expect(controller.state.nudges).toBe(1);
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+});
+
+describe("RunController manual network lifecycle", () => {
+  it("resumes a manual user turn from awaiting_user using the network start signal", () => {
+    let state = streamingState();
+    state = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: { status: "NEEDS_INPUT", version: 1, raw: "NEEDS_INPUT" },
+        text: "",
+      },
+      settings,
+    ).state;
+    const controller = makeController(state);
+    expect(controller.state.status).toBe("awaiting_user");
+
+    emitChatState({ version: 1, event: "generation-start", requestId: "manual-1" });
+    expect(controller.state.status).toBe("streaming");
+
+    emitChatState({
+      version: 1,
+      event: "generation-complete",
+      requestId: "manual-1",
+      marker: {
+        status: "CONTINUE",
+        version: 1,
+        text: "CHATFREEPT_STATUS: CONTINUE\nV: 1",
+      },
+    });
+    expect(controller.state.status).toBe("cooldown");
+    controller.dispose();
+  });
+
+  it("cancels a pending cooldown when a user edits or sends a manual turn", () => {
+    vi.useFakeTimers();
+    const controller = makeController(streamingState());
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    expect(controller.state.status).toBe("cooldown");
+
+    emitChatState({ version: 1, event: "generation-start", requestId: "edit-1" });
+    expect(controller.state.status).toBe("streaming");
+    expect(controller.state.cooldownUntil).toBeUndefined();
+    controller.dispose();
+  });
+
+  it("pauses on an aborted turn even without a preceding stop request", () => {
+    const controller = makeController(streamingState());
+    emitChatState({
+      version: 1,
+      event: "generation-aborted",
+      requestId: "turn-abort",
+      reason: "AbortError",
+    });
+    expect(controller.state.status).toBe("paused");
+    expect(controller.state.nudges).toBe(0);
+    controller.dispose();
+  });
+
+  it("ignores a later aborted clone after an explicit stop", () => {
+    const controller = makeController(streamingState());
+
+    emitChatState({
+      version: 1,
+      event: "generation-interrupted",
+      requestId: "turn-2",
+      reason: "stop_conversation",
+    });
+    emitChatState({
+      version: 1,
+      event: "generation-aborted",
+      requestId: "turn-2",
+      reason: "AbortError",
+    });
+
+    expect(controller.state.status).toBe("paused");
+    expect(controller.state.nudges).toBe(0);
+    controller.dispose();
+  });
+});
+
+describe("RunController runtime reconciliation", () => {
+  it("self-heals a missed completion event and auto-continues from the live marker", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(40_000);
+    const controller = makeController(streamingState());
+    mocks.lastMessageRole.mockReturnValue("assistant");
+    mocks.lastAssistantMessage.mockReturnValue({
+      el: document.createElement("div"),
+      text: "Finished.\nCHATFREEPT_STATUS: CONTINUE\nV: 1",
+      key: "message:new-reply",
+    });
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(controller.state.status).toBe("cooldown");
+
+    await vi.advanceTimersByTimeAsync(100);
+    await flushAsync();
+
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.autoSends).toBe(1);
+    controller.dispose();
+  });
+
+  it("never consumes the pre-send assistant turn as the expected reply", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(45_000);
+    const initial = {
+      ...streamingState(),
+      replyBaselineAssistantKey: "message:old-reply",
+    };
+    const controller = makeController(initial);
+    mocks.lastMessageRole.mockReturnValue("assistant");
+    mocks.lastAssistantMessage.mockReturnValue({
+      el: document.createElement("div"),
+      text: "Old.\nCHATFREEPT_STATUS: CONTINUE\nV: 1",
+      key: "message:old-reply",
+    });
+
+    await vi.advanceTimersByTimeAsync(6_000);
+    await flushAsync();
+
+    expect(controller.state.status).toBe("streaming");
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it("settles a fresh marker-less reply through the existing recovery nudge path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(50_000);
+    const controller = makeController(streamingState());
+    mocks.lastMessageRole.mockReturnValue("assistant");
+    mocks.lastAssistantMessage.mockReturnValue({
+      el: document.createElement("div"),
+      text: "I finished, but forgot the protocol footer.",
+      key: "message:no-marker",
+    });
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(controller.state.status).toBe("streaming");
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushAsync();
+
+    expect(controller.state.nudges).toBe(1);
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.status).toBe("streaming");
+    controller.dispose();
+  });
+
+  it("repairs an expired persisted cooldown immediately", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(60_000);
+    const initial = {
+      ...streamingState(),
+      phase: "developing" as const,
+      status: "cooldown" as const,
+      cooldownUntil: 59_000,
+    };
+
+    const controller = makeController(initial);
+    await flushAsync();
+
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.autoSends).toBe(1);
+    expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
 });

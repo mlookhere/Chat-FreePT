@@ -113,6 +113,25 @@ describe("run state", () => {
     expect(await storage.loadRun("c1")).toEqual(state);
   });
 
+  it("persists the Ultra Code queue and checkpoint fields", async () => {
+    const state = {
+      ...newRunState("ultra", 123),
+      repo: "owner/project",
+      queuedUserTexts: ["first", "second"],
+      lastLifecycleSignal: "generation-complete",
+      lastMarker: {
+        status: "CONTINUE" as const,
+        version: 1,
+        raw: "CONTINUE",
+        item: "2/6 — build",
+        url: "https://github.com/owner/project/pull/7",
+      },
+    };
+
+    await storage.saveRun(state);
+    expect(await storage.loadRun("ultra")).toEqual(state);
+  });
+
   it("keeps simultaneous conversation state independent", async () => {
     const first = {
       ...newRunState("conversation-a", 1),
@@ -139,11 +158,17 @@ describe("run state", () => {
     expect(await storage.loadRun("nope")).toBeNull();
   });
 
-  it("migrates pending keys to the real conversation id", async () => {
-    const state = newRunState("pending:abc", 1);
+  it("migrates pending keys and the repository lock to the real conversation id", async () => {
+    const state = {
+      ...newRunState("pending:abc", 1),
+      repo: "owner/project",
+      repoMode: "existing" as const,
+      repoName: "owner/project",
+    };
     await storage.saveRun(state);
     const migrated = await storage.migrateRunKey(state, "real-id");
     expect(migrated.conversationId).toBe("real-id");
+    expect(migrated.repo).toBe("owner/project");
     expect(await storage.loadRun("real-id")).toEqual(migrated);
     expect(await storage.loadRun("pending:abc")).toBeNull();
   });
@@ -209,14 +234,15 @@ describe("tab lock", () => {
 });
 
 describe("conversation ownership", () => {
-  it("moves the run and transfers the driver lock to the permanent id", async () => {
-    const state = newRunState("pending:abc", 1);
+  it("moves the run, repository lock, and driver lock to the permanent id", async () => {
+    const state = { ...newRunState("pending:abc", 1), repo: "owner/project" };
     await storage.saveRun(state);
     await storage.acquireTabLock("pending:abc", "tab-a");
 
     const migrated = await storage.adoptConversationOwnership(state, "real-id", "tab-a");
 
     expect(migrated?.conversationId).toBe("real-id");
+    expect(migrated?.repo).toBe("owner/project");
     expect(await storage.loadRun("pending:abc")).toBeNull();
     expect(await storage.loadRun("real-id")).toEqual(migrated);
     expect(await storage.acquireTabLock("pending:abc", "tab-b")).toBe(true);

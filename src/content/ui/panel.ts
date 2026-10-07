@@ -1,16 +1,22 @@
 import {
   autoContinueEnabled,
   isWaitingForManualContinue,
+  queuedMessages,
   type MachineEvent,
 } from "../../common/state-machine";
+import { normalizeRepositoryInput } from "../../common/repository";
 import type { RunState } from "../../common/types";
+import type { DiagnosticsStatus } from "../diagnostics";
 import { healthCheck, query, queryGuideTarget } from "../selectors";
-import { SetupGuide } from "./setup-guide";
 import { PANEL_CSS } from "./styles";
 
 export interface PanelHooks {
   onEvent: (event: MachineEvent) => void;
   getHandoffPrompt: () => string;
+  getDiagnosticsStatus?: () => DiagnosticsStatus;
+  onDiagnosticsStart?: () => void;
+  onDiagnosticsStop?: () => void;
+  onDiagnosticsExport?: () => void;
 }
 
 interface OnboardingState {
@@ -63,7 +69,6 @@ function canQueueNext(state: RunState): boolean {
 
 /** Native-feeling launcher plus a body-level composer takeover that cannot inherit ChatGPT focus traps. */
 export class Panel {
-  private readonly setupGuide = new SetupGuide();
   private readonly host: HTMLSpanElement;
   private readonly launcherShadow: ShadowRoot;
   private readonly launcher: HTMLButtonElement;
@@ -80,8 +85,10 @@ export class Panel {
   private disposed = false;
   private onboarding = { ...DEFAULT_ONBOARDING };
   private nativeSurface: NativeSurfaceSnapshot | null = null;
+  private diagnosticsStatus: DiagnosticsStatus = { recording: false, records: 0, dropped: 0 };
 
   constructor(private readonly hooks: PanelHooks) {
+    this.diagnosticsStatus = hooks.getDiagnosticsStatus?.() ?? this.diagnosticsStatus;
     const launcherParts = this.createLauncher();
     this.host = launcherParts.host;
     this.launcherShadow = launcherParts.shadow;
@@ -100,6 +107,11 @@ export class Panel {
     this.mountObserver.observe(document.documentElement, { childList: true, subtree: true });
     this.mount();
     void this.initOnboarding();
+  }
+
+  setDiagnosticsStatus(status: DiagnosticsStatus): void {
+    this.diagnosticsStatus = status;
+    this.updateDiagnosticsDom();
   }
 
   toggle(force?: boolean): void {
@@ -124,7 +136,7 @@ export class Panel {
     this.host.dataset["phase"] = state.phase;
     this.launcher.dataset["state"] = visualState;
 
-    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${autoContinueEnabled(state)}|${state.queuedUserText ?? ""}|${passive}`;
+    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${state.repo ?? ""}|${state.lastMarker?.status ?? ""}|${state.lastMarker?.item ?? ""}|${state.lastMarker?.url ?? ""}|${state.lastLifecycleSignal ?? ""}|${queuedMessages(state).join("\u001f")}|${autoContinueEnabled(state)}|${passive}`;
     if (viewKey !== this.lastViewKey) {
       this.lastViewKey = viewKey;
       this.stopArmed = false;
@@ -141,7 +153,6 @@ export class Panel {
     window.removeEventListener("resize", this.onViewportChange);
     window.removeEventListener("scroll", this.onViewportChange, true);
     this.restoreNativeTakeover();
-    this.setupGuide.dispose();
     this.host.remove();
     this.overlayHost.remove();
   }
@@ -319,24 +330,15 @@ export class Panel {
     this.positionLauncherTip();
   }
 
-  private showSetupModal(mode: "paid" | "free" = "paid"): void {
+  private showSetupModal(): void {
     this.launcherTipEl.classList.add("cfpt-hidden");
     this.host.dataset["highlighted"] = "false";
-    this.setupBackdropEl.innerHTML = mode === "free" ? freeSetupHtml() : paidSetupHtml();
+    this.setupBackdropEl.innerHTML = repositorySetupHtml();
     this.setupBackdropEl.classList.remove("cfpt-hidden");
     this.host.dataset["onboarding"] = "setup";
     queueMicrotask(() => {
       this.setupBackdropEl.querySelector<HTMLButtonElement>("button")?.focus();
     });
-  }
-
-  private async startSetupGuide(): Promise<void> {
-    this.setupBackdropEl.classList.add("cfpt-hidden");
-    this.onboarding.setupShown = true;
-    this.host.dataset["onboarding"] = "done";
-    await this.persistOnboarding();
-    this.toggle(false);
-    await this.setupGuide.start();
   }
 
   private tipCheckboxChecked(): boolean {
@@ -475,9 +477,16 @@ export class Panel {
           health.missing.join(", "),
         )}. Auto-run cannot operate until the extension is updated.</div>`
       : "";
-    if (passive) return warn + this.passiveHtml(state);
+    if (passive)
+      return warn + this.passiveHtml(state) + this.checkpointHtml(state) + this.diagnosticsHtml();
     const controls = this.automationControlsHtml(state);
-    return warn + controls + this.statusBodyHtml(state);
+    return (
+      warn +
+      controls +
+      this.statusBodyHtml(state) +
+      this.checkpointHtml(state) +
+      this.diagnosticsHtml()
+    );
   }
 
   private statusBodyHtml(state: RunState): string {
@@ -505,33 +514,77 @@ export class Panel {
 
   private automationControlsHtml(state: RunState): string {
     const enabled = autoContinueEnabled(state);
-    const queued = state.queuedUserText?.trim() ?? "";
-    const queueControls = canQueueNext(state) ? this.queueControlsHtml(queued) : "";
+    const queue = queuedMessages(state);
+    const queueControls = canQueueNext(state) ? this.queueControlsHtml(queue) : "";
     return `
       <div class="cfpt-field">
         <label class="cfpt-check-row">
           <input type="checkbox" data-action="auto-continue" ${enabled ? "checked" : ""} />
           <span><strong>Auto-continue</strong></span>
         </label>
-        <p class="cfpt-note">When off, Chat FreePT waits instead of sending its next automatic continue. A queued user message still sends once.</p>
+        <p class="cfpt-note">When off, Chat FreePT waits instead of sending a generic continue. Queued messages still send one at a time at safe turn boundaries.</p>
         ${queueControls}
       </div>
     `;
   }
 
-  private queueControlsHtml(queued: string): string {
-    const summary = queued
-      ? `<p class="cfpt-note"><strong>Queued next:</strong> ${esc(queued)}</p>
-         <button class="cfpt-btn" type="button" data-action="showqueue">Edit queued message</button>
-         <button class="cfpt-btn" type="button" data-action="clearqueue">Clear queued message</button>`
-      : `<button class="cfpt-btn" type="button" data-action="showqueue">Queue next message</button>`;
+  private checkpointHtml(state: RunState): string {
+    if (!state.repo) return "";
+    const queueDepth = queuedMessages(state).length;
+    const marker = state.lastMarker?.status ?? "none";
+    const item = state.lastMarker?.item ?? "none";
+    const lifecycle = state.lastLifecycleSignal ?? "none";
+    const markerUrl = state.lastMarker?.url ?? "";
+    const url = /^https:\/\/github\.com\//i.test(markerUrl)
+      ? `<a class="cfpt-link" href="${esc(markerUrl)}" target="_blank" rel="noreferrer noopener">${esc(markerUrl)}</a>`
+      : esc(markerUrl || "none");
+    return `
+      <div class="cfpt-field" data-ref="checkpoint">
+        <strong>Ultra Code checkpoint</strong>
+        <p class="cfpt-note">Repo: ${esc(state.repo)}</p>
+        <p class="cfpt-note">Phase: ${esc(phaseLabel(state.phase))} · Item: ${esc(item)} · Marker: ${esc(marker)}</p>
+        <p class="cfpt-note">Queue: ${queueDepth} · Last lifecycle: ${esc(lifecycle)}</p>
+        <p class="cfpt-note">CI / PR: ${url}</p>
+      </div>
+    `;
+  }
+
+  private diagnosticsHtml(): string {
     return `
       <div class="cfpt-field">
-        ${summary}
+        <strong>State diagnostics</strong>
+        <p class="cfpt-note" data-ref="diagnostics-status"></p>
+        <button class="cfpt-btn" type="button" data-action="diagnostics-start">Start recording</button>
+        <button class="cfpt-btn" type="button" data-action="diagnostics-stop">Stop recording</button>
+        <button class="cfpt-btn" type="button" data-action="diagnostics-export">Export JSON</button>
+        <p class="cfpt-note">Captures page, DOM, lifecycle, extension state, and redacted network structure. It does not save chat text, typed prompts, cookies, OAuth data, or authorization headers.</p>
+      </div>
+    `;
+  }
+
+  private queueControlsHtml(queue: string[]): string {
+    const items = queue
+      .map(
+        (message, index) => `
+          <div class="cfpt-field" data-ref="queue-item" data-index="${index}">
+            <p class="cfpt-note"><strong>${index + 1}.</strong> ${esc(message)}</p>
+            <button class="cfpt-btn" type="button" data-action="queue-up" data-index="${index}" ${index === 0 ? "disabled" : ""}>Move up</button>
+            <button class="cfpt-btn" type="button" data-action="queue-down" data-index="${index}" ${index === queue.length - 1 ? "disabled" : ""}>Move down</button>
+            <button class="cfpt-btn" type="button" data-action="queue-remove" data-index="${index}">Remove</button>
+          </div>`,
+      )
+      .join("");
+    return `
+      <div class="cfpt-field">
+        <strong>Message queue · ${queue.length}</strong>
+        <p class="cfpt-note">Queued messages run FIFO before generic auto-continue.</p>
+        ${items}
+        <button class="cfpt-btn" type="button" data-action="showqueue">Add queued message</button>
+        ${queue.length > 0 ? '<button class="cfpt-btn" type="button" data-action="clearqueue">Clear all</button>' : ""}
         <div class="cfpt-field cfpt-hidden" data-ref="queue-editor">
-          <label>Next user message</label>
-          <textarea data-ref="queue-next" rows="3" placeholder="Send this instead of the next automatic continue…">${esc(queued)}</textarea>
-          <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="savequeue">Save queued message</button>
+          <label>Queued user message</label>
+          <textarea data-ref="queue-next" rows="3" placeholder="Send this at the next safe turn boundary…"></textarea>
+          <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="savequeue">Add to queue</button>
           <button class="cfpt-btn" type="button" data-action="hidequeue">Cancel</button>
         </div>
       </div>`;
@@ -548,23 +601,29 @@ export class Panel {
   }
 
   private ideaFormHtml(state: RunState): string {
+    const repoField = state.repo
+      ? `<div class="cfpt-field">
+           <label>Repository locked to this conversation</label>
+           <input type="text" data-ref="reponame" value="${esc(state.repo)}" readonly />
+           <p class="cfpt-note">To use a different repository, start a new ChatGPT conversation.</p>
+         </div>`
+      : `<div class="cfpt-field">
+           <label>GitHub repository</label>
+           <input type="text" data-ref="reponame" value="" placeholder="owner/repo or https://github.com/owner/repo" />
+           <p class="cfpt-note">Need a new one? <a class="cfpt-link" href="https://github.com/new" target="_blank" rel="noreferrer noopener">Create a private repository on GitHub</a>, then paste its owner/name or URL here.</p>
+           <p class="cfpt-note" data-ref="repo-error"></p>
+         </div>`;
+
     return `
       <h3>What should ChatGPT build for you?</h3>
+      ${repoField}
       <div class="cfpt-field">
         <textarea data-ref="idea" rows="6" placeholder="Describe the project you want built…">${esc(
           state.idea,
         )}</textarea>
       </div>
-      <div class="cfpt-radio-row">
-        <label><input type="radio" name="repomode" value="new" ${state.repoMode === "new" ? "checked" : ""}/> New private repo</label>
-        <label><input type="radio" name="repomode" value="existing" ${state.repoMode === "existing" ? "checked" : ""}/> Existing repo</label>
-      </div>
-      <div class="cfpt-field">
-        <label>Repo name (optional for new; owner/name for existing)</label>
-        <input type="text" data-ref="reponame" value="${esc(state.repoName)}" placeholder="e.g. my-idea or owner/my-repo"/>
-      </div>
-      <p class="cfpt-note">Full autonomous GitHub work uses Developer mode + the remote GitHub MCP. Free-plan users can still use Chat FreePT in an assisted workflow, but should prepare an existing repo first and expect manual GitHub steps when ChatGPT lacks write tools.</p>
-      <button class="cfpt-btn" type="button" data-action="setup-open">GitHub setup</button>
+      <p class="cfpt-note">One ChatGPT conversation is permanently bound to one GitHub repository. Chat FreePT will verify access to that exact repo before work begins.</p>
+      <button class="cfpt-btn" type="button" data-action="setup-open">Repository setup</button>
       <button class="cfpt-btn cfpt-btn-primary" data-action="start">Start planning</button>
     `;
   }
@@ -643,6 +702,8 @@ export class Panel {
     const counters = this.panelEl.querySelector('[data-ref="counters"]');
     if (counters) {
       const bits = [`auto-continues: ${state.autoSends}`];
+      const queueDepth = queuedMessages(state).length;
+      if (queueDepth) bits.push(`queue: ${queueDepth}`);
       if (state.lastMarker?.item) bits.push(`item ${state.lastMarker.item}`);
       if (state.repo) bits.push(state.repo);
       counters.textContent = bits.join(" · ");
@@ -660,6 +721,29 @@ export class Panel {
     }
     const statusLine = this.panelEl.querySelector('[data-ref="statusline"]');
     if (statusLine) statusLine.textContent = STATUS_LABEL[state.status] ?? state.status;
+    this.updateDiagnosticsDom();
+  }
+
+  private updateDiagnosticsDom(): void {
+    const status = this.diagnosticsStatus;
+    const line = this.panelEl.querySelector<HTMLElement>('[data-ref="diagnostics-status"]');
+    if (line) {
+      line.textContent = status.recording
+        ? `Recording · ${status.records} events${status.dropped ? ` · ${status.dropped} trimmed` : ""}`
+        : status.records > 0
+          ? `Stopped · ${status.records} events ready to export`
+          : "Not recording";
+    }
+    const start = this.panelEl.querySelector<HTMLButtonElement>(
+      '[data-action="diagnostics-start"]',
+    );
+    const stop = this.panelEl.querySelector<HTMLButtonElement>('[data-action="diagnostics-stop"]');
+    const exportButton = this.panelEl.querySelector<HTMLButtonElement>(
+      '[data-action="diagnostics-export"]',
+    );
+    if (start) start.disabled = status.recording;
+    if (stop) stop.disabled = !status.recording;
+    if (exportButton) exportButton.disabled = status.records === 0;
   }
 
   private onClick(event: Event): void {
@@ -712,6 +796,26 @@ export class Panel {
       case "savequeue":
         this.saveQueuedMessage();
         break;
+      case "queue-up":
+        this.hooks.onEvent({
+          type: "USER_MOVE_QUEUE",
+          index: Number(target.dataset["index"]),
+          direction: -1,
+        });
+        break;
+      case "queue-down":
+        this.hooks.onEvent({
+          type: "USER_MOVE_QUEUE",
+          index: Number(target.dataset["index"]),
+          direction: 1,
+        });
+        break;
+      case "queue-remove":
+        this.hooks.onEvent({
+          type: "USER_REMOVE_QUEUE",
+          index: Number(target.dataset["index"]),
+        });
+        break;
       case "clearqueue":
         this.hooks.onEvent({ type: "USER_CLEAR_QUEUE" });
         break;
@@ -719,29 +823,38 @@ export class Panel {
         void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
         break;
       case "setup-open":
-      case "setup-back":
         this.showSetupModal();
-        break;
-      case "free-setup":
-        this.showSetupModal("free");
-        break;
-      case "setup-guide":
-        void this.startSetupGuide();
         break;
       case "setup-done":
         void this.acknowledgeSetup();
+        break;
+      case "diagnostics-start":
+        this.hooks.onDiagnosticsStart?.();
+        break;
+      case "diagnostics-stop":
+        this.hooks.onDiagnosticsStop?.();
+        break;
+      case "diagnostics-export":
+        this.hooks.onDiagnosticsExport?.();
         break;
     }
   }
 
   private startProject(): void {
-    const idea = this.refValue("idea");
-    if (!idea.trim()) return;
+    const idea = this.refValue("idea").trim();
+    const rawRepo = this.refValue("reponame");
+    const repo = normalizeRepositoryInput(rawRepo);
+    if (!repo) {
+      const error = this.panelEl.querySelector<HTMLElement>('[data-ref="repo-error"]');
+      if (error) error.textContent = "Enter a valid owner/repo or root GitHub repository URL.";
+      return;
+    }
+    if (!idea) return;
     this.hooks.onEvent({
       type: "USER_START",
       idea,
-      repoMode: this.radioValue("repomode") === "existing" ? "existing" : "new",
-      repoName: this.refValue("reponame").trim(),
+      repoMode: "existing",
+      repoName: repo,
     });
   }
 
@@ -764,9 +877,12 @@ export class Panel {
   }
 
   private saveQueuedMessage(): void {
-    const text = this.refValue("queue-next").trim();
+    const input = this.panelEl.querySelector<HTMLTextAreaElement>('[data-ref="queue-next"]');
+    const text = input?.value.trim() ?? "";
     if (!text) return;
     this.hooks.onEvent({ type: "USER_QUEUE_NEXT", text });
+    if (input) input.value = "";
+    this.hideQueueEditor();
   }
 
   private stopRun(target: HTMLElement): void {
@@ -792,13 +908,6 @@ export class Panel {
   private refValue(ref: string): string {
     const el = this.panelEl.querySelector(`[data-ref="${ref}"]`) as
       HTMLTextAreaElement | HTMLInputElement | null;
-    return el?.value ?? "";
-  }
-
-  private radioValue(name: string): string {
-    const el = this.panelEl.querySelector(
-      `input[name="${name}"]:checked`,
-    ) as HTMLInputElement | null;
     return el?.value ?? "";
   }
 }
@@ -828,42 +937,23 @@ function launcherTipHtml(): string {
     <button class="cfpt-btn cfpt-btn-primary cfpt-toast-continue" type="button" data-action="tip-continue">Continue</button>`;
 }
 
-function paidSetupHtml(): string {
+function repositorySetupHtml(): string {
   return `
     <section class="cfpt-setup-card" role="dialog" aria-modal="true" aria-labelledby="cfpt-setup-title">
-      <button class="cfpt-icon-close" type="button" data-action="setup-done" aria-label="Close setup">×</button>
+      <button class="cfpt-icon-close" type="button" data-action="setup-done" aria-label="Close repository setup">×</button>
       <div class="cfpt-setup-icon" aria-hidden="true">${airplaneSvg()}</div>
-      <div class="cfpt-plan-badge">Paid plan · full GitHub automation</div>
-      <h2 id="cfpt-setup-title">Connect GitHub with a follow-along guide</h2>
-      <p class="cfpt-setup-lead">For full autonomous repository work, Chat FreePT needs ChatGPT's Developer mode and a custom GitHub MCP/plugin with the write permissions you approve. ChatGPT marks Developer mode as Elevated Risk because unverified connectors can modify data.</p>
-      <p class="cfpt-setup-lead">The guide opens Settings, enables Developer mode, then takes you to Plugins. It can open the custom app form and fill the GitHub MCP name, remote server URL, and OAuth choice automatically. You still approve ChatGPT's risk warning and GitHub OAuth yourself; afterward the guide returns here and Chat FreePT verifies the actual GitHub capabilities.</p>
-      <div class="cfpt-setup-actions">
-        <button class="cfpt-btn" type="button" data-action="free-setup">Using ChatGPT Free?</button>
-        <button class="cfpt-btn" type="button" data-action="setup-done">I'll set it up myself</button>
-        <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="setup-guide">Follow along</button>
-      </div>
-    </section>`;
-}
-
-function freeSetupHtml(): string {
-  return `
-    <section class="cfpt-setup-card" role="dialog" aria-modal="true" aria-labelledby="cfpt-free-title">
-      <button class="cfpt-icon-close" type="button" data-action="setup-done" aria-label="Close setup">×</button>
-      <div class="cfpt-plan-badge">ChatGPT Free · assisted GitHub workflow</div>
-      <h2 id="cfpt-free-title">Prepare GitHub manually first</h2>
-      <p class="cfpt-setup-lead">Chat FreePT's local planning, continuation, queueing, pause, and NEEDS_INPUT flow still works on Free. The limitation is the full custom-MCP/Developer-mode path, so repository actions may need you.</p>
+      <div class="cfpt-plan-badge">One conversation · one repository</div>
+      <h2 id="cfpt-setup-title">Choose the GitHub repository first</h2>
+      <p class="cfpt-setup-lead">Chat FreePT locks this ChatGPT conversation to one repository before planning starts. Existing repositories work immediately.</p>
       <ol class="cfpt-setup-steps">
-        <li>Create the target GitHub repository yourself before starting Chat FreePT.</li>
-        <li>Make sure <strong>main</strong> exists and create <strong>dev</strong> from the same starting commit.</li>
-        <li>In Chat FreePT choose <strong>Existing repo</strong> and enter <code>owner/repo</code>; do not rely on New private repo creation.</li>
-        <li>Enable whatever GitHub/plugin access your ChatGPT account currently exposes. If no write tool is available, keep GitHub open separately.</li>
-        <li>When ChatGPT cannot create a branch/file, Issue/label, PR, merge, or inspect CI, it should stop with <strong>NEEDS_INPUT</strong>. Perform only that requested GitHub step manually, return to the chat, and Resume.</li>
-        <li>Because those writes are manual, Free mode is assisted rather than fully autonomous; never treat a missing/zero CI result as green.</li>
+        <li>For a new project, <a class="cfpt-link" href="https://github.com/new" target="_blank" rel="noreferrer noopener">create a private repository on GitHub</a>.</li>
+        <li>Return here and enter <strong>owner/repo</strong> or the root GitHub repository URL.</li>
+        <li>Describe the project and press <strong>Start planning</strong>.</li>
+        <li>ChatGPT verifies write access and CI capabilities against that exact repository. Missing access stops with <strong>NEEDS_INPUT</strong>.</li>
       </ol>
-      <p class="cfpt-setup-footnote">Chat FreePT does not receive your GitHub password or token. Workspace policy and ChatGPT feature availability can vary by account.</p>
+      <p class="cfpt-setup-footnote">Once planning starts, the repository is read-only for this conversation. Start a new ChatGPT conversation to work in another repo.</p>
       <div class="cfpt-setup-actions">
-        <button class="cfpt-btn" type="button" data-action="setup-back">Back</button>
-        <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="setup-done">I understand</button>
+        <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="setup-done">Continue</button>
       </div>
     </section>`;
 }

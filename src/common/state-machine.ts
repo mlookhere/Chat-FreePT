@@ -1,3 +1,4 @@
+import { normalizeRepositoryInput } from "./repository";
 import type {
   ActivityEntry,
   ErrorCode,
@@ -18,14 +19,23 @@ export type MachineEvent =
   | { type: "USER_REPLY"; text: string }
   | { type: "USER_SET_AUTO_CONTINUE"; enabled: boolean }
   | { type: "USER_QUEUE_NEXT"; text: string }
+  | { type: "USER_REMOVE_QUEUE"; index: number }
+  | { type: "USER_MOVE_QUEUE"; index: number; direction: -1 | 1 }
   | { type: "USER_CLEAR_QUEUE" }
   | { type: "INSERT_OK" }
   | { type: "INSERT_FAIL"; detail: string }
   | { type: "SEND_OK" }
   | { type: "SEND_FAIL"; detail: string }
+  | { type: "REPLY_EXPECTED"; baselineAssistantKey?: string }
   | { type: "STREAM_STARTED" }
-  | { type: "REPLY_COMPLETE"; marker: Marker | null; text: string }
+  | {
+      type: "REPLY_COMPLETE";
+      marker: Marker | null;
+      text: string;
+      assistantKey?: string;
+    }
   | { type: "STREAM_STUCK" }
+  | { type: "STREAM_INTERRUPTED"; reason?: string }
   | { type: "COOLDOWN_ELAPSED" }
   | { type: "PAGE_SIGNAL"; signal: PageSignal };
 
@@ -65,19 +75,23 @@ type UserEvent = Extract<
       | "USER_REPLY"
       | "USER_SET_AUTO_CONTINUE"
       | "USER_QUEUE_NEXT"
+      | "USER_REMOVE_QUEUE"
+      | "USER_MOVE_QUEUE"
       | "USER_CLEAR_QUEUE";
   }
 >;
 type StartEvent = Extract<UserEvent, { type: "USER_START" }>;
 type UserReplyEvent = Extract<UserEvent, { type: "USER_REPLY" }>;
 type QueueEvent = Extract<UserEvent, { type: "USER_QUEUE_NEXT" }>;
+type RemoveQueueEvent = Extract<UserEvent, { type: "USER_REMOVE_QUEUE" }>;
+type MoveQueueEvent = Extract<UserEvent, { type: "USER_MOVE_QUEUE" }>;
 type SendEvent = Extract<
   MachineEvent,
-  { type: "INSERT_OK" | "INSERT_FAIL" | "SEND_OK" | "SEND_FAIL" }
+  { type: "INSERT_OK" | "INSERT_FAIL" | "SEND_OK" | "SEND_FAIL" | "REPLY_EXPECTED" }
 >;
 type StreamEvent = Extract<
   MachineEvent,
-  { type: "STREAM_STARTED" | "REPLY_COMPLETE" | "STREAM_STUCK" }
+  { type: "STREAM_STARTED" | "REPLY_COMPLETE" | "STREAM_STUCK" | "STREAM_INTERRUPTED" }
 >;
 type SystemEvent = Extract<MachineEvent, { type: "COOLDOWN_ELAPSED" | "PAGE_SIGNAL" }>;
 
@@ -93,6 +107,8 @@ const USER_EVENTS = new Set<MachineEvent["type"]>([
   "USER_REPLY",
   "USER_SET_AUTO_CONTINUE",
   "USER_QUEUE_NEXT",
+  "USER_REMOVE_QUEUE",
+  "USER_MOVE_QUEUE",
   "USER_CLEAR_QUEUE",
 ]);
 const SEND_EVENTS = new Set<MachineEvent["type"]>([
@@ -100,11 +116,13 @@ const SEND_EVENTS = new Set<MachineEvent["type"]>([
   "INSERT_FAIL",
   "SEND_OK",
   "SEND_FAIL",
+  "REPLY_EXPECTED",
 ]);
 const STREAM_EVENTS = new Set<MachineEvent["type"]>([
   "STREAM_STARTED",
   "REPLY_COMPLETE",
   "STREAM_STUCK",
+  "STREAM_INTERRUPTED",
 ]);
 
 export function newRunState(conversationId: string, now: number): RunState {
@@ -132,6 +150,20 @@ export function isActive(state: RunState): boolean {
 
 export function autoContinueEnabled(state: RunState): boolean {
   return state.autoContinueEnabled !== false;
+}
+
+/** Ordered queued user messages, including migration from the legacy single-message slot. */
+export function queuedMessages(state: RunState): string[] {
+  if (state.queuedUserTexts?.length) return state.queuedUserTexts.filter((text) => text.trim());
+  const legacy = state.queuedUserText?.trim();
+  return legacy ? [legacy] : [];
+}
+
+function setQueuedMessages(state: RunState, messages: string[]): void {
+  const clean = messages.map((text) => text.trim()).filter(Boolean);
+  delete state.queuedUserText;
+  if (clean.length > 0) state.queuedUserTexts = clean;
+  else delete state.queuedUserTexts;
 }
 
 export function isWaitingForManualContinue(state: RunState): boolean {
@@ -218,8 +250,12 @@ function reduceUserEvent(ctx: ReduceContext, event: UserEvent): boolean {
       return setAutoContinue(ctx, event.enabled);
     case "USER_QUEUE_NEXT":
       return queueNextMessage(ctx, event);
+    case "USER_REMOVE_QUEUE":
+      return removeQueuedMessage(ctx, event);
+    case "USER_MOVE_QUEUE":
+      return moveQueuedMessage(ctx, event);
     case "USER_CLEAR_QUEUE":
-      return clearQueuedMessage(ctx);
+      return clearQueuedMessages(ctx);
   }
 }
 
@@ -228,16 +264,36 @@ function startRun(ctx: ReduceContext, event: StartEvent): boolean {
   if (state.status !== "idle" && state.phase !== "stopped" && state.phase !== "complete") {
     return false;
   }
+
+  const requestedRepo = normalizeRepositoryInput(event.repoName);
+  if (!state.repo && !requestedRepo) {
+    fail(ctx, "repo-required", "Choose and lock a GitHub repository before planning.");
+    return true;
+  }
+  if (state.repo && requestedRepo && requestedRepo.toLowerCase() !== state.repo.toLowerCase()) {
+    fail(
+      ctx,
+      "repo-mismatch",
+      `This conversation is locked to ${state.repo}. Start a new ChatGPT conversation to use ${requestedRepo}.`,
+    );
+    return true;
+  }
+
+  const lockedRepo = state.repo ?? requestedRepo;
+  if (!lockedRepo) return false;
+  state.repo = lockedRepo;
+  state.repoMode = "existing";
+  state.repoName = lockedRepo;
   state.phase = "planning";
   state.status = "inserting";
   state.idea = event.idea;
-  state.repoMode = event.repoMode;
-  state.repoName = event.repoName;
   state.autoSends = 0;
   state.nudges = 0;
   state.repliesSinceContract = 0;
   state.startedAt = ctx.now;
   delete state.queuedUserText;
+  delete state.queuedUserTexts;
+  delete state.lastLifecycleSignal;
   delete state.errorCode;
   delete state.pauseReason;
   note(ctx, "info", "Planning started");
@@ -248,6 +304,10 @@ function startRun(ctx: ReduceContext, event: StartEvent): boolean {
 function startDevelopment(ctx: ReduceContext): boolean {
   const state = ctx.state;
   if (state.phase !== "plan_ready") return false;
+  if (!state.repo) {
+    fail(ctx, "repo-required", "This conversation has no locked GitHub repository.");
+    return true;
+  }
   state.phase = "developing";
   state.status = "inserting";
   state.autoSends = 0;
@@ -281,8 +341,14 @@ function resumeRun(ctx: ReduceContext): boolean {
 
 function resetRun(ctx: ReduceContext, logText: string): void {
   const enabled = autoContinueEnabled(ctx.state);
+  const lockedRepo = ctx.state.repo;
   const reset = newRunState(ctx.state.conversationId, ctx.now);
   reset.autoContinueEnabled = enabled;
+  if (lockedRepo) {
+    reset.repo = lockedRepo;
+    reset.repoMode = "existing";
+    reset.repoName = lockedRepo;
+  }
   reset.log = [{ at: ctx.now, kind: "info", text: logText }];
   ctx.state = reset;
 }
@@ -323,7 +389,7 @@ function setAutoContinue(ctx: ReduceContext, enabled: boolean): boolean {
   state.autoContinueEnabled = enabled;
   note(ctx, "info", `Auto-continue ${enabled ? "enabled" : "disabled"}`);
 
-  if (!enabled && state.status === "cooldown" && !state.queuedUserText) {
+  if (!enabled && state.status === "cooldown" && queuedMessages(state).length === 0) {
     waitForManualContinue(ctx);
     return true;
   }
@@ -343,8 +409,8 @@ function setAutoContinue(ctx: ReduceContext, enabled: boolean): boolean {
 function queueNextMessage(ctx: ReduceContext, event: QueueEvent): boolean {
   const text = event.text.trim();
   if (!text || !isContinuablePhase(ctx.state)) return false;
-  ctx.state.queuedUserText = text;
-  note(ctx, "info", "Queued next user message");
+  setQueuedMessages(ctx.state, [...queuedMessages(ctx.state), text]);
+  note(ctx, "info", "Queued user message");
 
   if (ctx.state.status === "awaiting_user" && ctx.state.lastMarker?.status === "CONTINUE") {
     delete ctx.state.pauseReason;
@@ -353,10 +419,44 @@ function queueNextMessage(ctx: ReduceContext, event: QueueEvent): boolean {
   return true;
 }
 
-function clearQueuedMessage(ctx: ReduceContext): boolean {
-  if (!ctx.state.queuedUserText) return false;
-  delete ctx.state.queuedUserText;
-  note(ctx, "info", "Cleared queued user message");
+function removeQueuedMessage(ctx: ReduceContext, event: RemoveQueueEvent): boolean {
+  const queue = queuedMessages(ctx.state);
+  if (!Number.isInteger(event.index) || event.index < 0 || event.index >= queue.length) {
+    return false;
+  }
+  queue.splice(event.index, 1);
+  setQueuedMessages(ctx.state, queue);
+  note(ctx, "info", "Removed queued user message");
+  if (!autoContinueEnabled(ctx.state) && ctx.state.status === "cooldown" && queue.length === 0) {
+    waitForManualContinue(ctx);
+  }
+  return true;
+}
+
+function moveQueuedMessage(ctx: ReduceContext, event: MoveQueueEvent): boolean {
+  const queue = queuedMessages(ctx.state);
+  const target = event.index + event.direction;
+  if (
+    !Number.isInteger(event.index) ||
+    event.index < 0 ||
+    event.index >= queue.length ||
+    target < 0 ||
+    target >= queue.length
+  ) {
+    return false;
+  }
+  const [message] = queue.splice(event.index, 1);
+  if (!message) return false;
+  queue.splice(target, 0, message);
+  setQueuedMessages(ctx.state, queue);
+  note(ctx, "info", "Reordered queued user messages");
+  return true;
+}
+
+function clearQueuedMessages(ctx: ReduceContext): boolean {
+  if (queuedMessages(ctx.state).length === 0) return false;
+  setQueuedMessages(ctx.state, []);
+  note(ctx, "info", "Cleared queued user messages");
   if (!autoContinueEnabled(ctx.state) && ctx.state.status === "cooldown") {
     waitForManualContinue(ctx);
   }
@@ -379,21 +479,27 @@ function reduceSendEvent(ctx: ReduceContext, event: SendEvent): boolean {
     case "SEND_FAIL":
       fail(ctx, "send-failed", `Could not send the message: ${event.detail}`);
       return true;
+    case "REPLY_EXPECTED":
+      if (ctx.state.status !== "sending") return false;
+      if (event.baselineAssistantKey) {
+        ctx.state.replyBaselineAssistantKey = event.baselineAssistantKey;
+      } else {
+        delete ctx.state.replyBaselineAssistantKey;
+      }
+      return true;
   }
 }
 
 function reduceStreamEvent(ctx: ReduceContext, event: StreamEvent): boolean {
   switch (event.type) {
     case "STREAM_STARTED":
-      if (ctx.state.status === "paused" || ctx.state.status === "idle") return false;
-      ctx.state.status = "streaming";
-      return true;
+      return startStream(ctx);
     case "REPLY_COMPLETE":
-      if (ctx.state.status !== "streaming" && ctx.state.status !== "sending") return false;
-      ctx.state.repliesSinceContract += 1;
-      handleReply(ctx, event.marker, event.text);
-      return true;
+      return completeReply(ctx, event);
+    case "STREAM_INTERRUPTED":
+      return interruptStream(ctx, event.reason);
     case "STREAM_STUCK":
+      ctx.state.lastLifecycleSignal = "stream-stuck";
       fail(
         ctx,
         "stream-stuck",
@@ -403,12 +509,67 @@ function reduceStreamEvent(ctx: ReduceContext, event: StreamEvent): boolean {
   }
 }
 
+function startStream(ctx: ReduceContext): boolean {
+  if (ctx.state.status === "paused" || ctx.state.status === "idle") return false;
+  ctx.state.status = "streaming";
+  ctx.state.lastLifecycleSignal = "generation-start";
+  return true;
+}
+
+function completeReply(
+  ctx: ReduceContext,
+  event: Extract<StreamEvent, { type: "REPLY_COMPLETE" }>,
+): boolean {
+  if (!canConsumeReply(ctx.state, event.marker)) return false;
+  if (isDuplicateReply(ctx.state, event.assistantKey)) return false;
+
+  if (event.assistantKey) ctx.state.lastProcessedAssistantKey = event.assistantKey;
+  delete ctx.state.replyBaselineAssistantKey;
+  ctx.state.lastLifecycleSignal = "generation-complete";
+  ctx.state.repliesSinceContract += 1;
+  handleReply(ctx, event.marker, event.text);
+  return true;
+}
+
+function canConsumeReply(state: RunState, marker: Marker | null): boolean {
+  return (
+    state.status === "streaming" ||
+    state.status === "sending" ||
+    (state.status === "awaiting_user" && marker !== null && isContinuablePhase(state))
+  );
+}
+
+function isDuplicateReply(state: RunState, assistantKey: string | undefined): boolean {
+  return Boolean(
+    assistantKey &&
+    (assistantKey === state.lastProcessedAssistantKey ||
+      assistantKey === state.replyBaselineAssistantKey),
+  );
+}
+
+function interruptStream(ctx: ReduceContext, reason?: string): boolean {
+  if (
+    ctx.state.status === "idle" ||
+    ctx.state.status === "paused" ||
+    ctx.state.status === "complete"
+  ) {
+    return false;
+  }
+  ctx.state.status = "paused";
+  ctx.state.lastLifecycleSignal = "generation-interrupted";
+  ctx.state.pauseReason = reason ?? "Generation stopped in ChatGPT";
+  note(ctx, "info", "Generation interrupted — automation paused");
+  ctx.effects.push({ do: "badge", text: "II" });
+  return true;
+}
+
 function reduceSystemEvent(ctx: ReduceContext, event: SystemEvent): boolean {
   switch (event.type) {
     case "COOLDOWN_ELAPSED":
       return finishCooldown(ctx);
     case "PAGE_SIGNAL":
       if (!isActive(ctx.state) && ctx.state.status !== "awaiting_user") return false;
+      ctx.state.lastLifecycleSignal = `page:${event.signal}`;
       handlePageSignal(ctx, event.signal);
       return true;
   }
@@ -418,12 +579,13 @@ function finishCooldown(ctx: ReduceContext): boolean {
   const state = ctx.state;
   if (state.status !== "cooldown") return false;
 
-  if (state.queuedUserText) {
-    const text = state.queuedUserText;
-    delete state.queuedUserText;
+  const queue = queuedMessages(state);
+  const nextQueued = queue.shift();
+  if (nextQueued) {
+    setQueuedMessages(state, queue);
     state.status = "inserting";
     note(ctx, "send", "Sending queued user message");
-    ctx.effects.push({ do: "insertAndSend", kind: "queued_user_text", text });
+    ctx.effects.push({ do: "insertAndSend", kind: "queued_user_text", text: nextQueued });
     return true;
   }
 
@@ -481,9 +643,28 @@ function handleReply(ctx: ReduceContext, marker: Marker | null, text: string): v
 
   state.nudges = 0;
   state.lastMarker = marker;
-  if (marker.repo) state.repo = marker.repo;
+  if (!validateMarkerRepository(ctx, marker)) return;
   note(ctx, "marker", marker.raw);
   handleMarker(ctx, marker, text);
+}
+
+function validateMarkerRepository(ctx: ReduceContext, marker: Marker): boolean {
+  if (!ctx.state.repo) {
+    fail(ctx, "repo-required", "This conversation has no locked GitHub repository.");
+    return false;
+  }
+  if (!marker.repo) return true;
+
+  const reported = normalizeRepositoryInput(marker.repo);
+  if (!reported || reported.toLowerCase() !== ctx.state.repo.toLowerCase()) {
+    fail(
+      ctx,
+      "repo-mismatch",
+      `ChatGPT reported repository ${marker.repo}, but this conversation is locked to ${ctx.state.repo}. Start a new ChatGPT conversation to switch repositories.`,
+    );
+    return false;
+  }
+  return true;
 }
 
 function handleMarker(ctx: ReduceContext, marker: Marker, text: string): void {
@@ -542,7 +723,7 @@ function handleContinue(ctx: ReduceContext): void {
     state.status = "awaiting_user";
     return;
   }
-  if (state.queuedUserText) {
+  if (queuedMessages(state).length > 0) {
     scheduleContinuation(ctx);
     return;
   }

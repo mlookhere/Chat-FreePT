@@ -3,22 +3,30 @@ import { parseMarker } from "../common/marker";
 import {
   buildContinuePrompt,
   buildDevelopPrompt,
+  buildNudgePrompt,
   buildPlanPrompt,
   buildUserReply,
-  NUDGE_PROMPT,
 } from "../common/prompts";
 import type { Effect, MachineEvent, PromptKind } from "../common/state-machine";
 import { cooldownRemainingMs, isActive, reduce } from "../common/state-machine";
 import { saveRun } from "../common/storage";
 import type { BgRequest, RunState, Settings } from "../common/types";
+import { subscribeChatState, type ChatStateEvent } from "./chat-state";
 import { clickSend, composerIsEmpty, insertPrompt } from "./composer";
+import type { ControllerDiagnosticEvent } from "./diagnostics";
 import { isExtensionContextInvalidated } from "./extension-context";
 import { scanPageSignals } from "./page-signals";
 import { healthCheck } from "./selectors";
 import { StreamWatcher } from "./stream-watch";
-import { lastAssistantMessage } from "./transcript";
+import {
+  lastAssistantMessage,
+  lastMessageRole,
+  toolCallIndicatorVisible,
+  type AssistantMessage,
+} from "./transcript";
 
-const SIGNAL_POLL_MS = 5000;
+// StreamWatcher is the fast path; this heartbeat only repairs missed runtime transitions.
+const RUNTIME_CHECK_MS = 2000;
 const COMPOSER_BUSY_RETRIES = 3;
 const COMPOSER_BUSY_WAIT_MS = 5000;
 const COMPOSER_RESTORE_RETRIES = 10;
@@ -29,11 +37,18 @@ export class RunController {
   readonly settings: Settings;
   private readonly watcher: StreamWatcher;
   private cooldownTimer: ReturnType<typeof setTimeout> | undefined;
-  private signalTimer: ReturnType<typeof setInterval> | undefined;
+  private runtimeTimer: ReturnType<typeof setInterval> | undefined;
+  private networkSettleTimer: ReturnType<typeof setTimeout> | undefined;
+  private networkCompletedCurrentTurn = false;
+  private readonly unsubscribeChatState: () => void;
   private lastSignal: string | null = null;
+  private observedAssistantKey: string | undefined;
+  private observedAssistantText = "";
+  private observedAssistantSince = 0;
   private readonly onChange: (state: RunState) => void;
   private readonly onShowModal: () => void;
   private readonly onContextInvalidated: () => void;
+  private readonly onDiagnosticEvent: (event: ControllerDiagnosticEvent) => void;
   private disposed = false;
 
   constructor(
@@ -43,6 +58,7 @@ export class RunController {
       onChange: (state: RunState) => void;
       onShowModal: () => void;
       onContextInvalidated?: () => void;
+      onDiagnosticEvent?: (event: ControllerDiagnosticEvent) => void;
     },
   ) {
     this.state = initial;
@@ -50,26 +66,35 @@ export class RunController {
     this.onChange = hooks.onChange;
     this.onShowModal = hooks.onShowModal;
     this.onContextInvalidated = hooks.onContextInvalidated ?? (() => undefined);
+    this.onDiagnosticEvent = hooks.onDiagnosticEvent ?? (() => undefined);
     this.watcher = new StreamWatcher(
       {
         onStart: () => {
+          this.onDiagnosticEvent({ kind: "watcher", detail: { event: "start" } });
           if (this.state.status === "sending" || this.state.status === "streaming") {
             this.dispatch({ type: "STREAM_STARTED" });
           }
         },
-        onComplete: (text) =>
-          this.dispatch({ type: "REPLY_COMPLETE", marker: parseMarker(text), text }),
+        onComplete: (text) => {
+          this.onDiagnosticEvent({
+            kind: "watcher",
+            detail: { event: "complete", textLength: text.length },
+          });
+          if (!this.networkCompletedCurrentTurn) this.consumeCompletedReply(text);
+        },
         onStuck: () => {
+          this.onDiagnosticEvent({ kind: "watcher", detail: { event: "stuck" } });
           if (this.state.status === "streaming") this.dispatch({ type: "STREAM_STUCK" });
         },
       },
       settings,
     );
     this.watcher.start();
+    this.unsubscribeChatState = subscribeChatState((event) => this.onChatState(event));
     document.addEventListener("visibilitychange", this.onVisibilityResume);
     window.addEventListener("pageshow", this.onPageShow);
-    this.signalTimer = setInterval(() => this.pollSignals(), SIGNAL_POLL_MS);
-    this.restoreCooldown();
+    this.runtimeTimer = setInterval(() => this.checkRuntime(), RUNTIME_CHECK_MS);
+    this.repairCooldown();
   }
 
   dispose(): void {
@@ -77,9 +102,11 @@ export class RunController {
     document.removeEventListener("visibilitychange", this.onVisibilityResume);
     window.removeEventListener("pageshow", this.onPageShow);
     this.watcher.stop();
+    this.unsubscribeChatState();
+    this.clearNetworkSettleTimer();
     this.clearCooldownTimer();
-    if (this.signalTimer !== undefined) clearInterval(this.signalTimer);
-    this.signalTimer = undefined;
+    if (this.runtimeTimer !== undefined) clearInterval(this.runtimeTimer);
+    this.runtimeTimer = undefined;
   }
 
   /** A brand-new chat gets its real /c/<uuid> id after the first reply; adopt it in place. */
@@ -90,11 +117,23 @@ export class RunController {
 
   dispatch(event: MachineEvent): void {
     if (this.disposed) return;
-    const previousStatus = this.state.status;
+    const previous = this.state;
+    this.onDiagnosticEvent({ kind: "machine-event", event });
     const { state, effects } = reduce(this.state, event, this.settings);
     if (state === this.state) return;
     this.state = state;
-    if (previousStatus === "cooldown" && state.status !== "cooldown") {
+    this.onDiagnosticEvent({
+      kind: "state-transition",
+      event,
+      detail: {
+        fromPhase: previous.phase,
+        fromStatus: previous.status,
+        toPhase: state.phase,
+        toStatus: state.status,
+        effects: effects.map((effect) => effect.do),
+      },
+    });
+    if (previous.status === "cooldown" && state.status !== "cooldown") {
       this.clearCooldownTimer();
     }
     void saveRun(state).catch((err) => this.handleChromeFailure("state save failed", err));
@@ -104,22 +143,7 @@ export class RunController {
 
   /** Re-derive the machine's position from the live DOM (resume, reload, manual resume). */
   reconcile(): void {
-    if (this.state.status === "cooldown") {
-      this.restoreCooldown();
-      return;
-    }
-    if (this.watcher.isStreaming()) {
-      this.dispatch({ type: "STREAM_STARTED" });
-      return;
-    }
-    const message = lastAssistantMessage();
-    if (message) {
-      this.dispatch({
-        type: "REPLY_COMPLETE",
-        marker: parseMarker(message.text),
-        text: message.text,
-      });
-    }
+    this.reconcileLiveState(Date.now());
   }
 
   private readonly onVisibilityResume = (): void => {
@@ -133,7 +157,112 @@ export class RunController {
   private recoverAfterWake(): void {
     if (this.disposed) return;
     this.watcher.recoverFromWake();
-    if (isActive(this.state) || this.state.status === "awaiting_user") this.reconcile();
+    if (isActive(this.state) || this.state.status === "awaiting_user") {
+      this.reconcileLiveState(Date.now());
+    }
+  }
+
+  private onChatState(event: ChatStateEvent): void {
+    if (this.disposed) return;
+    this.onDiagnosticEvent({
+      kind: "network-lifecycle",
+      detail: {
+        event: event.event,
+        requestId: event.requestId ?? "",
+        status: event.status ?? "",
+        markerStatus: event.marker?.status ?? "",
+        reason: event.reason ?? "",
+      },
+    });
+
+    switch (event.event) {
+      case "generation-start":
+        this.clearNetworkSettleTimer();
+        this.networkCompletedCurrentTurn = false;
+        if (
+          this.state.status === "sending" ||
+          this.state.status === "streaming" ||
+          this.state.status === "cooldown" ||
+          this.state.status === "awaiting_user"
+        ) {
+          this.dispatch({ type: "STREAM_STARTED" });
+        }
+        return;
+      case "generation-interrupted":
+        this.clearNetworkSettleTimer();
+        if (
+          this.state.phase === "planning" ||
+          this.state.phase === "developing" ||
+          this.state.phase === "plan_ready"
+        ) {
+          this.dispatch({ type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" });
+        }
+        return;
+      case "generation-complete": {
+        this.clearNetworkSettleTimer();
+        if (this.state.status !== "sending" && this.state.status !== "streaming") return;
+        this.networkCompletedCurrentTurn = true;
+        const markerText = event.marker?.text ?? "";
+        this.dispatch({
+          type: "REPLY_COMPLETE",
+          marker: markerText ? parseMarker(markerText) : null,
+          text: markerText,
+          assistantKey: `network:${event.requestId ?? "complete"}`,
+        });
+        return;
+      }
+      case "stream-status":
+        if (
+          event.status === "COMPLETE" &&
+          (this.state.status === "sending" || this.state.status === "streaming")
+        ) {
+          this.scheduleNetworkSettleFallback(event.requestId ?? "status");
+        }
+        return;
+      case "generation-aborted":
+        this.clearNetworkSettleTimer();
+        if (this.state.status === "sending" || this.state.status === "streaming") {
+          this.dispatch({
+            type: "STREAM_INTERRUPTED",
+            reason: event.reason
+              ? `Generation interrupted (${event.reason})`
+              : "Generation interrupted",
+          });
+        }
+        return;
+    }
+  }
+
+  private scheduleNetworkSettleFallback(requestId: string): void {
+    if (this.networkSettleTimer !== undefined) return;
+    this.networkSettleTimer = setTimeout(
+      () => {
+        this.networkSettleTimer = undefined;
+        if (this.disposed) return;
+        if (this.state.status !== "sending" && this.state.status !== "streaming") return;
+        this.reconcileLiveState(Date.now());
+        if (this.state.status !== "sending" && this.state.status !== "streaming") return;
+        this.dispatch({
+          type: "REPLY_COMPLETE",
+          marker: null,
+          text: "",
+          assistantKey: `network-status:${requestId}`,
+        });
+      },
+      Math.max(this.settings.quietMs, 1500),
+    );
+  }
+
+  private clearNetworkSettleTimer(): void {
+    if (this.networkSettleTimer !== undefined) clearTimeout(this.networkSettleTimer);
+    this.networkSettleTimer = undefined;
+  }
+
+  private checkRuntime(): void {
+    if (this.disposed) return;
+    if (!isActive(this.state) && this.state.status !== "awaiting_user") return;
+    this.pollSignals();
+    this.reconcileLiveState(Date.now());
   }
 
   private pollSignals(): void {
@@ -148,7 +277,119 @@ export class RunController {
     this.dispatch({ type: "PAGE_SIGNAL", signal });
   }
 
+  private reconcileLiveState(now: number): void {
+    if (this.networkCompletedCurrentTurn && this.state.status === "awaiting_user") return;
+    const liveAssistant = lastAssistantMessage();
+    this.onDiagnosticEvent({
+      kind: "reconcile",
+      detail: {
+        status: this.state.status,
+        phase: this.state.phase,
+        watcherStreaming: this.watcher.isStreaming(),
+        lastRole: lastMessageRole() ?? "none",
+        assistantKey: liveAssistant?.key ?? "",
+        assistantLength: liveAssistant?.text.length ?? 0,
+        toolVisible: toolCallIndicatorVisible(),
+      },
+    });
+    if (this.state.status === "cooldown") {
+      this.repairCooldown();
+      return;
+    }
+
+    const canObserveReply =
+      this.state.status === "sending" ||
+      this.state.status === "streaming" ||
+      this.state.status === "awaiting_user";
+    if (!canObserveReply) {
+      this.resetObservedAssistant();
+      return;
+    }
+
+    if (this.watcher.isStreaming()) {
+      this.resetObservedAssistant();
+      if (this.state.status === "sending" || this.state.status === "streaming") {
+        this.dispatch({ type: "STREAM_STARTED" });
+      }
+      return;
+    }
+
+    if (lastMessageRole() !== "assistant") {
+      this.resetObservedAssistant();
+      return;
+    }
+
+    const message = lastAssistantMessage();
+    if (!message || !this.isFreshAssistant(message)) {
+      this.resetObservedAssistant();
+      return;
+    }
+
+    const marker = parseMarker(message.text);
+    if (marker) {
+      this.resetObservedAssistant();
+      this.dispatch({
+        type: "REPLY_COMPLETE",
+        marker,
+        text: message.text,
+        assistantKey: message.key,
+      });
+      return;
+    }
+
+    // While explicitly waiting for the user, only a fresh protocol-bearing reply can
+    // resume automation. Plain assistant prose should not create a recovery nudge.
+    if (this.state.status === "awaiting_user") {
+      this.resetObservedAssistant();
+      return;
+    }
+
+    if (this.observedAssistantKey !== message.key || this.observedAssistantText !== message.text) {
+      this.observedAssistantKey = message.key;
+      this.observedAssistantText = message.text;
+      this.observedAssistantSince = now;
+      return;
+    }
+
+    const quietMs = toolCallIndicatorVisible() ? this.settings.toolQuietMs : this.settings.quietMs;
+    if (now - this.observedAssistantSince >= quietMs) {
+      this.resetObservedAssistant();
+      this.dispatch({
+        type: "REPLY_COMPLETE",
+        marker: null,
+        text: message.text,
+        assistantKey: message.key,
+      });
+    }
+  }
+
+  private consumeCompletedReply(text: string): void {
+    const live = lastAssistantMessage();
+    const assistantKey = live?.text === text ? live.key : undefined;
+    this.resetObservedAssistant();
+    this.dispatch({
+      type: "REPLY_COMPLETE",
+      marker: parseMarker(text),
+      text,
+      ...(assistantKey ? { assistantKey } : {}),
+    });
+  }
+
+  private isFreshAssistant(message: AssistantMessage): boolean {
+    return (
+      message.key !== this.state.lastProcessedAssistantKey &&
+      message.key !== this.state.replyBaselineAssistantKey
+    );
+  }
+
+  private resetObservedAssistant(): void {
+    this.observedAssistantKey = undefined;
+    this.observedAssistantText = "";
+    this.observedAssistantSince = 0;
+  }
+
   private async execute(effect: Effect): Promise<void> {
+    this.onDiagnosticEvent({ kind: "effect", effect });
     switch (effect.do) {
       case "insertAndSend": {
         await this.insertAndSend(effect.kind, effect.text);
@@ -178,9 +419,15 @@ export class RunController {
     }
   }
 
-  private restoreCooldown(): void {
-    if (this.state.status !== "cooldown" || this.cooldownTimer !== undefined) return;
-    this.scheduleCooldown(cooldownRemainingMs(this.state));
+  private repairCooldown(): void {
+    if (this.state.status !== "cooldown") return;
+    const remaining = cooldownRemainingMs(this.state);
+    if (remaining <= 0) {
+      this.clearCooldownTimer();
+      this.dispatch({ type: "COOLDOWN_ELAPSED" });
+      return;
+    }
+    if (this.cooldownTimer === undefined) this.scheduleCooldown(remaining);
   }
 
   private scheduleCooldown(ms: number): void {
@@ -200,25 +447,25 @@ export class RunController {
   }
 
   private buildPrompt(kind: PromptKind, text?: string): string {
+    const repo = this.state.repo ?? this.state.repoName;
     switch (kind) {
       case "plan":
         return buildPlanPrompt({
           idea: this.state.idea,
-          repoMode: this.state.repoMode,
-          repoName: this.state.repoName,
+          repo,
           templateRepo: this.settings.templateRepo,
         });
       case "develop":
-        return buildDevelopPrompt(this.settings);
+        return buildDevelopPrompt(this.settings, repo);
       case "continue":
-        return buildContinuePrompt(this.settings, false);
+        return buildContinuePrompt(this.settings, false, repo);
       case "contract_refresh":
-        return buildContinuePrompt(this.settings, true);
+        return buildContinuePrompt(this.settings, true, repo);
       case "nudge":
-        return NUDGE_PROMPT;
+        return buildNudgePrompt(repo);
       case "user_text":
       case "queued_user_text":
-        return buildUserReply(text ?? "");
+        return buildUserReply(text ?? "", repo);
     }
   }
 
@@ -259,6 +506,12 @@ export class RunController {
     }
     this.dispatch({ type: "INSERT_OK" });
 
+    const baselineAssistantKey = lastAssistantMessage()?.key;
+    this.dispatch(
+      baselineAssistantKey
+        ? { type: "REPLY_EXPECTED", baselineAssistantKey }
+        : { type: "REPLY_EXPECTED" },
+    );
     this.watcher.expectReply();
     const sent = await clickSend(
       () => this.watcher.isStreaming(),

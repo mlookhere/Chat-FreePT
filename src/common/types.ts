@@ -40,7 +40,9 @@ export type ErrorCode =
   | "marker-missing"
   | "cap-reached"
   | "selector-broken"
-  | "conversation-full";
+  | "conversation-full"
+  | "repo-required"
+  | "repo-mismatch";
 
 export type RepoMode = "new" | "existing";
 
@@ -57,9 +59,9 @@ export interface RunState {
   status: RunStatus;
   idea: string;
   repoMode: RepoMode;
-  /** Repo the user named (existing mode) or suggested name (new mode). May be empty. */
+  /** Legacy repository input retained for v1 persisted-run compatibility. */
   repoName: string;
-  /** owner/name once ChatGPT reports it in a marker. */
+  /** Locked owner/name for this ChatGPT conversation. Once set, it never changes in-place. */
   repo?: string;
   lastMarker?: Marker;
   planSummary?: string;
@@ -67,8 +69,12 @@ export interface RunState {
   errorCode?: ErrorCode;
   /** Defaults to true for legacy persisted runs where the field is absent. */
   autoContinueEnabled?: boolean;
-  /** One user-authored message that takes precedence over the next automatic continue. */
+  /** Legacy single-message queue retained for persisted v1 compatibility. */
   queuedUserText?: string;
+  /** Ordered user-authored messages sent before generic automatic continuation. */
+  queuedUserTexts?: string[];
+  /** Last accepted ChatGPT lifecycle signal used by the durable checkpoint summary. */
+  lastLifecycleSignal?: string;
   /** Auto-sends used in the current phase (cap enforced per phase). */
   autoSends: number;
   /** Marker-recovery nudges since the last successful marker parse. Max 1. */
@@ -77,6 +83,10 @@ export interface RunState {
   repliesSinceContract: number;
   /** Absolute epoch-ms deadline for a persisted auto-continue cooldown. */
   cooldownUntil?: number;
+  /** Durable identity of the assistant turn already consumed by the state machine. */
+  lastProcessedAssistantKey?: string;
+  /** Assistant turn present when the current reply was armed; never consume it as the new reply. */
+  replyBaselineAssistantKey?: string;
   startedAt: number;
   updatedAt: number;
   log: ActivityEntry[];

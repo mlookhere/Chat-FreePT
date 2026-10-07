@@ -42,6 +42,7 @@ export function installChromeMock(): { local: Store; sync: Store } {
     storage: { local: local.area, sync: sync.area },
     runtime: {
       sendMessage: async () => undefined,
+      getURL: (path: string) => `chrome-extension://test/${path}`,
     },
   };
   return { local: local.data, sync: sync.data };

@@ -14,7 +14,7 @@ function start(): RunState {
   const initial = newRunState("c1", 1000);
   return reduce(
     initial,
-    { type: "USER_START", idea: "build a thing", repoMode: "new", repoName: "" },
+    { type: "USER_START", idea: "build a thing", repoMode: "existing", repoName: "o/r" },
     settings,
   ).state;
 }
@@ -47,6 +47,59 @@ describe("state machine continuation lifecycle", () => {
     expect(effects).toContainEqual({ do: "insertAndSend", kind: "plan" });
   });
 
+  it("requires a repository before planning", () => {
+    const result = reduce(
+      newRunState("c1", 1000),
+      { type: "USER_START", idea: "an idea", repoMode: "new", repoName: "" },
+      settings,
+    );
+    expect(result.state.status).toBe("error");
+    expect(result.state.errorCode).toBe("repo-required");
+  });
+
+  it("locks the normalized repository and refuses a later switch", () => {
+    let state = reduce(
+      newRunState("c1", 1000),
+      {
+        type: "USER_START",
+        idea: "an idea",
+        repoMode: "existing",
+        repoName: "https://github.com/Owner/project.git",
+      },
+      settings,
+    ).state;
+    expect(state.repo).toBe("Owner/project");
+
+    state = reduce(toStreaming(state), { type: "USER_STOP" }, settings).state;
+    expect(state.repo).toBe("Owner/project");
+
+    const switched = reduce(
+      state,
+      { type: "USER_START", idea: "other", repoMode: "existing", repoName: "owner/other" },
+      settings,
+    );
+    expect(switched.state.status).toBe("error");
+    expect(switched.state.errorCode).toBe("repo-mismatch");
+    expect(switched.state.repo).toBe("Owner/project");
+  });
+
+  it("rejects a status marker that reports a different repository", () => {
+    const result = reduce(
+      toStreaming(start()),
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("CONTINUE", { repo: "other/repo" }),
+        text: "",
+      },
+      settings,
+    );
+    expect(result.state.status).toBe("error");
+    expect(result.state.errorCode).toBe("repo-mismatch");
+    expect(result.state.repo).toBe("o/r");
+  });
+});
+
+describe("state machine continuation lifecycle", () => {
   it("walks insert → send → streaming", () => {
     const state = toStreaming(start());
     expect(state.status).toBe("streaming");
@@ -116,6 +169,96 @@ describe("state machine continuation lifecycle", () => {
       }
     }
     expect(kinds).toContain("contract_refresh");
+  });
+});
+
+describe("state machine reply checkpoints", () => {
+  it("persists the assistant baseline when a reply is armed", () => {
+    const sending = drive(start(), [{ type: "INSERT_OK" }]).state;
+    const result = reduce(
+      sending,
+      { type: "REPLY_EXPECTED", baselineAssistantKey: "message:before-send" },
+      settings,
+    );
+    expect(result.state.replyBaselineAssistantKey).toBe("message:before-send");
+  });
+
+  it("rejects a stale reply that matches the pre-send assistant baseline", () => {
+    let state = toStreaming(start());
+    state = {
+      ...state,
+      replyBaselineAssistantKey: "message:before-send",
+    };
+    const result = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("CONTINUE"),
+        text: "",
+        assistantKey: "message:before-send",
+      },
+      settings,
+    );
+    expect(result.state).toBe(state);
+    expect(result.effects).toEqual([]);
+  });
+
+  it("consumes a fresh assistant turn only once", () => {
+    let state = toStreaming(start());
+    state = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("CONTINUE"),
+        text: "",
+        assistantKey: "message:fresh",
+      },
+      settings,
+    ).state;
+    expect(state.lastProcessedAssistantKey).toBe("message:fresh");
+    expect(state.status).toBe("cooldown");
+
+    state = { ...state, status: "streaming" };
+    const duplicate = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("CONTINUE"),
+        text: "",
+        assistantKey: "message:fresh",
+      },
+      settings,
+    );
+    expect(duplicate.state).toBe(state);
+    expect(duplicate.effects).toEqual([]);
+  });
+
+  it("accepts a fresh marker-bearing reply after the user answered directly in chat", () => {
+    let state = toStreaming(start());
+    state = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("NEEDS_INPUT"),
+        text: "",
+        assistantKey: "message:question",
+      },
+      settings,
+    ).state;
+    expect(state.status).toBe("awaiting_user");
+
+    const result = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("CONTINUE"),
+        text: "",
+        assistantKey: "message:manual-answer-reply",
+      },
+      settings,
+    );
+    expect(result.state.status).toBe("cooldown");
+    expect(result.state.lastProcessedAssistantKey).toBe("message:manual-answer-reply");
   });
 });
 
@@ -242,10 +385,24 @@ describe("state machine recovery and user control", () => {
     expect(resumed.effects).toContainEqual({ do: "reconcile" });
   });
 
-  it("USER_STOP resets the run", () => {
+  it("STREAM_INTERRUPTED pauses without scheduling continuation", () => {
+    const result = reduce(
+      toStreaming(start()),
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    );
+    expect(result.state.status).toBe("paused");
+    expect(result.state.pauseReason).toBe("Generation stopped in ChatGPT");
+    expect(result.effects).toContainEqual({ do: "badge", text: "II" });
+    expect(result.effects.some((effect) => effect.do === "startCooldown")).toBe(false);
+  });
+
+  it("USER_STOP resets the run but preserves the repository lock", () => {
     const state = reduce(toStreaming(start()), { type: "USER_STOP" }, settings).state;
     expect(state.phase).toBe("idle");
     expect(state.status).toBe("idle");
+    expect(state.repo).toBe("o/r");
+    expect(state.repoName).toBe("o/r");
   });
 
   it("page signals pause with the right code", () => {

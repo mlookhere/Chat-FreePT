@@ -3,6 +3,8 @@ import { query, queryLast } from "./selectors";
 export interface AssistantMessage {
   el: HTMLElement;
   text: string;
+  /** Stable across DOM re-renders/reloads when ChatGPT exposes a turn/message id. */
+  key: string;
 }
 
 /**
@@ -12,7 +14,8 @@ export interface AssistantMessage {
 export function lastAssistantMessage(): AssistantMessage | null {
   const el = queryLast("assistantMessage") as HTMLElement | null;
   if (!el) return null;
-  return { el, text: el.innerText ?? el.textContent ?? "" };
+  const text = el.innerText ?? el.textContent ?? "";
+  return { el, text, key: assistantMessageKey(el, text) };
 }
 
 export function lastMessageRole(): "assistant" | "user" | null {
@@ -39,4 +42,28 @@ export function toolCallIndicatorVisible(): boolean {
 
 export function conversationRootEl(): HTMLElement {
   return (query("conversationRoot") as HTMLElement | null) ?? document.body;
+}
+
+function assistantMessageKey(el: HTMLElement, text: string): string {
+  const directId = el.getAttribute("data-message-id");
+  if (directId) return `message:${directId}`;
+
+  const messageHost = el.closest<HTMLElement>("[data-message-id]");
+  const hostId = messageHost?.getAttribute("data-message-id");
+  if (hostId) return `message:${hostId}`;
+
+  const turn = el.closest<HTMLElement>('[data-testid^="conversation-turn"]');
+  const turnId = turn?.getAttribute("data-testid");
+  if (turnId) return `turn:${turnId}`;
+
+  return `text:${fnv1a(text)}`;
+}
+
+function fnv1a(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
