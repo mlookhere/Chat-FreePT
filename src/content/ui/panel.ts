@@ -534,9 +534,11 @@ export class Panel {
     const marker = state.lastMarker?.status ?? "none";
     const item = state.lastMarker?.item ?? "none";
     const lifecycle = state.lastLifecycleSignal ?? "none";
-    const url = state.lastMarker?.url
-      ? `<a class="cfpt-link" href="${esc(state.lastMarker.url)}" target="_blank" rel="noreferrer noopener">${esc(state.lastMarker.url)}</a>`
-      : "none";
+    const markerUrl = state.lastMarker?.url ?? "";
+    const url =
+      /^https:\/\/github\.com\//i.test(markerUrl)
+        ? `<a class="cfpt-link" href="${esc(markerUrl)}" target="_blank" rel="noreferrer noopener">${esc(markerUrl)}</a>`
+        : esc(markerUrl || "none");
     return `
       <div class="cfpt-field" data-ref="checkpoint">
         <strong>Ultra Code checkpoint</strong>
