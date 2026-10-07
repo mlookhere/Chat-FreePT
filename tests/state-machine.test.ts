@@ -98,6 +98,9 @@ describe("state machine continuation lifecycle", () => {
     expect(result.state.repo).toBe("o/r");
   });
 
+});
+
+describe("state machine continuation lifecycle", () => {
   it("walks insert → send → streaming", () => {
     const state = toStreaming(start());
     expect(state.status).toBe("streaming");
