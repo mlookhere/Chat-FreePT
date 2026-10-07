@@ -332,6 +332,18 @@ describe("state machine recovery and user control", () => {
     expect(resumed.effects).toContainEqual({ do: "reconcile" });
   });
 
+  it("STREAM_INTERRUPTED pauses without scheduling continuation", () => {
+    const result = reduce(
+      toStreaming(start()),
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    );
+    expect(result.state.status).toBe("paused");
+    expect(result.state.pauseReason).toBe("Generation stopped in ChatGPT");
+    expect(result.effects).toContainEqual({ do: "badge", text: "II" });
+    expect(result.effects.some((effect) => effect.do === "startCooldown")).toBe(false);
+  });
+
   it("USER_STOP resets the run", () => {
     const state = reduce(toStreaming(start()), { type: "USER_STOP" }, settings).state;
     expect(state.phase).toBe("idle");

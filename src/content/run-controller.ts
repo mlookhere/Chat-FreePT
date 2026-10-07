@@ -11,6 +11,7 @@ import type { Effect, MachineEvent, PromptKind } from "../common/state-machine";
 import { cooldownRemainingMs, isActive, reduce } from "../common/state-machine";
 import { saveRun } from "../common/storage";
 import type { BgRequest, RunState, Settings } from "../common/types";
+import { subscribeChatState, type ChatStateEvent } from "./chat-state";
 import { clickSend, composerIsEmpty, insertPrompt } from "./composer";
 import type { ControllerDiagnosticEvent } from "./diagnostics";
 import { isExtensionContextInvalidated } from "./extension-context";
@@ -37,6 +38,9 @@ export class RunController {
   private readonly watcher: StreamWatcher;
   private cooldownTimer: ReturnType<typeof setTimeout> | undefined;
   private runtimeTimer: ReturnType<typeof setInterval> | undefined;
+  private networkSettleTimer: ReturnType<typeof setTimeout> | undefined;
+  private networkCompletedCurrentTurn = false;
+  private readonly unsubscribeChatState: () => void;
   private lastSignal: string | null = null;
   private observedAssistantKey: string | undefined;
   private observedAssistantText = "";
@@ -76,7 +80,7 @@ export class RunController {
             kind: "watcher",
             detail: { event: "complete", textLength: text.length },
           });
-          this.consumeCompletedReply(text);
+          if (!this.networkCompletedCurrentTurn) this.consumeCompletedReply(text);
         },
         onStuck: () => {
           this.onDiagnosticEvent({ kind: "watcher", detail: { event: "stuck" } });
@@ -86,6 +90,7 @@ export class RunController {
       settings,
     );
     this.watcher.start();
+    this.unsubscribeChatState = subscribeChatState((event) => this.onChatState(event));
     document.addEventListener("visibilitychange", this.onVisibilityResume);
     window.addEventListener("pageshow", this.onPageShow);
     this.runtimeTimer = setInterval(() => this.checkRuntime(), RUNTIME_CHECK_MS);
@@ -97,6 +102,8 @@ export class RunController {
     document.removeEventListener("visibilitychange", this.onVisibilityResume);
     window.removeEventListener("pageshow", this.onPageShow);
     this.watcher.stop();
+    this.unsubscribeChatState();
+    this.clearNetworkSettleTimer();
     this.clearCooldownTimer();
     if (this.runtimeTimer !== undefined) clearInterval(this.runtimeTimer);
     this.runtimeTimer = undefined;
@@ -155,6 +162,102 @@ export class RunController {
     }
   }
 
+  private onChatState(event: ChatStateEvent): void {
+    if (this.disposed) return;
+    this.onDiagnosticEvent({
+      kind: "network-lifecycle",
+      detail: {
+        event: event.event,
+        requestId: event.requestId ?? "",
+        status: event.status ?? "",
+        markerStatus: event.marker?.status ?? "",
+        reason: event.reason ?? "",
+      },
+    });
+
+    switch (event.event) {
+      case "generation-start":
+        this.clearNetworkSettleTimer();
+        this.networkCompletedCurrentTurn = false;
+        if (
+          this.state.status === "sending" ||
+          this.state.status === "streaming" ||
+          this.state.status === "cooldown" ||
+          this.state.status === "awaiting_user"
+        ) {
+          this.dispatch({ type: "STREAM_STARTED" });
+        }
+        return;
+      case "generation-interrupted":
+        this.clearNetworkSettleTimer();
+        if (
+          this.state.phase === "planning" ||
+          this.state.phase === "developing" ||
+          this.state.phase === "plan_ready"
+        ) {
+          this.dispatch({ type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" });
+        }
+        return;
+      case "generation-complete": {
+        this.clearNetworkSettleTimer();
+        if (this.state.status !== "sending" && this.state.status !== "streaming") return;
+        this.networkCompletedCurrentTurn = true;
+        const markerText = event.marker?.text ?? "";
+        this.dispatch({
+          type: "REPLY_COMPLETE",
+          marker: markerText ? parseMarker(markerText) : null,
+          text: markerText,
+          assistantKey: `network:${event.requestId ?? "complete"}`,
+        });
+        return;
+      }
+      case "stream-status":
+        if (
+          event.status === "COMPLETE" &&
+          (this.state.status === "sending" || this.state.status === "streaming")
+        ) {
+          this.scheduleNetworkSettleFallback(event.requestId ?? "status");
+        }
+        return;
+      case "generation-aborted":
+        this.clearNetworkSettleTimer();
+        if (this.state.status === "sending" || this.state.status === "streaming") {
+          this.dispatch({
+            type: "STREAM_INTERRUPTED",
+            reason: event.reason
+              ? `Generation interrupted (${event.reason})`
+              : "Generation interrupted",
+          });
+        }
+        return;
+    }
+  }
+
+  private scheduleNetworkSettleFallback(requestId: string): void {
+    if (this.networkSettleTimer !== undefined) return;
+    this.networkSettleTimer = setTimeout(
+      () => {
+        this.networkSettleTimer = undefined;
+        if (this.disposed) return;
+        if (this.state.status !== "sending" && this.state.status !== "streaming") return;
+        this.reconcileLiveState(Date.now());
+        if (this.state.status !== "sending" && this.state.status !== "streaming") return;
+        this.dispatch({
+          type: "REPLY_COMPLETE",
+          marker: null,
+          text: "",
+          assistantKey: `network-status:${requestId}`,
+        });
+      },
+      Math.max(this.settings.quietMs, 1500),
+    );
+  }
+
+  private clearNetworkSettleTimer(): void {
+    if (this.networkSettleTimer !== undefined) clearTimeout(this.networkSettleTimer);
+    this.networkSettleTimer = undefined;
+  }
+
   private checkRuntime(): void {
     if (this.disposed) return;
     if (!isActive(this.state) && this.state.status !== "awaiting_user") return;
@@ -175,6 +278,7 @@ export class RunController {
   }
 
   private reconcileLiveState(now: number): void {
+    if (this.networkCompletedCurrentTurn && this.state.status === "awaiting_user") return;
     const liveAssistant = lastAssistantMessage();
     this.onDiagnosticEvent({
       kind: "reconcile",

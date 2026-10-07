@@ -12,6 +12,7 @@ import {
 import type { RunState, Settings } from "../common/types";
 import type { ContentRequest } from "../common/types";
 import { activateDeveloperModeSetup } from "./developer-mode-activation";
+import { ensureChatStateBridge } from "./chat-state";
 import { DiagnosticsRecorder } from "./diagnostics";
 import { createExtensionContextGuard } from "./extension-context";
 import { conversationIdFromUrl, watchNavigation } from "./navigation";
@@ -345,6 +346,7 @@ function installLifecycleListeners(): void {
 }
 
 async function boot(): Promise<void> {
+  ensureChatStateBridge();
   installLifecycleListeners();
   const mode = chatGptPageMode(location.href);
   if (mode !== "composer") {

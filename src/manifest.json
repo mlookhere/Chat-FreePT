@@ -25,7 +25,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["diagnostics-bridge.js"],
+      "resources": ["diagnostics-bridge.js", "chat-state-bridge.js"],
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"]
     }
   ]
