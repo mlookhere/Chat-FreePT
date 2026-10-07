@@ -85,23 +85,64 @@ describe("panel continuation controls", () => {
       text: "Run the accessibility checks next.",
     });
   });
+});
 
-  it("re-renders queued state with edit and clear controls", () => {
+describe("panel Ultra Code queue and checkpoint", () => {
+  it("renders ordered queue controls and dispatches reorder/remove/clear", () => {
     const { panel: current, onEvent } = makePanel();
     const state = {
       ...newRunState("c1", 1),
       phase: "planning" as const,
       status: "cooldown" as const,
-      queuedUserText: "Check the release artifact.",
+      queuedUserTexts: ["Check the release artifact.", "Verify the package."],
     };
 
     current.render(state);
-    expect(shadow.textContent).toContain("Queued next:");
+    expect(shadow.textContent).toContain("Message queue · 2");
     expect(shadow.textContent).toContain("Check the release artifact.");
-    expect(shadow.querySelector('[data-action="showqueue"]')?.textContent).toContain("Edit");
+    expect(shadow.textContent).toContain("Verify the package.");
+
+    shadow.querySelector<HTMLButtonElement>('[data-action="queue-down"][data-index="0"]')?.click();
+    expect(onEvent).toHaveBeenCalledWith({
+      type: "USER_MOVE_QUEUE",
+      index: 0,
+      direction: 1,
+    });
+
+    shadow
+      .querySelector<HTMLButtonElement>('[data-action="queue-remove"][data-index="1"]')
+      ?.click();
+    expect(onEvent).toHaveBeenCalledWith({ type: "USER_REMOVE_QUEUE", index: 1 });
 
     shadow.querySelector<HTMLButtonElement>('[data-action="clearqueue"]')?.click();
     expect(onEvent).toHaveBeenCalledWith({ type: "USER_CLEAR_QUEUE" });
+  });
+
+  it("shows the durable Ultra Code checkpoint", () => {
+    const { panel: current } = makePanel();
+    current.render({
+      ...newRunState("c1", 1),
+      repo: "owner/project",
+      phase: "developing",
+      status: "streaming",
+      queuedUserTexts: ["one", "two"],
+      lastLifecycleSignal: "generation-start",
+      lastMarker: {
+        status: "CONTINUE",
+        version: 1,
+        raw: "CONTINUE",
+        item: "3/7 — tests",
+        url: "https://github.com/owner/project/pull/42",
+      },
+    });
+
+    expect(shadow.textContent).toContain("Ultra Code checkpoint");
+    expect(shadow.textContent).toContain("owner/project");
+    expect(shadow.textContent).toContain("3/7 — tests");
+    expect(shadow.textContent).toContain("Marker: CONTINUE");
+    expect(shadow.textContent).toContain("Queue: 2");
+    expect(shadow.textContent).toContain("generation-start");
+    expect(shadow.innerHTML).toContain("https://github.com/owner/project/pull/42");
   });
 
   it("derives the manual-continue view from machine state, not pause text", () => {

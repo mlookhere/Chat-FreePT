@@ -113,6 +113,25 @@ describe("run state", () => {
     expect(await storage.loadRun("c1")).toEqual(state);
   });
 
+  it("persists the Ultra Code queue and checkpoint fields", async () => {
+    const state = {
+      ...newRunState("ultra", 123),
+      repo: "owner/project",
+      queuedUserTexts: ["first", "second"],
+      lastLifecycleSignal: "generation-complete",
+      lastMarker: {
+        status: "CONTINUE" as const,
+        version: 1,
+        raw: "CONTINUE",
+        item: "2/6 — build",
+        url: "https://github.com/owner/project/pull/7",
+      },
+    };
+
+    await storage.saveRun(state);
+    expect(await storage.loadRun("ultra")).toEqual(state);
+  });
+
   it("keeps simultaneous conversation state independent", async () => {
     const first = {
       ...newRunState("conversation-a", 1),

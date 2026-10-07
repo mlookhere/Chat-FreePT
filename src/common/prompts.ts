@@ -100,6 +100,25 @@ ALL Actions checks are green (zero checks is not green); fix red checks by cause
 attempts then NEEDS_INPUT; update the control Issue after merges; end EVERY reply with the
 chatfreept status block, last thing in the reply.`;
 
+export const ULTRA_CODE_CONTRACT = `## Ultra Code operating contract
+
+- Reconstruct current repository state before acting: inspect the control Issue, relevant
+  Issues/PRs, branch heads, and current Actions runs. Treat chat memory as a hint, not truth.
+- Make meaningful autonomous progress each turn. Use GitHub Issues, work branches, PRs,
+  and Actions as the durable source of state.
+- Recover stale or interrupted work by resuming existing Issues/branches/PRs instead of
+  duplicating them.
+- Never idle waiting for CI. If checks are still running, report CONTINUE with the relevant
+  run/PR URL so the next Chat FreePT turn can re-check.
+- Minimize user questions. Use NEEDS_INPUT only for a real decision, permission, or external
+  action that cannot be resolved safely from repository state and available tools.
+- Never trade correctness for speed: preserve the CI contract, do not weaken gates, and do
+  not merge on zero, missing, pending, or red required checks.`;
+
+export const ULTRA_CODE_COMPACT = `Ultra Code reminder: inspect durable repo state first; make meaningful progress; resume
+existing work instead of duplicating it; never idle waiting on CI; minimize unnecessary
+questions; never weaken gates or treat zero/missing checks as green.`;
+
 const VENDOR_RECIPE_TEMPLATE = `## Vendoring the CI pipeline
 
 The project repo gets its CI control plane from the template repo {{TEMPLATE_REPO}} (read
@@ -141,6 +160,8 @@ the status markers you emit, so follow the marker rules exactly.
 {{REPO_LOCK}}
 
 {{MCP_PREFLIGHT}}
+
+{{ULTRA_CODE}}
 
 ## Step 1 — Repository
 
@@ -189,6 +210,8 @@ const DEVELOP_TEMPLATE = `# Chat FreePT protocol — development phase
 
 {{REPO_LOCK}}
 
+{{ULTRA_CODE}}
+
 The master plan is approved. Execute it one item at a time.
 
 ## Per-item loop
@@ -232,6 +255,8 @@ const HANDOFF_TEMPLATE = `# Chat FreePT protocol — handoff (continued from a p
 
 We were mid-project. Repo: {{REPO}}. Phase: {{PHASE}}.
 
+{{ULTRA_CODE}}
+
 Reconstruct the current state from the repository itself with your GitHub MCP tools: read
 docs/MASTER_PLAN.md, the control Issue, open Issues and PRs, and the latest Actions runs.
 Then resume the {{PHASE}} loop under the same protocol.
@@ -258,6 +283,7 @@ export function buildPlanPrompt(input: PlanPromptInput): string {
   return renderTemplate(PLAN_TEMPLATE, {
     REPO_LOCK: repositoryLockBlock(input.repo),
     MCP_PREFLIGHT: buildMcpPreflight(input.repo),
+    ULTRA_CODE: ULTRA_CODE_CONTRACT,
     REPO: input.repo,
     VENDOR_RECIPE: renderTemplate(VENDOR_RECIPE_TEMPLATE, { TEMPLATE_REPO: input.templateRepo }),
     IDEA: input.idea.trim(),
@@ -269,6 +295,7 @@ export function buildPlanPrompt(input: PlanPromptInput): string {
 export function buildDevelopPrompt(settings: Settings, repo: string): string {
   return renderTemplate(DEVELOP_TEMPLATE, {
     REPO_LOCK: repositoryLockBlock(repo),
+    ULTRA_CODE: ULTRA_CODE_CONTRACT,
     DELAY_S: String(Math.round(settings.sendDelayMs / 1000)),
     CI_CONTRACT: CI_CONTRACT_BLOCK,
     MARKER: MARKER_BLOCK,
@@ -281,13 +308,13 @@ export function buildContinuePrompt(
   repo: string,
 ): string {
   const body = withContractRefresh
-    ? `${settings.continueMessage}\n\n${COMPACT_CONTRACT}`
-    : settings.continueMessage;
+    ? `${settings.continueMessage}\n\n${COMPACT_CONTRACT}\n\n${ULTRA_CODE_CONTRACT}`
+    : `${settings.continueMessage}\n\n${ULTRA_CODE_COMPACT}`;
   return `${repositoryLockBlock(repo)}\n\n${body}`;
 }
 
 export function buildUserReply(text: string, repo: string): string {
-  return `${repositoryLockBlock(repo)}\n\n${text.trim()}\n\n(End with your CHATFREEPT status block.)`;
+  return `${repositoryLockBlock(repo)}\n\n${ULTRA_CODE_COMPACT}\n\n${text.trim()}\n\n(End with your CHATFREEPT status block.)`;
 }
 
 export function buildHandoffPrompt(state: RunState): string {
@@ -295,6 +322,7 @@ export function buildHandoffPrompt(state: RunState): string {
   return renderTemplate(HANDOFF_TEMPLATE, {
     REPO: repo,
     PHASE: state.phase === "developing" ? "DEVELOPING" : "PLANNING",
+    ULTRA_CODE: ULTRA_CODE_CONTRACT,
     CI_CONTRACT: CI_CONTRACT_BLOCK,
     MARKER: MARKER_BLOCK,
   });

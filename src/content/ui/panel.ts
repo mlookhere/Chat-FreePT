@@ -1,6 +1,7 @@
 import {
   autoContinueEnabled,
   isWaitingForManualContinue,
+  queuedMessages,
   type MachineEvent,
 } from "../../common/state-machine";
 import { normalizeRepositoryInput } from "../../common/repository";
@@ -135,7 +136,7 @@ export class Panel {
     this.host.dataset["phase"] = state.phase;
     this.launcher.dataset["state"] = visualState;
 
-    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${state.repo ?? ""}|${autoContinueEnabled(state)}|${state.queuedUserText ?? ""}|${passive}`;
+    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${state.repo ?? ""}|${state.lastMarker?.status ?? ""}|${state.lastMarker?.item ?? ""}|${state.lastMarker?.url ?? ""}|${state.lastLifecycleSignal ?? ""}|${queuedMessages(state).join("\u001f")}|${autoContinueEnabled(state)}|${passive}`;
     if (viewKey !== this.lastViewKey) {
       this.lastViewKey = viewKey;
       this.stopArmed = false;
@@ -476,9 +477,16 @@ export class Panel {
           health.missing.join(", "),
         )}. Auto-run cannot operate until the extension is updated.</div>`
       : "";
-    if (passive) return warn + this.passiveHtml(state) + this.diagnosticsHtml();
+    if (passive)
+      return warn + this.passiveHtml(state) + this.checkpointHtml(state) + this.diagnosticsHtml();
     const controls = this.automationControlsHtml(state);
-    return warn + controls + this.statusBodyHtml(state) + this.diagnosticsHtml();
+    return (
+      warn +
+      controls +
+      this.statusBodyHtml(state) +
+      this.checkpointHtml(state) +
+      this.diagnosticsHtml()
+    );
   }
 
   private statusBodyHtml(state: RunState): string {
@@ -506,16 +514,37 @@ export class Panel {
 
   private automationControlsHtml(state: RunState): string {
     const enabled = autoContinueEnabled(state);
-    const queued = state.queuedUserText?.trim() ?? "";
-    const queueControls = canQueueNext(state) ? this.queueControlsHtml(queued) : "";
+    const queue = queuedMessages(state);
+    const queueControls = canQueueNext(state) ? this.queueControlsHtml(queue) : "";
     return `
       <div class="cfpt-field">
         <label class="cfpt-check-row">
           <input type="checkbox" data-action="auto-continue" ${enabled ? "checked" : ""} />
           <span><strong>Auto-continue</strong></span>
         </label>
-        <p class="cfpt-note">When off, Chat FreePT waits instead of sending its next automatic continue. A queued user message still sends once.</p>
+        <p class="cfpt-note">When off, Chat FreePT waits instead of sending a generic continue. Queued messages still send one at a time at safe turn boundaries.</p>
         ${queueControls}
+      </div>
+    `;
+  }
+
+  private checkpointHtml(state: RunState): string {
+    if (!state.repo) return "";
+    const queueDepth = queuedMessages(state).length;
+    const marker = state.lastMarker?.status ?? "none";
+    const item = state.lastMarker?.item ?? "none";
+    const lifecycle = state.lastLifecycleSignal ?? "none";
+    const markerUrl = state.lastMarker?.url ?? "";
+    const url = /^https:\/\/github\.com\//i.test(markerUrl)
+      ? `<a class="cfpt-link" href="${esc(markerUrl)}" target="_blank" rel="noreferrer noopener">${esc(markerUrl)}</a>`
+      : esc(markerUrl || "none");
+    return `
+      <div class="cfpt-field" data-ref="checkpoint">
+        <strong>Ultra Code checkpoint</strong>
+        <p class="cfpt-note">Repo: ${esc(state.repo)}</p>
+        <p class="cfpt-note">Phase: ${esc(phaseLabel(state.phase))} · Item: ${esc(item)} · Marker: ${esc(marker)}</p>
+        <p class="cfpt-note">Queue: ${queueDepth} · Last lifecycle: ${esc(lifecycle)}</p>
+        <p class="cfpt-note">CI / PR: ${url}</p>
       </div>
     `;
   }
@@ -533,19 +562,29 @@ export class Panel {
     `;
   }
 
-  private queueControlsHtml(queued: string): string {
-    const summary = queued
-      ? `<p class="cfpt-note"><strong>Queued next:</strong> ${esc(queued)}</p>
-         <button class="cfpt-btn" type="button" data-action="showqueue">Edit queued message</button>
-         <button class="cfpt-btn" type="button" data-action="clearqueue">Clear queued message</button>`
-      : `<button class="cfpt-btn" type="button" data-action="showqueue">Queue next message</button>`;
+  private queueControlsHtml(queue: string[]): string {
+    const items = queue
+      .map(
+        (message, index) => `
+          <div class="cfpt-field" data-ref="queue-item" data-index="${index}">
+            <p class="cfpt-note"><strong>${index + 1}.</strong> ${esc(message)}</p>
+            <button class="cfpt-btn" type="button" data-action="queue-up" data-index="${index}" ${index === 0 ? "disabled" : ""}>Move up</button>
+            <button class="cfpt-btn" type="button" data-action="queue-down" data-index="${index}" ${index === queue.length - 1 ? "disabled" : ""}>Move down</button>
+            <button class="cfpt-btn" type="button" data-action="queue-remove" data-index="${index}">Remove</button>
+          </div>`,
+      )
+      .join("");
     return `
       <div class="cfpt-field">
-        ${summary}
+        <strong>Message queue · ${queue.length}</strong>
+        <p class="cfpt-note">Queued messages run FIFO before generic auto-continue.</p>
+        ${items}
+        <button class="cfpt-btn" type="button" data-action="showqueue">Add queued message</button>
+        ${queue.length > 0 ? '<button class="cfpt-btn" type="button" data-action="clearqueue">Clear all</button>' : ""}
         <div class="cfpt-field cfpt-hidden" data-ref="queue-editor">
-          <label>Next user message</label>
-          <textarea data-ref="queue-next" rows="3" placeholder="Send this instead of the next automatic continue…">${esc(queued)}</textarea>
-          <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="savequeue">Save queued message</button>
+          <label>Queued user message</label>
+          <textarea data-ref="queue-next" rows="3" placeholder="Send this at the next safe turn boundary…"></textarea>
+          <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="savequeue">Add to queue</button>
           <button class="cfpt-btn" type="button" data-action="hidequeue">Cancel</button>
         </div>
       </div>`;
@@ -663,6 +702,8 @@ export class Panel {
     const counters = this.panelEl.querySelector('[data-ref="counters"]');
     if (counters) {
       const bits = [`auto-continues: ${state.autoSends}`];
+      const queueDepth = queuedMessages(state).length;
+      if (queueDepth) bits.push(`queue: ${queueDepth}`);
       if (state.lastMarker?.item) bits.push(`item ${state.lastMarker.item}`);
       if (state.repo) bits.push(state.repo);
       counters.textContent = bits.join(" · ");
@@ -755,6 +796,26 @@ export class Panel {
       case "savequeue":
         this.saveQueuedMessage();
         break;
+      case "queue-up":
+        this.hooks.onEvent({
+          type: "USER_MOVE_QUEUE",
+          index: Number(target.dataset["index"]),
+          direction: -1,
+        });
+        break;
+      case "queue-down":
+        this.hooks.onEvent({
+          type: "USER_MOVE_QUEUE",
+          index: Number(target.dataset["index"]),
+          direction: 1,
+        });
+        break;
+      case "queue-remove":
+        this.hooks.onEvent({
+          type: "USER_REMOVE_QUEUE",
+          index: Number(target.dataset["index"]),
+        });
+        break;
       case "clearqueue":
         this.hooks.onEvent({ type: "USER_CLEAR_QUEUE" });
         break;
@@ -816,9 +877,12 @@ export class Panel {
   }
 
   private saveQueuedMessage(): void {
-    const text = this.refValue("queue-next").trim();
+    const input = this.panelEl.querySelector<HTMLTextAreaElement>('[data-ref="queue-next"]');
+    const text = input?.value.trim() ?? "";
     if (!text) return;
     this.hooks.onEvent({ type: "USER_QUEUE_NEXT", text });
+    if (input) input.value = "";
+    this.hideQueueEditor();
   }
 
   private stopRun(target: HTMLElement): void {

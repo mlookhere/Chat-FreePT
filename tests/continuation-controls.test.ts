@@ -3,6 +3,7 @@ import {
   autoContinueEnabled,
   isWaitingForManualContinue,
   newRunState,
+  queuedMessages,
   reduce,
   type Effect,
   type MachineEvent,
@@ -112,13 +113,49 @@ describe("queued continuation input", () => {
 
     const result = reduce(state, { type: "COOLDOWN_ELAPSED" }, settings);
     expect(result.state.status).toBe("inserting");
-    expect(result.state.queuedUserText).toBeUndefined();
+    expect(queuedMessages(result.state)).toEqual([]);
     expect(result.state.autoSends).toBe(settings.autoContinueCap);
     expect(result.effects).toContainEqual({
       do: "insertAndSend",
       kind: "queued_user_text",
       text: "Run the audit first.",
     });
+  });
+
+  it("keeps multiple queued messages FIFO and supports reorder/remove", () => {
+    let state = streamingRun();
+    state = reduce(state, { type: "USER_QUEUE_NEXT", text: "first" }, settings).state;
+    state = reduce(state, { type: "USER_QUEUE_NEXT", text: "second" }, settings).state;
+    state = reduce(state, { type: "USER_QUEUE_NEXT", text: "third" }, settings).state;
+    expect(queuedMessages(state)).toEqual(["first", "second", "third"]);
+
+    state = reduce(state, { type: "USER_MOVE_QUEUE", index: 2, direction: -1 }, settings).state;
+    expect(queuedMessages(state)).toEqual(["first", "third", "second"]);
+
+    state = reduce(state, { type: "USER_REMOVE_QUEUE", index: 1 }, settings).state;
+    expect(queuedMessages(state)).toEqual(["first", "second"]);
+
+    state = reduce(
+      state,
+      { type: "REPLY_COMPLETE", marker: marker("CONTINUE"), text: "" },
+      settings,
+    ).state;
+    const first = reduce(state, { type: "COOLDOWN_ELAPSED" }, settings);
+    expect(first.effects).toContainEqual({
+      do: "insertAndSend",
+      kind: "queued_user_text",
+      text: "first",
+    });
+    expect(queuedMessages(first.state)).toEqual(["second"]);
+  });
+
+  it("migrates the legacy single-message slot into the ordered queue", () => {
+    const legacy = { ...streamingRun(), queuedUserText: "legacy next" };
+    expect(queuedMessages(legacy)).toEqual(["legacy next"]);
+
+    const appended = reduce(legacy, { type: "USER_QUEUE_NEXT", text: "new next" }, settings).state;
+    expect(appended.queuedUserText).toBeUndefined();
+    expect(queuedMessages(appended)).toEqual(["legacy next", "new next"]);
   });
 
   it("returns to waiting after a queued message reply while auto-continue remains off", () => {
@@ -155,7 +192,7 @@ describe("queued continuation input", () => {
 
     state = reduce(state, { type: "USER_CLEAR_QUEUE" }, settings).state;
     expect(state.status).toBe("awaiting_user");
-    expect(state.queuedUserText).toBeUndefined();
+    expect(queuedMessages(state)).toEqual([]);
     expect(state.cooldownUntil).toBeUndefined();
   });
 });
@@ -183,7 +220,7 @@ describe("run reset semantics", () => {
     expect(result.state.phase).toBe("idle");
     expect(result.state.status).toBe("idle");
     expect(result.state.autoContinueEnabled).toBe(false);
-    expect(result.state.queuedUserText).toBeUndefined();
+    expect(queuedMessages(result.state)).toEqual([]);
     expect(result.state.repo).toBe("owner/repo");
     expect(result.state.lastMarker).toBeUndefined();
     expect(result.state.pauseReason).toBeUndefined();
@@ -214,7 +251,7 @@ describe("run reset semantics", () => {
     expect(result.state.autoContinueEnabled).toBe(false);
     expect(result.state.idea).toBe("");
     expect(result.state.repo).toBe("owner/repo");
-    expect(result.state.queuedUserText).toBeUndefined();
+    expect(queuedMessages(result.state)).toEqual([]);
     expect(result.state.lastMarker).toBeUndefined();
     expect(result.state.autoSends).toBe(0);
     expect(result.state.log).toHaveLength(1);

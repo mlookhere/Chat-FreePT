@@ -69,8 +69,12 @@ export interface RunState {
   errorCode?: ErrorCode;
   /** Defaults to true for legacy persisted runs where the field is absent. */
   autoContinueEnabled?: boolean;
-  /** One user-authored message that takes precedence over the next automatic continue. */
+  /** Legacy single-message queue retained for persisted v1 compatibility. */
   queuedUserText?: string;
+  /** Ordered user-authored messages sent before generic automatic continuation. */
+  queuedUserTexts?: string[];
+  /** Last accepted ChatGPT lifecycle signal used by the durable checkpoint summary. */
+  lastLifecycleSignal?: string;
   /** Auto-sends used in the current phase (cap enforced per phase). */
   autoSends: number;
   /** Marker-recovery nudges since the last successful marker parse. Max 1. */

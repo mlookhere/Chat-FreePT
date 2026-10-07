@@ -220,6 +220,36 @@ describe("RunController sends and continuation controls", () => {
     controller.dispose();
   });
 
+  it("pause and stop suppress a pending automatic send immediately", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(16_000);
+    const paused = makeController(streamingState());
+
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    expect(paused.state.status).toBe("cooldown");
+    paused.dispatch({ type: "USER_PAUSE" });
+    expect(paused.state.status).toBe("paused");
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushAsync();
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    paused.dispose();
+
+    mocks.insertPrompt.mockClear();
+    mocks.clickSend.mockClear();
+    const stopped = makeController(streamingState());
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    stopped.dispatch({ type: "USER_STOP" });
+    expect(stopped.state.status).toBe("idle");
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushAsync();
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    stopped.dispose();
+  });
+
   it("sends queued user text once while auto-continue is disabled", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(17_000);
@@ -239,6 +269,7 @@ describe("RunController sends and continuation controls", () => {
     expect(mocks.clickSend).toHaveBeenCalledTimes(1);
     expect(controller.state.autoSends).toBe(0);
     expect(controller.state.queuedUserText).toBeUndefined();
+    expect(controller.state.queuedUserTexts).toBeUndefined();
     expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
@@ -425,6 +456,7 @@ describe("RunController network lifecycle", () => {
 
     expect(controller.state.status).toBe("cooldown");
     expect(controller.state.lastProcessedAssistantKey).toBe("network:turn-1");
+    expect(controller.state.lastLifecycleSignal).toBe("generation-complete");
     controller.dispose();
   });
 
@@ -440,6 +472,7 @@ describe("RunController network lifecycle", () => {
 
     expect(controller.state.status).toBe("paused");
     expect(controller.state.pauseReason).toContain("stopped");
+    expect(controller.state.lastLifecycleSignal).toBe("generation-interrupted");
     controller.dispose();
   });
 
