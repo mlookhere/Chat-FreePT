@@ -13,7 +13,7 @@ function streamingState(): RunState {
   const initial = newRunState("c1", Date.now());
   const started = reduce(
     initial,
-    { type: "USER_START", idea: "build", repoMode: "new", repoName: "" },
+    { type: "USER_START", idea: "build", repoMode: "existing", repoName: "owner/project" },
     settings,
   ).state;
   const sending = reduce(started, { type: "INSERT_OK" }, settings).state;

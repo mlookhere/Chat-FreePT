@@ -111,7 +111,7 @@ function streamingState(): ReturnType<typeof newRunState> {
   let state = newRunState("c1", Date.now());
   state = reduce(
     state,
-    { type: "USER_START", idea: "build it", repoMode: "new", repoName: "" },
+    { type: "USER_START", idea: "build it", repoMode: "existing", repoName: "owner/project" },
     settings,
   ).state;
   state = reduce(state, { type: "INSERT_OK" }, settings).state;
@@ -166,8 +166,8 @@ describe("RunController sends and continuation controls", () => {
     controller.dispatch({
       type: "USER_START",
       idea: "build a compact extension",
-      repoMode: "new",
-      repoName: "freept-test",
+      repoMode: "existing",
+      repoName: "owner/freept-test",
     });
     await flushAsync();
 
@@ -290,7 +290,12 @@ describe("RunController recovery and disposal", () => {
       .mockReturnValueOnce({ missing: [], degraded: [] });
     const controller = makeController();
 
-    controller.dispatch({ type: "USER_START", idea: "build it", repoMode: "new", repoName: "" });
+    controller.dispatch({
+      type: "USER_START",
+      idea: "build it",
+      repoMode: "existing",
+      repoName: "owner/project",
+    });
     await flushAsync();
     expect(mocks.insertPrompt).not.toHaveBeenCalled();
 
@@ -359,7 +364,12 @@ describe("RunController recovery and disposal", () => {
     );
     const controller = makeController();
 
-    controller.dispatch({ type: "USER_START", idea: "build it", repoMode: "new", repoName: "" });
+    controller.dispatch({
+      type: "USER_START",
+      idea: "build it",
+      repoMode: "existing",
+      repoName: "owner/project",
+    });
     await flushAsync();
     expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
 

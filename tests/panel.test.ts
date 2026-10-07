@@ -288,91 +288,71 @@ describe("composer takeover lifecycle", () => {
   });
 });
 
-describe("new repository guide", () => {
-  it("walks through GitHub and CI setup then launches the existing new-repo flow", () => {
+describe("conversation repository setup", () => {
+  it("normalizes a repository URL and starts planning against that exact repo", () => {
     onboardingDone();
     const onEvent = vi.fn();
     const panel = makePanel({ onEvent });
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
 
-    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-open"]')?.click();
-    expect(overlayShadow().textContent).toContain("New private repo · 1 of 4");
-    expect(overlayShadow().textContent).toContain("brand-new");
-    expect(overlayShadow().textContent).toContain("private");
-
-    const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="repo-guide-idea"]');
-    const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="repo-guide-name"]');
-    if (!idea || !repo) throw new Error("repo guide inputs missing");
+    const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]');
+    const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
+    if (!repo || !idea) throw new Error("repository setup inputs missing");
+    repo.value = "https://github.com/Owner/weather-board.git";
     idea.value = "Build a tiny weather dashboard";
-    repo.value = "weather-board";
-    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-next"]')?.click();
-
-    expect(overlayShadow().textContent).toContain("New private repo · 2 of 4");
-    expect(overlayShadow().textContent).toContain("Chat FreePT GitHub MCP");
-    expect(overlayShadow().textContent).toContain("Repository creation");
-    expect(overlayShadow().textContent).toContain("Actions status");
-
-    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-next"]')?.click();
-    expect(overlayShadow().textContent).toContain("New private repo · 3 of 4");
-    expect(overlayShadow().textContent).toContain("CI pipeline is prepared automatically");
-    expect(overlayShadow().textContent).toContain("main");
-    expect(overlayShadow().textContent).toContain("dev");
-    expect(overlayShadow().textContent).toContain("[CONTROL] Current repository state");
-    expect(overlayShadow().textContent).toContain("Zero checks never counts as green");
-
-    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-next"]')?.click();
-    expect(overlayShadow().textContent).toContain("New private repo · 4 of 4");
-    expect(overlayShadow().textContent).toContain("weather-board");
-    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-launch"]')?.click();
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="start"]')?.click();
 
     expect(onEvent).toHaveBeenCalledWith({
       type: "USER_START",
       idea: "Build a tiny weather dashboard",
-      repoMode: "new",
-      repoName: "weather-board",
+      repoMode: "existing",
+      repoName: "Owner/weather-board",
     });
   });
 
-  it("keeps the user on step one when the project idea is missing", () => {
+  it("rejects an invalid repository before starting", () => {
     onboardingDone();
-    const panel = makePanel();
+    const onEvent = vi.fn();
+    const panel = makePanel({ onEvent });
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
 
-    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-open"]')?.click();
-    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-next"]')?.click();
+    const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]');
+    const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
+    if (!repo || !idea) throw new Error("repository setup inputs missing");
+    repo.value = "weather-board";
+    idea.value = "Build it";
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="start"]')?.click();
 
-    expect(overlayShadow().textContent).toContain("New private repo · 1 of 4");
-    expect(overlayShadow().textContent).toContain(
-      "Describe what you want ChatGPT to build before continuing.",
-    );
+    expect(onEvent).not.toHaveBeenCalled();
+    expect(overlayShadow().textContent).toContain("Enter a valid owner/repo");
   });
 
-  it("returns guide edits to the main form when cancelled", () => {
+  it("renders a locked repository read-only and explains how to switch", () => {
+    onboardingDone();
+    const panel = makePanel();
+    panel.render({ ...newRunState("conversation-1", 1), repo: "owner/project" });
+    panel.toggle(true);
+
+    const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]');
+    expect(repo?.value).toBe("owner/project");
+    expect(repo?.readOnly).toBe(true);
+    expect(overlayShadow().textContent).toContain("start a new ChatGPT conversation");
+  });
+
+  it("opens repository-first setup without Developer Mode instructions", () => {
     onboardingDone();
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="setup-open"]')?.click();
 
-    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-open"]')?.click();
-    const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="repo-guide-idea"]');
-    const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="repo-guide-name"]');
-    if (!idea || !repo) throw new Error("repo guide inputs missing");
-    idea.value = "Keep this draft";
-    repo.value = "draft-repo";
-    overlayShadow().querySelector<HTMLButtonElement>('[data-action="repo-guide-cancel"]')?.click();
-
-    expect(overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]')?.value).toBe(
-      "Keep this draft",
-    );
-    expect(overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]')?.value).toBe(
-      "draft-repo",
-    );
-    expect(
-      overlayShadow().querySelector<HTMLInputElement>('input[name="repomode"][value="new"]')
-        ?.checked,
-    ).toBe(true);
+    expect(overlayShadow().textContent).toContain("Choose the GitHub repository first");
+    expect(overlayShadow().textContent).toContain("create a private repository on GitHub");
+    expect(overlayShadow().innerHTML).toContain("https://github.com/new");
+    expect(overlayShadow().textContent).not.toContain("Developer mode");
+    expect(overlayShadow().textContent).not.toContain("Chat FreePT GitHub MCP");
   });
 });
 
@@ -395,20 +375,16 @@ describe("first-run and plan-aware setup", () => {
     });
   });
 
-  it("offers an opt-in follow-along path and a separate Free path", async () => {
+  it("uses repository-first onboarding", async () => {
     onboardingDone();
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
     overlayShadow().querySelector<HTMLButtonElement>('[data-action="setup-open"]')?.click();
 
-    expect(overlayShadow().textContent).toContain("Follow along");
-    expect(overlayShadow().textContent).toContain("Using ChatGPT Free?");
-    expect(overlayShadow().textContent).toContain("fill the GitHub MCP name");
-    overlayShadow().querySelector<HTMLButtonElement>('[data-action="free-setup"]')?.click();
-    expect(overlayShadow().textContent).toContain("Prepare GitHub manually first");
-    expect(overlayShadow().textContent).toContain("Existing repo");
+    expect(overlayShadow().textContent).toContain("One conversation · one repository");
     expect(overlayShadow().textContent).toContain("NEEDS_INPUT");
+    expect(overlayShadow().textContent).not.toContain("Follow along");
   });
 
   it("does not re-show onboarding after suppression and completion", async () => {

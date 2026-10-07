@@ -29,7 +29,7 @@ function drive(state: RunState, events: MachineEvent[]): { state: RunState; effe
 
 function streamingRun(): RunState {
   return drive(newRunState("c1", 1000), [
-    { type: "USER_START", idea: "build it", repoMode: "new", repoName: "" },
+    { type: "USER_START", idea: "build it", repoMode: "existing", repoName: "owner/project" },
     { type: "INSERT_OK" },
     { type: "SEND_OK" },
   ]).state;
@@ -184,7 +184,7 @@ describe("run reset semantics", () => {
     expect(result.state.status).toBe("idle");
     expect(result.state.autoContinueEnabled).toBe(false);
     expect(result.state.queuedUserText).toBeUndefined();
-    expect(result.state.repo).toBeUndefined();
+    expect(result.state.repo).toBe("owner/repo");
     expect(result.state.lastMarker).toBeUndefined();
     expect(result.state.pauseReason).toBeUndefined();
     expect(result.state.errorCode).toBeUndefined();
@@ -213,7 +213,7 @@ describe("run reset semantics", () => {
     expect(result.state.status).toBe("idle");
     expect(result.state.autoContinueEnabled).toBe(false);
     expect(result.state.idea).toBe("");
-    expect(result.state.repo).toBeUndefined();
+    expect(result.state.repo).toBe("owner/repo");
     expect(result.state.queuedUserText).toBeUndefined();
     expect(result.state.lastMarker).toBeUndefined();
     expect(result.state.autoSends).toBe(0);

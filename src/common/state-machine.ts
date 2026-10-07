@@ -1,3 +1,4 @@
+import { normalizeRepositoryInput } from "./repository";
 import type {
   ActivityEntry,
   ErrorCode,
@@ -237,11 +238,29 @@ function startRun(ctx: ReduceContext, event: StartEvent): boolean {
   if (state.status !== "idle" && state.phase !== "stopped" && state.phase !== "complete") {
     return false;
   }
+
+  const requestedRepo = normalizeRepositoryInput(event.repoName);
+  if (!state.repo && !requestedRepo) {
+    fail(ctx, "repo-required", "Choose and lock a GitHub repository before planning.");
+    return true;
+  }
+  if (state.repo && requestedRepo && requestedRepo.toLowerCase() !== state.repo.toLowerCase()) {
+    fail(
+      ctx,
+      "repo-mismatch",
+      `This conversation is locked to ${state.repo}. Start a new ChatGPT conversation to use ${requestedRepo}.`,
+    );
+    return true;
+  }
+
+  const lockedRepo = state.repo ?? requestedRepo;
+  if (!lockedRepo) return false;
+  state.repo = lockedRepo;
+  state.repoMode = "existing";
+  state.repoName = lockedRepo;
   state.phase = "planning";
   state.status = "inserting";
   state.idea = event.idea;
-  state.repoMode = event.repoMode;
-  state.repoName = event.repoName;
   state.autoSends = 0;
   state.nudges = 0;
   state.repliesSinceContract = 0;
@@ -257,6 +276,10 @@ function startRun(ctx: ReduceContext, event: StartEvent): boolean {
 function startDevelopment(ctx: ReduceContext): boolean {
   const state = ctx.state;
   if (state.phase !== "plan_ready") return false;
+  if (!state.repo) {
+    fail(ctx, "repo-required", "This conversation has no locked GitHub repository.");
+    return true;
+  }
   state.phase = "developing";
   state.status = "inserting";
   state.autoSends = 0;
@@ -290,8 +313,14 @@ function resumeRun(ctx: ReduceContext): boolean {
 
 function resetRun(ctx: ReduceContext, logText: string): void {
   const enabled = autoContinueEnabled(ctx.state);
+  const lockedRepo = ctx.state.repo;
   const reset = newRunState(ctx.state.conversationId, ctx.now);
   reset.autoContinueEnabled = enabled;
+  if (lockedRepo) {
+    reset.repo = lockedRepo;
+    reset.repoMode = "existing";
+    reset.repoName = lockedRepo;
+  }
   reset.log = [{ at: ctx.now, kind: "info", text: logText }];
   ctx.state = reset;
 }
@@ -546,9 +575,28 @@ function handleReply(ctx: ReduceContext, marker: Marker | null, text: string): v
 
   state.nudges = 0;
   state.lastMarker = marker;
-  if (marker.repo) state.repo = marker.repo;
+  if (!validateMarkerRepository(ctx, marker)) return;
   note(ctx, "marker", marker.raw);
   handleMarker(ctx, marker, text);
+}
+
+function validateMarkerRepository(ctx: ReduceContext, marker: Marker): boolean {
+  if (!ctx.state.repo) {
+    fail(ctx, "repo-required", "This conversation has no locked GitHub repository.");
+    return false;
+  }
+  if (!marker.repo) return true;
+
+  const reported = normalizeRepositoryInput(marker.repo);
+  if (!reported || reported.toLowerCase() !== ctx.state.repo.toLowerCase()) {
+    fail(
+      ctx,
+      "repo-mismatch",
+      `ChatGPT reported repository ${marker.repo}, but this conversation is locked to ${ctx.state.repo}. Start a new ChatGPT conversation to switch repositories.`,
+    );
+    return false;
+  }
+  return true;
 }
 
 function handleMarker(ctx: ReduceContext, marker: Marker, text: string): void {

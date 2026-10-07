@@ -14,7 +14,7 @@ function start(): RunState {
   const initial = newRunState("c1", 1000);
   return reduce(
     initial,
-    { type: "USER_START", idea: "build a thing", repoMode: "new", repoName: "" },
+    { type: "USER_START", idea: "build a thing", repoMode: "existing", repoName: "o/r" },
     settings,
   ).state;
 }
@@ -47,6 +47,59 @@ describe("state machine continuation lifecycle", () => {
     expect(effects).toContainEqual({ do: "insertAndSend", kind: "plan" });
   });
 
+  it("requires a repository before planning", () => {
+    const result = reduce(
+      newRunState("c1", 1000),
+      { type: "USER_START", idea: "an idea", repoMode: "new", repoName: "" },
+      settings,
+    );
+    expect(result.state.status).toBe("error");
+    expect(result.state.errorCode).toBe("repo-required");
+  });
+
+  it("locks the normalized repository and refuses a later switch", () => {
+    let state = reduce(
+      newRunState("c1", 1000),
+      {
+        type: "USER_START",
+        idea: "an idea",
+        repoMode: "existing",
+        repoName: "https://github.com/Owner/project.git",
+      },
+      settings,
+    ).state;
+    expect(state.repo).toBe("Owner/project");
+
+    state = reduce(toStreaming(state), { type: "USER_STOP" }, settings).state;
+    expect(state.repo).toBe("Owner/project");
+
+    const switched = reduce(
+      state,
+      { type: "USER_START", idea: "other", repoMode: "existing", repoName: "owner/other" },
+      settings,
+    );
+    expect(switched.state.status).toBe("error");
+    expect(switched.state.errorCode).toBe("repo-mismatch");
+    expect(switched.state.repo).toBe("Owner/project");
+  });
+
+  it("rejects a status marker that reports a different repository", () => {
+    const result = reduce(
+      toStreaming(start()),
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("CONTINUE", { repo: "other/repo" }),
+        text: "",
+      },
+      settings,
+    );
+    expect(result.state.status).toBe("error");
+    expect(result.state.errorCode).toBe("repo-mismatch");
+    expect(result.state.repo).toBe("o/r");
+  });
+});
+
+describe("state machine continuation lifecycle", () => {
   it("walks insert → send → streaming", () => {
     const state = toStreaming(start());
     expect(state.status).toBe("streaming");
@@ -344,10 +397,12 @@ describe("state machine recovery and user control", () => {
     expect(result.effects.some((effect) => effect.do === "startCooldown")).toBe(false);
   });
 
-  it("USER_STOP resets the run", () => {
+  it("USER_STOP resets the run but preserves the repository lock", () => {
     const state = reduce(toStreaming(start()), { type: "USER_STOP" }, settings).state;
     expect(state.phase).toBe("idle");
     expect(state.status).toBe("idle");
+    expect(state.repo).toBe("o/r");
+    expect(state.repoName).toBe("o/r");
   });
 
   it("page signals pause with the right code", () => {
