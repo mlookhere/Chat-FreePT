@@ -80,7 +80,7 @@ function collectStrings(value: unknown, out: string[]): void {
 }
 
 function protocolCandidateText(raw: string): string {
-  const pieces: string[] = [raw, raw.replace(/\\n/g, "\n").replace(/\\\"/g, '"')];
+  const pieces: string[] = [raw, raw.replace(/\\n/g, "\n").replace(/\\"/g, '"')];
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("data:")) continue;
