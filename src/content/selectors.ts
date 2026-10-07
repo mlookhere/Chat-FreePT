@@ -77,7 +77,8 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: 'button[data-testid="stop-button"]' },
       { css: 'button[aria-label="Stop streaming"]' },
       { css: 'button[aria-label="Stop generating"]' },
-      { css: 'button[aria-label*="Stop"]' },
+      { css: '#thread-bottom form button[aria-label*="Stop"]' },
+      { css: 'form[data-type="unified-composer"] button[aria-label*="Stop"]' },
     ],
   },
   assistantMessage: {
