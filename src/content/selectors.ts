@@ -77,6 +77,7 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: 'button[data-testid="stop-button"]' },
       { css: 'button[aria-label="Stop streaming"]' },
       { css: 'button[aria-label="Stop generating"]' },
+      // Keep broad label fallbacks inside the composer so unrelated page controls cannot match.
       { css: '#thread-bottom form button[aria-label*="Stop"]' },
       { css: 'form[data-type="unified-composer"] button[aria-label*="Stop"]' },
     ],
