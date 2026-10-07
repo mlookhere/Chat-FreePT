@@ -97,7 +97,6 @@ describe("state machine continuation lifecycle", () => {
     expect(result.state.errorCode).toBe("repo-mismatch");
     expect(result.state.repo).toBe("o/r");
   });
-
 });
 
 describe("state machine continuation lifecycle", () => {

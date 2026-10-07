@@ -29,8 +29,6 @@ interface NativeSurfaceSnapshot {
   inert: boolean;
 }
 
-
-
 const ONBOARDING_KEY = "cfpt:onboarding:v1";
 const DEFAULT_ONBOARDING: OnboardingState = {
   launcherTipSuppressed: false,
@@ -848,7 +846,6 @@ export class Panel {
       HTMLTextAreaElement | HTMLInputElement | null;
     return el?.value ?? "";
   }
-
 }
 
 function appendStyle(root: ShadowRoot): void {

@@ -290,7 +290,12 @@ describe("RunController recovery and disposal", () => {
       .mockReturnValueOnce({ missing: [], degraded: [] });
     const controller = makeController();
 
-    controller.dispatch({ type: "USER_START", idea: "build it", repoMode: "existing", repoName: "owner/project" });
+    controller.dispatch({
+      type: "USER_START",
+      idea: "build it",
+      repoMode: "existing",
+      repoName: "owner/project",
+    });
     await flushAsync();
     expect(mocks.insertPrompt).not.toHaveBeenCalled();
 
@@ -359,7 +364,12 @@ describe("RunController recovery and disposal", () => {
     );
     const controller = makeController();
 
-    controller.dispatch({ type: "USER_START", idea: "build it", repoMode: "existing", repoName: "owner/project" });
+    controller.dispatch({
+      type: "USER_START",
+      idea: "build it",
+      repoMode: "existing",
+      repoName: "owner/project",
+    });
     await flushAsync();
     expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
 

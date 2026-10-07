@@ -244,11 +244,7 @@ function startRun(ctx: ReduceContext, event: StartEvent): boolean {
     fail(ctx, "repo-required", "Choose and lock a GitHub repository before planning.");
     return true;
   }
-  if (
-    state.repo &&
-    requestedRepo &&
-    requestedRepo.toLowerCase() !== state.repo.toLowerCase()
-  ) {
+  if (state.repo && requestedRepo && requestedRepo.toLowerCase() !== state.repo.toLowerCase()) {
     fail(
       ctx,
       "repo-mismatch",
