@@ -11,7 +11,6 @@ import {
 } from "../common/storage";
 import type { RunState, Settings } from "../common/types";
 import type { ContentRequest } from "../common/types";
-import { activateDeveloperModeSetup } from "./developer-mode-activation";
 import { ensureChatStateBridge } from "./chat-state";
 import { DiagnosticsRecorder } from "./diagnostics";
 import { createExtensionContextGuard } from "./extension-context";
@@ -20,14 +19,12 @@ import { chatGptPageMode, type ChatGptPageMode } from "./page-mode";
 import { RunController } from "./run-controller";
 import { require_ } from "./selectors";
 import { Panel } from "./ui/panel";
-import { SetupGuide } from "./ui/setup-guide";
 
 const HEARTBEAT_MS = 5000;
 const TAKEOVER_RETRY_MS = 5000;
 const tabNonce = crypto.randomUUID();
 
 let panel: Panel | null = null;
-let standaloneGuide: SetupGuide | null = null;
 let controller: RunController | null = null;
 let currentConvId = "";
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
@@ -64,8 +61,6 @@ function shutdownInvalidatedContext(): void {
   controller = null;
   panel?.dispose();
   panel = null;
-  standaloneGuide?.dispose();
-  standaloneGuide = null;
   diagnostics.dispose();
 }
 
@@ -199,16 +194,6 @@ async function initConversation(convId: string): Promise<void> {
   startController(state, settings);
 }
 
-function ensureStandaloneGuide(mode: ChatGptPageMode): void {
-  if (mode !== "plugins" || panel || standaloneGuide || contextGuard.invalidated) return;
-  standaloneGuide = new SetupGuide();
-}
-
-function clearStandaloneGuide(): void {
-  standaloneGuide?.dispose();
-  standaloneGuide = null;
-}
-
 async function leaveConversationForUtilityPage(mode: ChatGptPageMode): Promise<void> {
   stopTakeoverRetry();
   controller?.dispose();
@@ -217,20 +202,18 @@ async function leaveConversationForUtilityPage(mode: ChatGptPageMode): Promise<v
   const previous = currentConvId;
   currentConvId = "";
   await releaseOwnedLock(previous);
-  if (contextGuard.invalidated) return;
-  ensureStandaloneGuide(mode);
-  log.debug(`Chat FreePT idle on expected non-composer route (${mode})`);
+  if (!contextGuard.invalidated) {
+    log.debug(`Chat FreePT idle on expected non-composer route (${mode})`);
+  }
 }
 
 async function activateComposerPage(): Promise<void> {
   if (contextGuard.invalidated || panel) return;
-  clearStandaloneGuide();
   try {
     await require_("composer", 45000, 500);
   } catch {
     const mode = chatGptPageMode(location.href);
     if (mode !== "composer") {
-      ensureStandaloneGuide(mode);
       log.debug(`Chat FreePT idle on expected non-composer route (${mode})`);
       return;
     }
@@ -239,16 +222,6 @@ async function activateComposerPage(): Promise<void> {
   }
   if (contextGuard.invalidated || chatGptPageMode(location.href) !== "composer" || panel) return;
 
-  try {
-    const activation = await activateDeveloperModeSetup();
-    if (activation === "activated")
-      log.info("Chat FreePT GitHub MCP activated for this conversation");
-    else if (activation !== "not-needed") {
-      log.warn(`developer MCP conversation activation incomplete: ${activation}`);
-    }
-  } catch (error) {
-    reportAsyncFailure("developer MCP conversation activation failed", error);
-  }
   if (contextGuard.invalidated || panel) return;
 
   panel = new Panel({
@@ -350,7 +323,6 @@ async function boot(): Promise<void> {
   installLifecycleListeners();
   const mode = chatGptPageMode(location.href);
   if (mode !== "composer") {
-    ensureStandaloneGuide(mode);
     log.debug(`Chat FreePT idle on expected non-composer route (${mode})`);
     return;
   }
