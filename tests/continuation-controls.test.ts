@@ -129,11 +129,7 @@ describe("queued continuation input", () => {
     state = reduce(state, { type: "USER_QUEUE_NEXT", text: "third" }, settings).state;
     expect(queuedMessages(state)).toEqual(["first", "second", "third"]);
 
-    state = reduce(
-      state,
-      { type: "USER_MOVE_QUEUE", index: 2, direction: -1 },
-      settings,
-    ).state;
+    state = reduce(state, { type: "USER_MOVE_QUEUE", index: 2, direction: -1 }, settings).state;
     expect(queuedMessages(state)).toEqual(["first", "third", "second"]);
 
     state = reduce(state, { type: "USER_REMOVE_QUEUE", index: 1 }, settings).state;
@@ -157,11 +153,7 @@ describe("queued continuation input", () => {
     const legacy = { ...streamingRun(), queuedUserText: "legacy next" };
     expect(queuedMessages(legacy)).toEqual(["legacy next"]);
 
-    const appended = reduce(
-      legacy,
-      { type: "USER_QUEUE_NEXT", text: "new next" },
-      settings,
-    ).state;
+    const appended = reduce(legacy, { type: "USER_QUEUE_NEXT", text: "new next" }, settings).state;
     expect(appended.queuedUserText).toBeUndefined();
     expect(queuedMessages(appended)).toEqual(["legacy next", "new next"]);
   });

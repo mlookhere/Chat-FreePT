@@ -85,7 +85,6 @@ describe("panel continuation controls", () => {
       text: "Run the accessibility checks next.",
     });
   });
-
 });
 
 describe("panel Ultra Code queue and checkpoint", () => {
@@ -110,7 +109,9 @@ describe("panel Ultra Code queue and checkpoint", () => {
       direction: 1,
     });
 
-    shadow.querySelector<HTMLButtonElement>('[data-action="queue-remove"][data-index="1"]')?.click();
+    shadow
+      .querySelector<HTMLButtonElement>('[data-action="queue-remove"][data-index="1"]')
+      ?.click();
     expect(onEvent).toHaveBeenCalledWith({ type: "USER_REMOVE_QUEUE", index: 1 });
 
     shadow.querySelector<HTMLButtonElement>('[data-action="clearqueue"]')?.click();
