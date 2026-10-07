@@ -22,7 +22,7 @@ ${FENCE}chatfreept
 CHATFREEPT_STATUS: <CONTINUE | NEEDS_INPUT | PLAN_READY | COMPLETE | ERROR>
 V: 1
 PHASE: <PLANNING | DEVELOPING>
-REPO: <owner/name, once known>
+REPO: <the locked owner/name for this conversation>
 ITEM: <n/m — current plan item, during development>
 NOTE: <one short line: what just happened, or what you need>
 URL: <most relevant link, optional>
@@ -37,72 +37,41 @@ Meanings:
 
 Never omit the block. Never put anything after it.`;
 
-export const DEVELOPER_MODE_SETUP_BLOCK = `If a required capability is missing, read-only,
-or rejected by authorization, STOP and report the exact missing capability classes. Then
-tell me to configure GitHub's official remote MCP in ChatGPT:
+const CORE_MCP_REQUIREMENTS = `Required capabilities (tool names may differ; match
+capabilities semantically): read this repository/files/trees; create branches; create or
+update files on an explicit branch including .github/workflows/*; create/update Issues
+and comments; apply existing labels to Issues/PRs; create/update Pull Requests; merge Pull
+Requests; and read Actions/check results plus failing job/step logs.`;
 
-1. Start Chat FreePT's GitHub setup and choose Follow along. The extension should open
-   Settings → Security and login, enable Developer mode when the host permits it, and open
-   Plugins automatically. If ChatGPT presents an additional security confirmation, I must
-   approve it myself.
-2. In https://chatgpt.com/plugins, create or reuse the dedicated custom app named
-   Chat FreePT GitHub MCP. Use Server URL
-   https://api.githubcopilot.com/mcp/x/all and OAuth. GitHub documents /x/all as the remote
-   endpoint exposing all available MCP toolsets, which is appropriate for this release-engineering
-   workflow because repository, Issue, label, pull-request, Git and Actions capabilities are required.
-3. The extension may fill the safe fields and press Create after I explicitly check
-   ChatGPT's custom-MCP risk acknowledgement. It must never check that acknowledgement for me
-   or bypass GitHub OAuth. Complete the GitHub authorization myself.
-4. Return to the originating conversation. Chat FreePT should open the composer Plus menu,
-   choose Developer mode, and select the exact Chat FreePT GitHub MCP app for this conversation.
-   Do not treat a generic/built-in GitHub integration as equivalent to this dedicated custom MCP.
-5. Only after that conversation-level activation succeeds, run this capability preflight again.
-   If the Developer mode/app controls are unavailable, the exact app cannot be selected, or the
-   activated remote MCP still lacks required repository/workflow write capabilities, report
-   NEEDS_INPUT with the exact missing activation/capability class rather than pretending setup
-   succeeded or substituting another GitHub integration.
+export function repositoryLockBlock(repo: string): string {
+  return `## Repository lock
 
-Do not ask me to run shell commands or click GitHub controls. End with NEEDS_INPUT so I can
-finish only the explicit ChatGPT/GitHub consent step and then resume.`;
+This ChatGPT conversation is permanently bound to **${repo}**.
 
-const CORE_MCP_REQUIREMENTS = `Core capabilities required in both modes (tool names may
-differ; match capabilities semantically): read repositories/files/trees; create branches;
-create or update files on an explicit branch including .github/workflows/*; create/update
-Issues and comments; apply existing labels to Issues/PRs; create/update Pull Requests; merge
-Pull Requests; and read Actions/check results plus failing job/step logs.`;
+- Use only ${repo} for every repository operation in this conversation.
+- Never create, select, infer, or switch to another repository.
+- Treat any conflicting repository name from prior context as stale.
+- If ${repo} is unavailable or inaccessible, stop with NEEDS_INPUT instead of substituting another repo.
+- Every status block must report REPO: ${repo}.`;
+}
 
-export function buildMcpPreflight(repoMode: "new" | "existing", repoName: string): string {
-  const modeRequirements =
-    repoMode === "new"
-      ? `This is NEW-REPOSITORY mode. In addition to the core capabilities, you MUST have a
-repository-creation capability (for example create_repository) and a repository-label
-creation capability (for example label_write with method=create, create_label, or an
-equivalent). A new repo has none of the CI-Pipline labels yet, so label creation is mandatory.`
-      : `This is EXISTING-REPOSITORY mode for ${repoName || "the repository I name"}. Do NOT
-require repository creation. First verify read/write access and list the CI-Pipline labels
-already present. Repository-label creation is required only for labels that are actually
-missing; if every required label already exists, lack of create_label/label_write is not a
-blocker.`;
+export function buildMcpPreflight(repo: string): string {
+  return `## Step 0 — GitHub preflight
 
-  return `## Step 0 — GitHub MCP preflight
-
-Before any repository mutation, inspect all GitHub-capable tools available in this
-conversation. Do not assume one connector or exact tool names; several ChatGPT apps can
-expose equivalent operations.
+Before any repository mutation, inspect the GitHub-capable tools available in this
+conversation and verify read/write access to the exact locked repository **${repo}**.
+Do not create a repository and do not switch repositories.
 
 ${CORE_MCP_REQUIREMENTS}
 
-${modeRequirements}
+List the CI-Pipline labels already present in ${repo}. Repository-label creation is required
+only for labels that are actually missing. Repository default-branch mutation is NOT required;
+all branch operations must name dev or main explicitly.
 
-Repository default-branch mutation is NOT required. Do not block because there is no
-update-repository/default-branch tool; all Chat FreePT branch operations must name their
-base/head explicitly.
-
-The workflow scope matters: you must be able to write .github/workflows/*. If that write is
-rejected, or any required capability above is missing, never silently skip it: zero CI checks
-is not green.
-
-${DEVELOPER_MODE_SETUP_BLOCK}`;
+The workflow scope matters: you must be able to write .github/workflows/*. If a required
+capability or access scope is missing, report NEEDS_INPUT with the exact missing capability.
+Do not give Developer Mode/plugin setup instructions and do not silently substitute another
+GitHub integration or repository. Zero CI checks is not green.`;
 }
 
 export const CI_CONTRACT_BLOCK = `## Operating contract (CI-Pipline)
@@ -172,11 +141,15 @@ your GitHub MCP tools. You never ask me to run commands or click anything on Git
 do everything yourself with tools. I am assisted by a browser extension that reads only
 the status markers you emit, so follow the marker rules exactly.
 
+{{REPO_LOCK}}
+
 {{MCP_PREFLIGHT}}
 
 ## Step 1 — Repository
 
-{{REPO_INSTRUCTIONS}}
+Use the already-selected repository **{{REPO}}**. Verify its current contents before
+vendoring. If existing content would conflict with the CI pipeline, stop with NEEDS_INPUT
+and describe the conflict. Never create or switch repositories.
 
 {{VENDOR_RECIPE}}
 
@@ -216,6 +189,8 @@ the repo is seeded, the plan is committed, and the Issues exist, end with PLAN_R
 {{MARKER}}`;
 
 const DEVELOP_TEMPLATE = `# Chat FreePT protocol — development phase
+
+{{REPO_LOCK}}
 
 The master plan is approved. Execute it one item at a time.
 
@@ -268,36 +243,25 @@ Then resume the {{PHASE}} loop under the same protocol.
 
 {{MARKER}}`;
 
-export const NUDGE_PROMPT = `Your last reply did not end with the required chatfreept status block. Reply now with ONLY
+export function buildNudgePrompt(repo: string): string {
+  return `${repositoryLockBlock(repo)}
+
+Your last reply did not end with the required chatfreept status block. Reply now with ONLY
 the status block (a fenced code block, language chatfreept) reflecting the current true
 state. Every future reply must end with it.`;
+}
 
 export interface PlanPromptInput {
   idea: string;
-  repoMode: "new" | "existing";
-  repoName: string;
+  repo: string;
   templateRepo: string;
 }
 
 export function buildPlanPrompt(input: PlanPromptInput): string {
-  let repoInstructions: string;
-  if (input.repoMode === "existing" && input.repoName) {
-    repoInstructions =
-      `Use my existing repository ${input.repoName}. Verify you can read and write it. ` +
-      `If it already has content that would conflict with vendoring the CI pipeline, stop ` +
-      `with NEEDS_INPUT and tell me what you found.`;
-  } else if (input.repoName) {
-    repoInstructions =
-      `Create a new PRIVATE repository named "${input.repoName}" under my account ` +
-      `(discover my login with your tools). Initialize it with a README.`;
-  } else {
-    repoInstructions =
-      `Create a new PRIVATE repository under my account (discover my login with your ` +
-      `tools); derive a short kebab-case name from the idea below. Initialize it with a README.`;
-  }
   return renderTemplate(PLAN_TEMPLATE, {
-    MCP_PREFLIGHT: buildMcpPreflight(input.repoMode, input.repoName),
-    REPO_INSTRUCTIONS: repoInstructions,
+    REPO_LOCK: repositoryLockBlock(input.repo),
+    MCP_PREFLIGHT: buildMcpPreflight(input.repo),
+    REPO: input.repo,
     VENDOR_RECIPE: renderTemplate(VENDOR_RECIPE_TEMPLATE, { TEMPLATE_REPO: input.templateRepo }),
     IDEA: input.idea.trim(),
     CI_CONTRACT: CI_CONTRACT_BLOCK,
@@ -305,26 +269,34 @@ export function buildPlanPrompt(input: PlanPromptInput): string {
   });
 }
 
-export function buildDevelopPrompt(settings: Settings): string {
+export function buildDevelopPrompt(settings: Settings, repo: string): string {
   return renderTemplate(DEVELOP_TEMPLATE, {
+    REPO_LOCK: repositoryLockBlock(repo),
     DELAY_S: String(Math.round(settings.sendDelayMs / 1000)),
     CI_CONTRACT: CI_CONTRACT_BLOCK,
     MARKER: MARKER_BLOCK,
   });
 }
 
-export function buildContinuePrompt(settings: Settings, withContractRefresh: boolean): string {
-  if (!withContractRefresh) return settings.continueMessage;
-  return `${settings.continueMessage}\n\n${COMPACT_CONTRACT}`;
+export function buildContinuePrompt(
+  settings: Settings,
+  withContractRefresh: boolean,
+  repo: string,
+): string {
+  const body = withContractRefresh
+    ? `${settings.continueMessage}\n\n${COMPACT_CONTRACT}`
+    : settings.continueMessage;
+  return `${repositoryLockBlock(repo)}\n\n${body}`;
 }
 
-export function buildUserReply(text: string): string {
-  return `${text.trim()}\n\n(End with your CHATFREEPT status block.)`;
+export function buildUserReply(text: string, repo: string): string {
+  return `${repositoryLockBlock(repo)}\n\n${text.trim()}\n\n(End with your CHATFREEPT status block.)`;
 }
 
 export function buildHandoffPrompt(state: RunState): string {
+  const repo = state.repo ?? "(repository lock missing)";
   return renderTemplate(HANDOFF_TEMPLATE, {
-    REPO: state.repo || state.repoName || "(see the plan conversation)",
+    REPO: repo,
     PHASE: state.phase === "developing" ? "DEVELOPING" : "PLANNING",
     CI_CONTRACT: CI_CONTRACT_BLOCK,
     MARKER: MARKER_BLOCK,
