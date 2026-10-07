@@ -3,10 +3,10 @@ import {
   isWaitingForManualContinue,
   type MachineEvent,
 } from "../../common/state-machine";
+import { normalizeRepositoryInput } from "../../common/repository";
 import type { RunState } from "../../common/types";
 import type { DiagnosticsStatus } from "../diagnostics";
 import { healthCheck, query, queryGuideTarget } from "../selectors";
-import { SetupGuide } from "./setup-guide";
 import { PANEL_CSS } from "./styles";
 
 export interface PanelHooks {
@@ -29,14 +29,7 @@ interface NativeSurfaceSnapshot {
   inert: boolean;
 }
 
-type SetupSurface = "onboarding" | "repo-guide" | null;
 
-interface RepoGuideDraft {
-  step: 1 | 2 | 3 | 4;
-  idea: string;
-  repoName: string;
-  error: string;
-}
 
 const ONBOARDING_KEY = "cfpt:onboarding:v1";
 const DEFAULT_ONBOARDING: OnboardingState = {
@@ -77,7 +70,6 @@ function canQueueNext(state: RunState): boolean {
 
 /** Native-feeling launcher plus a body-level composer takeover that cannot inherit ChatGPT focus traps. */
 export class Panel {
-  private readonly setupGuide = new SetupGuide();
   private readonly host: HTMLSpanElement;
   private readonly launcherShadow: ShadowRoot;
   private readonly launcher: HTMLButtonElement;
@@ -94,8 +86,6 @@ export class Panel {
   private disposed = false;
   private onboarding = { ...DEFAULT_ONBOARDING };
   private nativeSurface: NativeSurfaceSnapshot | null = null;
-  private setupSurface: SetupSurface = null;
-  private repoGuide: RepoGuideDraft = { step: 1, idea: "", repoName: "", error: "" };
   private diagnosticsStatus: DiagnosticsStatus = { recording: false, records: 0, dropped: 0 };
 
   constructor(private readonly hooks: PanelHooks) {
@@ -164,7 +154,6 @@ export class Panel {
     window.removeEventListener("resize", this.onViewportChange);
     window.removeEventListener("scroll", this.onViewportChange, true);
     this.restoreNativeTakeover();
-    this.setupGuide.dispose();
     this.host.remove();
     this.overlayHost.remove();
   }
@@ -180,7 +169,6 @@ export class Panel {
 
   async acknowledgeSetup(): Promise<void> {
     this.setupBackdropEl.classList.add("cfpt-hidden");
-    this.setupSurface = null;
     this.onboarding.setupShown = true;
     this.host.dataset["onboarding"] = "done";
     await this.persistOnboarding();
@@ -278,9 +266,7 @@ export class Panel {
       if (event.target === this.takeoverBackdropEl) this.toggle(false);
     });
     this.setupBackdropEl.addEventListener("click", (event) => {
-      if (event.target !== this.setupBackdropEl) return;
-      if (this.setupSurface === "repo-guide") this.closeRepoGuide();
-      else void this.acknowledgeSetup();
+      if (event.target === this.setupBackdropEl) void this.acknowledgeSetup();
     });
     window.addEventListener("resize", this.onViewportChange);
     window.addEventListener("scroll", this.onViewportChange, true);
@@ -303,8 +289,7 @@ export class Panel {
   private onKeyDown(event: Event): void {
     if (!(event instanceof KeyboardEvent) || event.key !== "Escape") return;
     if (!this.setupBackdropEl.classList.contains("cfpt-hidden")) {
-      if (this.setupSurface === "repo-guide") this.closeRepoGuide();
-      else void this.acknowledgeSetup();
+      void this.acknowledgeSetup();
       return;
     }
     if (this.host.dataset["expanded"] === "true") this.toggle(false);
@@ -346,107 +331,14 @@ export class Panel {
     this.positionLauncherTip();
   }
 
-  private showSetupModal(mode: "paid" | "free" = "paid"): void {
-    this.setupSurface = "onboarding";
+  private showSetupModal(): void {
     this.launcherTipEl.classList.add("cfpt-hidden");
     this.host.dataset["highlighted"] = "false";
-    this.setupBackdropEl.innerHTML = mode === "free" ? freeSetupHtml() : paidSetupHtml();
+    this.setupBackdropEl.innerHTML = repositorySetupHtml();
     this.setupBackdropEl.classList.remove("cfpt-hidden");
     this.host.dataset["onboarding"] = "setup";
     queueMicrotask(() => {
       this.setupBackdropEl.querySelector<HTMLButtonElement>("button")?.focus();
-    });
-  }
-
-  private async startSetupGuide(): Promise<void> {
-    this.setupBackdropEl.classList.add("cfpt-hidden");
-    this.setupSurface = null;
-    this.onboarding.setupShown = true;
-    this.host.dataset["onboarding"] = "done";
-    await this.persistOnboarding();
-    this.toggle(false);
-    await this.setupGuide.start();
-  }
-
-  private showRepoGuide(): void {
-    this.repoGuide = {
-      step: 1,
-      idea: this.refValue("idea"),
-      repoName: this.refValue("reponame").trim(),
-      error: "",
-    };
-    this.setupSurface = "repo-guide";
-    this.renderRepoGuide();
-  }
-
-  private renderRepoGuide(): void {
-    this.setupBackdropEl.innerHTML = repoGuideHtml(this.repoGuide);
-    this.setupBackdropEl.classList.remove("cfpt-hidden");
-    queueMicrotask(() => {
-      const selector =
-        this.repoGuide.step === 1 ? '[data-ref="repo-guide-idea"]' : "button[data-action]";
-      this.setupBackdropEl.querySelector<HTMLElement>(selector)?.focus();
-    });
-  }
-
-  private captureRepoGuideDraft(): void {
-    const idea = this.setupBackdropEl.querySelector<HTMLTextAreaElement>(
-      '[data-ref="repo-guide-idea"]',
-    );
-    const repo = this.setupBackdropEl.querySelector<HTMLInputElement>(
-      '[data-ref="repo-guide-name"]',
-    );
-    if (idea) this.repoGuide.idea = idea.value;
-    if (repo) this.repoGuide.repoName = repo.value.trim();
-  }
-
-  private advanceRepoGuide(delta: -1 | 1): void {
-    this.captureRepoGuideDraft();
-    if (delta > 0 && this.repoGuide.step === 1 && !this.repoGuide.idea.trim()) {
-      this.repoGuide.error = "Describe what you want ChatGPT to build before continuing.";
-      this.renderRepoGuide();
-      return;
-    }
-    this.repoGuide.error = "";
-    const next = Math.min(4, Math.max(1, this.repoGuide.step + delta));
-    this.repoGuide.step = next as RepoGuideDraft["step"];
-    this.renderRepoGuide();
-  }
-
-  private closeRepoGuide(): void {
-    this.captureRepoGuideDraft();
-    this.syncRepoGuideToMainForm();
-    this.setupBackdropEl.classList.add("cfpt-hidden");
-    this.setupSurface = null;
-  }
-
-  private syncRepoGuideToMainForm(): void {
-    const idea = this.panelEl.querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
-    const repo = this.panelEl.querySelector<HTMLInputElement>('[data-ref="reponame"]');
-    const newMode = this.panelEl.querySelector<HTMLInputElement>(
-      'input[name="repomode"][value="new"]',
-    );
-    if (idea) idea.value = this.repoGuide.idea;
-    if (repo) repo.value = this.repoGuide.repoName;
-    if (newMode) newMode.checked = true;
-  }
-
-  private launchRepoGuide(): void {
-    this.captureRepoGuideDraft();
-    if (!this.repoGuide.idea.trim()) {
-      this.repoGuide.step = 1;
-      this.repoGuide.error = "Describe what you want ChatGPT to build before starting.";
-      this.renderRepoGuide();
-      return;
-    }
-    const { idea, repoName } = this.repoGuide;
-    this.setupBackdropEl.classList.add("cfpt-hidden");
-    this.setupSurface = null;
-    this.hooks.onEvent({
-      type: "USER_START",
-      idea: idea.trim(),
-      repoMode: "new",
-      repoName: repoName.trim(),
     });
   }
 
@@ -672,24 +564,29 @@ export class Panel {
   }
 
   private ideaFormHtml(state: RunState): string {
+    const repoField = state.repo
+      ? `<div class="cfpt-field">
+           <label>Repository locked to this conversation</label>
+           <input type="text" data-ref="reponame" value="${esc(state.repo)}" readonly />
+           <p class="cfpt-note">To use a different repository, start a new ChatGPT conversation.</p>
+         </div>`
+      : `<div class="cfpt-field">
+           <label>GitHub repository</label>
+           <input type="text" data-ref="reponame" value="" placeholder="owner/repo or https://github.com/owner/repo" />
+           <p class="cfpt-note">Need a new one? <a class="cfpt-link" href="https://github.com/new" target="_blank" rel="noreferrer noopener">Create a private repository on GitHub</a>, then paste its owner/name or URL here.</p>
+           <p class="cfpt-note" data-ref="repo-error"></p>
+         </div>`;
+
     return `
       <h3>What should ChatGPT build for you?</h3>
+      ${repoField}
       <div class="cfpt-field">
         <textarea data-ref="idea" rows="6" placeholder="Describe the project you want built…">${esc(
           state.idea,
         )}</textarea>
       </div>
-      <div class="cfpt-radio-row">
-        <label><input type="radio" name="repomode" value="new" ${state.repoMode === "new" ? "checked" : ""}/> New private repo</label>
-        <label><input type="radio" name="repomode" value="existing" ${state.repoMode === "existing" ? "checked" : ""}/> Existing repo</label>
-      </div>
-      <div class="cfpt-field">
-        <label>Repo name (optional for new; owner/name for existing)</label>
-        <input type="text" data-ref="reponame" value="${esc(state.repoName)}" placeholder="e.g. my-idea or owner/my-repo"/>
-      </div>
-      <p class="cfpt-note">Full autonomous GitHub work uses Developer mode + the remote GitHub MCP. Free-plan users can still use Chat FreePT in an assisted workflow, but should prepare an existing repo first and expect manual GitHub steps when ChatGPT lacks write tools.</p>
-      <button class="cfpt-btn" type="button" data-action="setup-open">GitHub setup</button>
-      <button class="cfpt-btn" type="button" data-action="repo-guide-open">New repo guide</button>
+      <p class="cfpt-note">One ChatGPT conversation is permanently bound to one GitHub repository. Chat FreePT will verify access to that exact repo before work begins.</p>
+      <button class="cfpt-btn" type="button" data-action="setup-open">Repository setup</button>
       <button class="cfpt-btn cfpt-btn-primary" data-action="start">Start planning</button>
     `;
   }
@@ -867,36 +764,10 @@ export class Panel {
         void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
         break;
       case "setup-open":
-      case "setup-back":
         this.showSetupModal();
-        break;
-      case "free-setup":
-        this.showSetupModal("free");
-        break;
-      case "setup-guide":
-        void this.startSetupGuide();
         break;
       case "setup-done":
         void this.acknowledgeSetup();
-        break;
-      case "repo-guide-open":
-        this.showRepoGuide();
-        break;
-      case "repo-guide-next":
-        this.advanceRepoGuide(1);
-        break;
-      case "repo-guide-back":
-        this.advanceRepoGuide(-1);
-        break;
-      case "repo-guide-cancel":
-        this.closeRepoGuide();
-        break;
-      case "repo-guide-github":
-        this.closeRepoGuide();
-        this.showSetupModal();
-        break;
-      case "repo-guide-launch":
-        this.launchRepoGuide();
         break;
       case "diagnostics-start":
         this.hooks.onDiagnosticsStart?.();
@@ -911,13 +782,20 @@ export class Panel {
   }
 
   private startProject(): void {
-    const idea = this.refValue("idea");
-    if (!idea.trim()) return;
+    const idea = this.refValue("idea").trim();
+    const rawRepo = this.refValue("reponame");
+    const repo = normalizeRepositoryInput(rawRepo);
+    if (!repo) {
+      const error = this.panelEl.querySelector<HTMLElement>('[data-ref="repo-error"]');
+      if (error) error.textContent = "Enter a valid owner/repo or root GitHub repository URL.";
+      return;
+    }
+    if (!idea) return;
     this.hooks.onEvent({
       type: "USER_START",
       idea,
-      repoMode: this.radioValue("repomode") === "existing" ? "existing" : "new",
-      repoName: this.refValue("reponame").trim(),
+      repoMode: "existing",
+      repoName: repo,
     });
   }
 
@@ -971,12 +849,6 @@ export class Panel {
     return el?.value ?? "";
   }
 
-  private radioValue(name: string): string {
-    const el = this.panelEl.querySelector(
-      `input[name="${name}"]:checked`,
-    ) as HTMLInputElement | null;
-    return el?.value ?? "";
-  }
 }
 
 function appendStyle(root: ShadowRoot): void {
@@ -1004,121 +876,24 @@ function launcherTipHtml(): string {
     <button class="cfpt-btn cfpt-btn-primary cfpt-toast-continue" type="button" data-action="tip-continue">Continue</button>`;
 }
 
-function paidSetupHtml(): string {
+function repositorySetupHtml(): string {
   return `
     <section class="cfpt-setup-card" role="dialog" aria-modal="true" aria-labelledby="cfpt-setup-title">
-      <button class="cfpt-icon-close" type="button" data-action="setup-done" aria-label="Close setup">×</button>
+      <button class="cfpt-icon-close" type="button" data-action="setup-done" aria-label="Close repository setup">×</button>
       <div class="cfpt-setup-icon" aria-hidden="true">${airplaneSvg()}</div>
-      <div class="cfpt-plan-badge">Paid plan · full GitHub automation</div>
-      <h2 id="cfpt-setup-title">Connect GitHub with a follow-along guide</h2>
-      <p class="cfpt-setup-lead">For full autonomous repository work, Chat FreePT needs ChatGPT's Developer mode and a custom GitHub MCP/plugin with the write permissions you approve. ChatGPT marks Developer mode as Elevated Risk because unverified connectors can modify data.</p>
-      <p class="cfpt-setup-lead">The guide opens Settings, enables Developer mode, then takes you to Plugins. It can open the custom app form and fill the GitHub MCP name, remote server URL, and OAuth choice automatically. You still approve ChatGPT's risk warning and GitHub OAuth yourself; afterward the guide returns here and Chat FreePT verifies the actual GitHub capabilities.</p>
+      <div class="cfpt-plan-badge">One conversation · one repository</div>
+      <h2 id="cfpt-setup-title">Choose the GitHub repository first</h2>
+      <p class="cfpt-setup-lead">Chat FreePT locks this ChatGPT conversation to one repository before planning starts. Existing repositories work immediately.</p>
+      <ol class="cfpt-setup-steps">
+        <li>For a new project, <a class="cfpt-link" href="https://github.com/new" target="_blank" rel="noreferrer noopener">create a private repository on GitHub</a>.</li>
+        <li>Return here and enter <strong>owner/repo</strong> or the root GitHub repository URL.</li>
+        <li>Describe the project and press <strong>Start planning</strong>.</li>
+        <li>ChatGPT verifies write access and CI capabilities against that exact repository. Missing access stops with <strong>NEEDS_INPUT</strong>.</li>
+      </ol>
+      <p class="cfpt-setup-footnote">Once planning starts, the repository is read-only for this conversation. Start a new ChatGPT conversation to work in another repo.</p>
       <div class="cfpt-setup-actions">
-        <button class="cfpt-btn" type="button" data-action="free-setup">Using ChatGPT Free?</button>
-        <button class="cfpt-btn" type="button" data-action="setup-done">I'll set it up myself</button>
-        <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="setup-guide">Follow along</button>
+        <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="setup-done">Continue</button>
       </div>
-    </section>`;
-}
-
-function freeSetupHtml(): string {
-  return `
-    <section class="cfpt-setup-card" role="dialog" aria-modal="true" aria-labelledby="cfpt-free-title">
-      <button class="cfpt-icon-close" type="button" data-action="setup-done" aria-label="Close setup">×</button>
-      <div class="cfpt-plan-badge">ChatGPT Free · assisted GitHub workflow</div>
-      <h2 id="cfpt-free-title">Prepare GitHub manually first</h2>
-      <p class="cfpt-setup-lead">Chat FreePT's local planning, continuation, queueing, pause, and NEEDS_INPUT flow still works on Free. The limitation is the full custom-MCP/Developer-mode path, so repository actions may need you.</p>
-      <ol class="cfpt-setup-steps">
-        <li>Create the target GitHub repository yourself before starting Chat FreePT.</li>
-        <li>Make sure <strong>main</strong> exists and create <strong>dev</strong> from the same starting commit.</li>
-        <li>In Chat FreePT choose <strong>Existing repo</strong> and enter <code>owner/repo</code>; do not rely on New private repo creation.</li>
-        <li>Enable whatever GitHub/plugin access your ChatGPT account currently exposes. If no write tool is available, keep GitHub open separately.</li>
-        <li>When ChatGPT cannot create a branch/file, Issue/label, PR, merge, or inspect CI, it should stop with <strong>NEEDS_INPUT</strong>. Perform only that requested GitHub step manually, return to the chat, and Resume.</li>
-        <li>Because those writes are manual, Free mode is assisted rather than fully autonomous; never treat a missing/zero CI result as green.</li>
-      </ol>
-      <p class="cfpt-setup-footnote">Chat FreePT does not receive your GitHub password or token. Workspace policy and ChatGPT feature availability can vary by account.</p>
-      <div class="cfpt-setup-actions">
-        <button class="cfpt-btn" type="button" data-action="setup-back">Back</button>
-        <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="setup-done">I understand</button>
-      </div>
-    </section>`;
-}
-
-function repoGuideHtml(draft: RepoGuideDraft): string {
-  const badge = `New private repo · ${draft.step} of 4`;
-  const close = `<button class="cfpt-icon-close" type="button" data-action="repo-guide-cancel" aria-label="Close new repo guide">×</button>`;
-  const back =
-    draft.step > 1
-      ? '<button class="cfpt-btn" type="button" data-action="repo-guide-back">Back</button>'
-      : '<button class="cfpt-btn" type="button" data-action="repo-guide-cancel">Cancel</button>';
-  const next =
-    draft.step < 4
-      ? '<button class="cfpt-btn cfpt-btn-primary" type="button" data-action="repo-guide-next">Next</button>'
-      : '<button class="cfpt-btn cfpt-btn-primary" type="button" data-action="repo-guide-launch">Create repo + start planning</button>';
-
-  let body: string;
-  if (draft.step === 1) {
-    body = `
-      <h2>Tell Chat FreePT what to create</h2>
-      <p class="cfpt-setup-lead">This path creates a brand-new <strong>private</strong> GitHub repository and prepares it for autonomous CI-gated work.</p>
-      ${draft.error ? `<div class="cfpt-warn">${esc(draft.error)}</div>` : ""}
-      <div class="cfpt-field">
-        <label>Project idea</label>
-        <textarea data-ref="repo-guide-idea" rows="6" placeholder="Describe what you want built…">${esc(draft.idea)}</textarea>
-      </div>
-      <div class="cfpt-field">
-        <label>Repository name <span class="cfpt-note">(optional)</span></label>
-        <input data-ref="repo-guide-name" type="text" value="${esc(draft.repoName)}" placeholder="e.g. my-project" />
-        <p class="cfpt-note">Leave this blank and ChatGPT will derive a short kebab-case name from your idea.</p>
-      </div>`;
-  } else if (draft.step === 2) {
-    body = `
-      <h2>GitHub automation is checked first</h2>
-      <p class="cfpt-setup-lead">Before creating anything, ChatGPT must verify the exact <strong>Chat FreePT GitHub MCP</strong> is active for this conversation.</p>
-      <ol class="cfpt-setup-steps">
-        <li>Repository creation must be available.</li>
-        <li>Branch, file/tree and workflow writes must be available.</li>
-        <li>Issue, label, pull-request and merge tools must be available.</li>
-        <li>Actions status and failing-job logs must be readable.</li>
-        <li>If any required capability is missing, ChatGPT stops with <strong>NEEDS_INPUT</strong> before mutating the repo.</li>
-      </ol>
-      <p class="cfpt-setup-footnote">Chat FreePT never approves ChatGPT's elevated-risk acknowledgement or GitHub OAuth for you.</p>
-      <button class="cfpt-btn" type="button" data-action="repo-guide-github">Open GitHub setup instead</button>`;
-  } else if (draft.step === 3) {
-    body = `
-      <h2>The CI pipeline is prepared automatically</h2>
-      <p class="cfpt-setup-lead">After the private repo exists, ChatGPT bootstraps the configured CI-Pipline before feature work starts.</p>
-      <ol class="cfpt-setup-steps">
-        <li>Initialize the repository and vendor the CI control-plane files.</li>
-        <li>Create <strong>main</strong> and <strong>dev</strong> from the fully seeded starting commit.</li>
-        <li>Adapt CI commands and workflow setup to the project's actual toolchain.</li>
-        <li>Create the required <code>type:*</code>, <code>state:*</code>, <code>risk:*</code> and review labels.</li>
-        <li>Create and maintain the pinned <strong>[CONTROL] Current repository state</strong> Issue.</li>
-        <li>Verify Actions actually run. Zero checks never counts as green.</li>
-      </ol>
-      <p class="cfpt-setup-footnote">You do not need to run shell commands or manually copy CI files.</p>`;
-  } else {
-    const repo = draft.repoName ? esc(draft.repoName) : "Auto-name from your project idea";
-    body = `
-      <h2>Ready to create the project</h2>
-      <div class="cfpt-field">
-        <strong>Repository</strong>
-        <p class="cfpt-note">${repo} · private</p>
-      </div>
-      <div class="cfpt-field">
-        <strong>What happens next</strong>
-        <p class="cfpt-note">ChatGPT preflights GitHub, creates the repo, installs the CI-Pipline, seeds main/dev, creates labels and the control Issue, then records the master plan before development begins.</p>
-      </div>
-      <p class="cfpt-setup-footnote">If GitHub blocks an approval or capability, ChatGPT pauses with NEEDS_INPUT instead of silently skipping setup.</p>`;
-  }
-
-  return `
-    <section class="cfpt-setup-card" data-repo-guide="true" role="dialog" aria-modal="true" aria-labelledby="cfpt-repo-guide-title">
-      ${close}
-      <div class="cfpt-setup-icon" aria-hidden="true">${airplaneSvg()}</div>
-      <div class="cfpt-plan-badge">${badge}</div>
-      <div id="cfpt-repo-guide-title">${body}</div>
-      <div class="cfpt-setup-actions">${back}${next}</div>
     </section>`;
 }
 
