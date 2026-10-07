@@ -52,6 +52,24 @@ Every plan, development, continuation, recovery, queued-user, and direct-user pr
 the repository lock. If ChatGPT reports or attempts to use a different repository, Chat FreePT
 pauses instead of silently switching.
 
+### Ultra Code sessions
+
+During planning and development, Chat FreePT uses an Ultra Code operating contract designed
+for long-running autonomous work. ChatGPT is told to reconstruct repository state from Issues,
+branches, PRs, the control Issue, and Actions before acting; resume stale work instead of
+duplicating it; make meaningful progress each turn; never idle waiting for CI; minimize
+unnecessary questions; and never weaken gates or treat zero/missing checks as green.
+
+The panel includes an ordered message queue. You can add multiple instructions while ChatGPT
+is working, inspect them, move individual items up or down, remove one item, or clear the
+queue. Messages are persisted with the conversation and sent FIFO, one per safe turn boundary,
+before a generic auto-continue. A manually typed ChatGPT composer draft is never overwritten.
+
+The **Ultra Code checkpoint** summarizes the durable session state: locked repository, phase,
+current plan item, last status marker, latest CI/PR URL, queue depth, and last lifecycle signal.
+Pause or Stop immediately cancels pending automatic sends. Resume reconciles the live network
+and DOM state before Chat FreePT sends anything else.
+
 ## Install (unpacked)
 
 ```bash
@@ -122,5 +140,6 @@ For a useful auto-continue capture:
 
 Auto-continue is capped (default 50 sends per phase, configurable in options), throttled with
 a configurable delay, and pauses immediately on ChatGPT error banners, missing status
-markers (after one nudge), rate-limit notices, or a logged-out composer. The panel always
-shows a Pause/Stop control while a run is active.
+markers (after one nudge), rate-limit notices, or a logged-out composer. Queued user messages
+take priority over generic auto-continue. The panel always shows Pause/Stop controls while a
+run is active, and either action suppresses pending automatic sends immediately.
