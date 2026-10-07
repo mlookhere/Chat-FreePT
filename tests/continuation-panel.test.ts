@@ -86,6 +86,9 @@ describe("panel continuation controls", () => {
     });
   });
 
+});
+
+describe("panel Ultra Code queue and checkpoint", () => {
   it("renders ordered queue controls and dispatches reorder/remove/clear", () => {
     const { panel: current, onEvent } = makePanel();
     const state = {
