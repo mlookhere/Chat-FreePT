@@ -1,0 +1,37 @@
+name: Temporary format PR 126
+
+on:
+  push:
+    branches:
+      - work/123-ultra-code
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out work branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: work/123-ultra-code
+          persist-credentials: true
+
+      - name: Install Node dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Format changed TypeScript
+        run: npx prettier --write src/content/ui/panel.ts tests/continuation-controls.test.ts tests/continuation-panel.test.ts
+
+      - name: Commit formatting and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/tmp-format-pr126.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/content/ui/panel.ts tests/continuation-controls.test.ts tests/continuation-panel.test.ts .github/workflows/tmp-format-pr126.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "style: format Ultra Code changes"
+          git push origin HEAD:work/123-ultra-code
