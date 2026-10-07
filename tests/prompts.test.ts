@@ -11,6 +11,8 @@ import {
   MARKER_BLOCK,
   renderTemplate,
   repositoryLockBlock,
+  ULTRA_CODE_COMPACT,
+  ULTRA_CODE_CONTRACT,
 } from "../src/common/prompts";
 import { parseMarker } from "../src/common/marker";
 import { newRunState } from "../src/common/state-machine";
@@ -78,15 +80,19 @@ describe("develop and follow-up prompts", () => {
     expect(prompt).toContain("Refs #<issue>");
     expect(prompt).toContain("self-audit");
     expect(prompt).toContain(String(Math.round(DEFAULT_SETTINGS.sendDelayMs / 1000)));
+    expect(prompt).toContain(ULTRA_CODE_CONTRACT);
+    expect(prompt).toContain("never idle waiting for CI");
   });
 
   it("continue always reinforces the locked repo", () => {
     const plain = buildContinuePrompt(DEFAULT_SETTINGS, false, REPO);
     expect(plain).toContain(repositoryLockBlock(REPO));
     expect(plain).toContain(DEFAULT_SETTINGS.continueMessage);
+    expect(plain).toContain(ULTRA_CODE_COMPACT);
 
     const refresh = buildContinuePrompt(DEFAULT_SETTINGS, true, REPO);
     expect(refresh).toContain(COMPACT_CONTRACT);
+    expect(refresh).toContain(ULTRA_CODE_CONTRACT);
     expect(refresh).toContain(REPO);
   });
 
@@ -95,6 +101,7 @@ describe("develop and follow-up prompts", () => {
     expect(buildNudgePrompt(REPO)).toContain("ONLY");
     expect(buildUserReply("use sqlite", REPO)).toContain("use sqlite");
     expect(buildUserReply("use sqlite", REPO)).toContain(REPO);
+    expect(buildUserReply("use sqlite", REPO)).toContain(ULTRA_CODE_COMPACT);
     expect(buildUserReply("use sqlite", REPO)).toContain("CHATFREEPT status block");
   });
 
@@ -104,6 +111,7 @@ describe("develop and follow-up prompts", () => {
     expect(prompt).toContain(REPO);
     expect(prompt).toContain("DEVELOPING");
     expect(prompt).toContain("Operating contract");
+    expect(prompt).toContain(ULTRA_CODE_CONTRACT);
   });
 });
 
