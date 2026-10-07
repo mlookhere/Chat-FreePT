@@ -137,7 +137,7 @@ export class Panel {
     this.host.dataset["phase"] = state.phase;
     this.launcher.dataset["state"] = visualState;
 
-    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${autoContinueEnabled(state)}|${state.queuedUserText ?? ""}|${passive}`;
+    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${state.repo ?? ""}|${autoContinueEnabled(state)}|${state.queuedUserText ?? ""}|${passive}`;
     if (viewKey !== this.lastViewKey) {
       this.lastViewKey = viewKey;
       this.stopArmed = false;
