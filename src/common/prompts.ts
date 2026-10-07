@@ -121,13 +121,10 @@ it with your GitHub tools):
    (e.g. actions/setup-node for Node projects) while keeping ./scripts/bootstrap --ci and
    ./ci/run <stage> as the entry points and keeping job names unchanged (they are
    referenced as required checks).
-5. Seed branches explicitly. For a new repo, discover the platform-created initial branch
-   after initialization (normally main), then ensure main contains the fully seeded commit
-   and create dev from that same commit. For an existing repo, inspect main/dev before
-   creating or modifying either. Do NOT require changing the repository default branch:
-   every later operation must name dev or main explicitly. If a safe default-branch
-   mutation tool is available you may set main after both branches exist, but its absence
-   is never a blocker. Do NOT configure branch protection.
+5. Inspect the locked repository's existing main/dev state before branch changes. Ensure
+   main contains the fully seeded starting commit and create dev from that same commit when
+   dev is missing. Do NOT require changing the repository default branch: every later
+   operation must name dev or main explicitly. Do NOT configure branch protection.
 6. Create the labels the plane expects (type:bug, type:feature, type:maintenance,
    type:release; state:ready, state:active, state:blocked, state:review,
    state:release-ready; risk:database, risk:security, risk:billing, risk:deployment,
@@ -178,7 +175,7 @@ control Issue.
 
 ## Pacing
 
-Work now. If you cannot finish preflight + repository setup + the recorded plan in one
+Work now. If you cannot finish preflight + CI setup + the recorded plan in one
 reply, end intermediate replies with CONTINUE and keep going when I say continue. Ask
 anything ambiguous with NEEDS_INPUT before declaring the plan ready — never after. When
 the repo is seeded, the plan is committed, and the Issues exist, end with PLAN_READY
