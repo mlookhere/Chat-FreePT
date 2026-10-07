@@ -29,7 +29,7 @@ function drive(state: RunState, events: MachineEvent[]): { state: RunState; effe
 
 function streamingRun(): RunState {
   return drive(newRunState("c1", 1000), [
-    { type: "USER_START", idea: "build it", repoMode: "new", repoName: "" },
+    { type: "USER_START", idea: "build it", repoMode: "existing", repoName: "owner/project" },
     { type: "INSERT_OK" },
     { type: "SEND_OK" },
   ]).state;
