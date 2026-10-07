@@ -10,6 +10,14 @@ const mocks = vi.hoisted(() => ({
   lastAssistantMessage: vi.fn(),
   lastMessageRole: vi.fn(),
   toolCallIndicatorVisible: vi.fn(),
+  chatStateListeners: [] as Array<(event: {
+    version: number;
+    event: "generation-start" | "generation-complete" | "generation-interrupted" | "generation-aborted" | "stream-status";
+    requestId?: string;
+    marker?: { status: string; version: number; text: string } | null;
+    status?: string;
+    reason?: string;
+  }) => void>,
   watchers: [] as Array<{
     callbacks: {
       onStart: () => void;
@@ -24,6 +32,16 @@ const mocks = vi.hoisted(() => ({
     recoverFromWake: ReturnType<typeof vi.fn>;
     isStreaming: () => boolean;
   }>,
+}));
+
+vi.mock("../src/content/chat-state", () => ({
+  subscribeChatState: (listener: (typeof mocks.chatStateListeners)[number]) => {
+    mocks.chatStateListeners.push(listener);
+    return () => {
+      const index = mocks.chatStateListeners.indexOf(listener);
+      if (index >= 0) mocks.chatStateListeners.splice(index, 1);
+    };
+  },
 }));
 
 vi.mock("../src/content/composer", () => ({
@@ -100,6 +118,10 @@ function makeController(initial = newRunState("c1", Date.now())): Controller {
   });
 }
 
+function emitChatState(event: Parameters<(typeof mocks.chatStateListeners)[number]>[0]): void {
+  for (const listener of [...mocks.chatStateListeners]) listener(event);
+}
+
 function watcher(): (typeof mocks.watchers)[number] {
   const current = mocks.watchers.at(-1);
   if (!current) throw new Error("watcher was not constructed");
@@ -123,6 +145,7 @@ beforeEach(() => {
   mocks.lastMessageRole.mockReset().mockReturnValue(null);
   mocks.toolCallIndicatorVisible.mockReset().mockReturnValue(false);
   mocks.watchers.length = 0;
+  mocks.chatStateListeners.length = 0;
 });
 
 afterEach(() => {
@@ -362,6 +385,85 @@ describe("RunController recovery and disposal", () => {
     expect(mocks.clickSend).not.toHaveBeenCalled();
     expect(controller.state.status).toBe("error");
     expect(controller.state.errorCode).toBe("composer-insert-failed");
+    controller.dispose();
+  });
+});
+
+describe("RunController network lifecycle", () => {
+  it("uses network completion with a marker even when transcript selectors see nothing", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(35_000);
+    const controller = makeController(streamingState());
+
+    emitChatState({
+      version: 1,
+      event: "generation-complete",
+      requestId: "turn-1",
+      marker: {
+        status: "CONTINUE",
+        version: 1,
+        text: "CHATFREEPT_STATUS: CONTINUE\nV: 1",
+      },
+    });
+
+    expect(controller.state.status).toBe("cooldown");
+    expect(controller.state.lastProcessedAssistantKey).toBe("network:turn-1");
+    controller.dispose();
+  });
+
+  it("pauses automation when ChatGPT stop_conversation is observed", () => {
+    const controller = makeController(streamingState());
+
+    emitChatState({
+      version: 1,
+      event: "generation-interrupted",
+      requestId: "turn-stop",
+      reason: "stop_conversation",
+    });
+
+    expect(controller.state.status).toBe("paused");
+    expect(controller.state.pauseReason).toContain("stopped");
+    controller.dispose();
+  });
+
+  it("uses COMPLETE stream_status only as a delayed missing-marker fallback", async () => {
+    vi.useFakeTimers();
+    const controller = makeController(streamingState());
+
+    emitChatState({
+      version: 1,
+      event: "stream-status",
+      requestId: "status-1",
+      status: "COMPLETE",
+    });
+    expect(controller.state.status).toBe("streaming");
+
+    await vi.advanceTimersByTimeAsync(50);
+    await flushAsync();
+
+    expect(controller.state.nudges).toBe(1);
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
+  it("ignores a later aborted clone after an explicit stop", () => {
+    const controller = makeController(streamingState());
+
+    emitChatState({
+      version: 1,
+      event: "generation-interrupted",
+      requestId: "turn-2",
+      reason: "stop_conversation",
+    });
+    emitChatState({
+      version: 1,
+      event: "generation-aborted",
+      requestId: "turn-2",
+      reason: "AbortError",
+    });
+
+    expect(controller.state.status).toBe("paused");
+    expect(controller.state.nudges).toBe(0);
     controller.dispose();
   });
 });
