@@ -109,37 +109,53 @@ function markerSummary(status: string, fields: Record<string, string>): string {
 
 function extractMarker(raw: string): MarkerPayload | null {
   const text = protocolCandidateText(raw);
+  const match = lastStatusMatch(text);
+  if (!match?.[1]) return null;
+
+  const status = match[1].toUpperCase();
+  const fields = parseMarkerFields(text.slice(match.index));
+  const payload = buildMarkerPayload(status, fields);
+  assignOptionalMarkerFields(payload, fields);
+  payload.text += `\n# ${markerSummary(status, fields)}`;
+  return payload;
+}
+
+function lastStatusMatch(text: string): RegExpExecArray | null {
   const statusRe = /CHATFREEPT_STATUS\s*:\s*(CONTINUE|NEEDS_INPUT|PLAN_READY|COMPLETE|ERROR)\b/gi;
   let match: RegExpExecArray | null = null;
   for (let next = statusRe.exec(text); next; next = statusRe.exec(text)) match = next;
-  if (!match || !match[1]) return null;
+  return match;
+}
 
-  const status = match[1].toUpperCase();
-  const tail = text.slice(match.index);
+function parseMarkerFields(tail: string): Record<string, string> {
   const fields: Record<string, string> = {};
   for (const line of tail.split(/\r?\n/).slice(1, 10)) {
     const field = /^\s*(V|PHASE|REPO|ITEM|NOTE|URL)\s*:\s*(.+?)\s*$/.exec(line);
-    if (!field || !field[1] || !field[2]) continue;
+    if (!field?.[1] || !field[2]) continue;
     fields[field[1].toUpperCase()] = field[2].replace(/\\n/g, " ").trim();
   }
+  return fields;
+}
 
-  const payload: MarkerPayload = {
+function buildMarkerPayload(status: string, fields: Record<string, string>): MarkerPayload {
+  const keys = ["V", "PHASE", "REPO", "ITEM", "NOTE", "URL"];
+  const lines = keys.flatMap((key) => (fields[key] ? [`${key}: ${fields[key]}`] : []));
+  return {
     status,
     version: Number.parseInt(fields["V"] ?? "1", 10) || 1,
-    text: [
-      `CHATFREEPT_STATUS: ${status}`,
-      ...["V", "PHASE", "REPO", "ITEM", "NOTE", "URL"]
-        .filter((key) => fields[key])
-        .map((key) => `${key}: ${fields[key]}`),
-    ].join("\n"),
+    text: [`CHATFREEPT_STATUS: ${status}`, ...lines].join("\n"),
   };
+}
+
+function assignOptionalMarkerFields(
+  payload: MarkerPayload,
+  fields: Record<string, string>,
+): void {
   if (fields["PHASE"]) payload.phase = fields["PHASE"];
   if (fields["REPO"]) payload.repo = fields["REPO"];
   if (fields["ITEM"]) payload.item = fields["ITEM"];
   if (fields["NOTE"]) payload.note = fields["NOTE"];
   if (fields["URL"]) payload.url = fields["URL"];
-  payload.text += `\n# ${markerSummary(status, fields)}`;
-  return payload;
 }
 
 async function inspectConversationResponse(response: Response, requestId: string): Promise<void> {
