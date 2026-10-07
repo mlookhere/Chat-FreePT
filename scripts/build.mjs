@@ -13,6 +13,7 @@ await build({
     background: "src/background/index.ts",
     options: "src/options/options.ts",
     "diagnostics-bridge": "src/page/diagnostics-bridge.ts",
+    "chat-state-bridge": "src/page/chat-state-bridge.ts",
   },
   outdir,
   bundle: true,
