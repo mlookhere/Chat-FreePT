@@ -63,7 +63,7 @@ unnecessary questions; and never weaken gates or treat zero/missing checks as gr
 The panel includes an ordered message queue. You can add multiple instructions while ChatGPT
 is working, inspect them, move individual items up or down, remove one item, or clear the
 queue. Messages are persisted with the conversation and sent FIFO, one per safe turn boundary,
-before a generic auto-continue. A manually typed ChatGPT composer draft is never overwritten.
+before a generic auto-continue. A manually typed ChatGPT composer draft is never overwritten. The ordered queue and checkpoint survive normal extension state persistence and conversation-ID migration.
 
 The **Ultra Code checkpoint** summarizes the durable session state: locked repository, phase,
 current plan item, last status marker, latest CI/PR URL, queue depth, and last lifecycle signal.
