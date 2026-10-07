@@ -10,11 +10,10 @@ contract, translated for ChatGPT — and then orchestrates the conversation end 
    Issues, a repo layout, and the CI stages the project needs. The extension auto-continues
    the conversation until the plan is complete, then waits for you to press
    **Start development**.
-2. **Develop.** ChatGPT — using its own **GitHub MCP connector**, not this extension — creates
-   or reuses the project repository, vendors the CI-Pipline control plane into it, and works
-   the plan: one Issue → one `work/<n>-slug` branch → one PR into `dev` → GitHub Actions
-   gates → merge on green. No protected branches, so the loop runs unattended on free
-   private repositories.
+2. **Develop.** ChatGPT — using the GitHub-capable tools available in the conversation,
+   not this extension — works only in the repository locked to that conversation, vendors
+   the CI-Pipline control plane into it, and executes the plan: one Issue →
+   one `work/<n>-slug` branch → one PR into `dev` → GitHub Actions gates → merge on green.
 3. **Orchestrate.** The extension watches the conversation through ChatGPT lifecycle signals
    plus a self-healing runtime reconciliation loop. Once a completed assistant turn is
    confirmed, it reads a machine-readable status marker from the reply:
@@ -23,29 +22,35 @@ contract, translated for ChatGPT — and then orchestrates the conversation end 
    - `PLAN_READY` — the master plan is finished; the panel offers **Start development**.
    - `COMPLETE` — everything is merged and green; a completion modal takes over the screen.
 
-The extension never talks to GitHub and never holds credentials. ChatGPT's MCP connector owns
-every repository operation; Chat FreePT is the prompt injector, conversation orchestrator,
-and UI.
+The extension never talks to GitHub and never holds GitHub credentials. ChatGPT's available
+GitHub tools own every repository operation; Chat FreePT is the prompt injector, conversation
+orchestrator, repository lock, and UI.
 
 ## Requirements
 
 - Chrome (Manifest V3).
-- A ChatGPT account/workspace where Developer Mode can use a write-capable custom MCP app.
-- The dedicated custom app must be configured as:
-  - **Name:** `Chat FreePT GitHub MCP`
-  - **Server URL:** `https://api.githubcopilot.com/mcp/x/all`
-  - **Authentication:** OAuth
+- A GitHub repository selected before planning begins.
+- ChatGPT must have GitHub-capable tools with the read/write, Issue, PR, merge, workflow,
+  and Actions access required by the CI contract.
 
-Chat FreePT's **Follow along** setup guides the ChatGPT-side flow through **Settings → Security
-and login → Developer mode → Plugins**, then returns to the originating conversation and
-selects **Developer mode** plus the exact **Chat FreePT GitHub MCP** app before setup is marked
-complete. The extension may fill safe app-configuration fields, but it never approves
-ChatGPT's elevated-risk acknowledgement and never completes or bypasses GitHub OAuth on the
-user's behalf.
+Chat FreePT does not configure ChatGPT Developer Mode, plugins, custom apps, OAuth, or other
+account-level integration settings. It checks capabilities against the exact repository
+selected for the conversation and stops with `NEEDS_INPUT` if access is missing.
 
-The injected skill performs its own GitHub capability preflight in the conversation and stops
-with `NEEDS_INPUT` if the required repository, branch/file, Issue/label, PR/merge, or Actions
-capabilities are unavailable.
+### One conversation, one repository
+
+Before the first plan starts, enter either `owner/repo` or the repository's root GitHub URL.
+For a new project, create a private repository at GitHub first, then return to Chat FreePT and
+paste its repository name or URL.
+
+The repository is normalized to `owner/repo`, persisted with the conversation, and locked.
+The lock follows a new chat from its temporary ID to ChatGPT's permanent conversation ID.
+Once locked, the field is read-only. To work in a different repository, start a new ChatGPT
+conversation.
+
+Every plan, development, continuation, recovery, queued-user, and direct-user prompt repeats
+the repository lock. If ChatGPT reports or attempts to use a different repository, Chat FreePT
+pauses instead of silently switching.
 
 ## Install (unpacked)
 
@@ -61,20 +66,7 @@ instead of rebuilding locally. Extract `chat-freept.zip` to a folder first, then
 unpacked** on that extracted folder so the browser is testing the exact CI-built package.
 
 Open a ChatGPT conversation and click the Chat FreePT airplane launcher beside the native
-composer **Plus** control. Describe your idea and start the plan.
-
-## New repository guide
-
-From an idle Chat FreePT panel, choose **New repo guide** for a four-step walkthrough. It
-collects the project idea and optional repository name, explains the exact GitHub MCP
-capabilities that are checked before mutation, shows how Chat FreePT vendors and adapts the
-CI-Pipline, and finishes with **Create repo + start planning**.
-
-The final button uses the normal Chat FreePT `USER_START` flow in new-repository mode; the
-guide does not create a parallel automation path. ChatGPT must create a private repository,
-seed `main` and `dev`, install the required labels and control Issue, and verify that Actions
-actually run before planning can be considered ready. Missing capabilities stop with
-`NEEDS_INPUT` rather than silently skipping setup.
+composer **Plus** control. Select the repository, describe your idea, and start the plan.
 
 ## Development
 
