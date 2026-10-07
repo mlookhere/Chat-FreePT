@@ -40,7 +40,9 @@ export type ErrorCode =
   | "marker-missing"
   | "cap-reached"
   | "selector-broken"
-  | "conversation-full";
+  | "conversation-full"
+  | "repo-required"
+  | "repo-mismatch";
 
 export type RepoMode = "new" | "existing";
 
@@ -57,9 +59,9 @@ export interface RunState {
   status: RunStatus;
   idea: string;
   repoMode: RepoMode;
-  /** Repo the user named (existing mode) or suggested name (new mode). May be empty. */
+  /** Legacy repository input retained for v1 persisted-run compatibility. */
   repoName: string;
-  /** owner/name once ChatGPT reports it in a marker. */
+  /** Locked owner/name for this ChatGPT conversation. Once set, it never changes in-place. */
   repo?: string;
   lastMarker?: Marker;
   planSummary?: string;
