@@ -446,7 +446,10 @@ describe("RunController network lifecycle", () => {
     controller.dispose();
   });
 
-});\n\ndescribe("RunController manual network lifecycle", () => {\n  it("resumes a manual user turn from awaiting_user using the network start signal", () => {
+});
+
+describe("RunController manual network lifecycle", () => {
+  it("resumes a manual user turn from awaiting_user using the network start signal", () => {
     let state = streamingState();
     state = reduce(
       state,
