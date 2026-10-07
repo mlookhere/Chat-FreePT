@@ -100,6 +100,48 @@ describe("StreamWatcher reply lifecycle", () => {
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores unrelated global Stop controls", async () => {
+    const onStart = vi.fn();
+    const onComplete = vi.fn();
+    watcher = new StreamWatcher({ onStart, onComplete, onStuck: vi.fn() }, SETTINGS);
+    watcher.start();
+
+    const unrelated = document.createElement("button");
+    unrelated.setAttribute("aria-label", "Stop recording");
+    document.body.appendChild(unrelated);
+    await advance(800);
+    unrelated.remove();
+    await advance(3_200);
+
+    expect(onStart).not.toHaveBeenCalled();
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it("keeps the broad Stop fallback inside the unified composer", async () => {
+    const onStart = vi.fn();
+    const onComplete = vi.fn();
+    watcher = new StreamWatcher({ onStart, onComplete, onStuck: vi.fn() }, SETTINGS);
+    watcher.start();
+
+    const form = document.createElement("form");
+    form.dataset["type"] = "unified-composer";
+    const stop = document.createElement("button");
+    stop.setAttribute("aria-label", "Stop response");
+    form.appendChild(stop);
+    main().appendChild(form);
+
+    await advance(800);
+    expect(onStart).toHaveBeenCalledTimes(1);
+
+    main().appendChild(
+      assistant("new", "Done.\nCHATFREEPT_STATUS: CONTINUE\nV: 1\nPHASE: DEVELOPING"),
+    );
+    stop.remove();
+    await advance(3_200);
+
+    expect(onComplete).toHaveBeenCalledTimes(1);
+  });
+
   it("cancels an armed expectation after a failed send", async () => {
     main().appendChild(assistant("old", "previous reply"));
     const onStart = vi.fn();
