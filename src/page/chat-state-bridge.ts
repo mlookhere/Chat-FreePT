@@ -149,7 +149,7 @@ async function inspectConversationResponse(response: Response, requestId: string
   } catch (error) {
     const name = error instanceof Error ? error.name : "";
     emit({
-      event: name === "AbortError" ? "generation-aborted" : "generation-aborted",
+      event: "generation-aborted",
       requestId,
       reason: name || "response-read-failed",
     });
