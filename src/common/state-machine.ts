@@ -421,7 +421,9 @@ function queueNextMessage(ctx: ReduceContext, event: QueueEvent): boolean {
 
 function removeQueuedMessage(ctx: ReduceContext, event: RemoveQueueEvent): boolean {
   const queue = queuedMessages(ctx.state);
-  if (event.index < 0 || event.index >= queue.length) return false;
+  if (!Number.isInteger(event.index) || event.index < 0 || event.index >= queue.length) {
+    return false;
+  }
   queue.splice(event.index, 1);
   setQueuedMessages(ctx.state, queue);
   note(ctx, "info", "Removed queued user message");
@@ -434,7 +436,13 @@ function removeQueuedMessage(ctx: ReduceContext, event: RemoveQueueEvent): boole
 function moveQueuedMessage(ctx: ReduceContext, event: MoveQueueEvent): boolean {
   const queue = queuedMessages(ctx.state);
   const target = event.index + event.direction;
-  if (event.index < 0 || event.index >= queue.length || target < 0 || target >= queue.length) {
+  if (
+    !Number.isInteger(event.index) ||
+    event.index < 0 ||
+    event.index >= queue.length ||
+    target < 0 ||
+    target >= queue.length
+  ) {
     return false;
   }
   const [message] = queue.splice(event.index, 1);
