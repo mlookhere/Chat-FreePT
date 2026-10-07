@@ -224,3 +224,5 @@ if (!window.__CFPT_CHAT_STATE_BRIDGE__) {
   window.__CFPT_CHAT_STATE_BRIDGE__ = true;
   install();
 }
+
+export {};
