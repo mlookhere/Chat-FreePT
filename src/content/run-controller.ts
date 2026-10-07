@@ -3,9 +3,9 @@ import { parseMarker } from "../common/marker";
 import {
   buildContinuePrompt,
   buildDevelopPrompt,
+  buildNudgePrompt,
   buildPlanPrompt,
   buildUserReply,
-  NUDGE_PROMPT,
 } from "../common/prompts";
 import type { Effect, MachineEvent, PromptKind } from "../common/state-machine";
 import { cooldownRemainingMs, isActive, reduce } from "../common/state-machine";
@@ -447,25 +447,25 @@ export class RunController {
   }
 
   private buildPrompt(kind: PromptKind, text?: string): string {
+    const repo = this.state.repo ?? this.state.repoName;
     switch (kind) {
       case "plan":
         return buildPlanPrompt({
           idea: this.state.idea,
-          repoMode: this.state.repoMode,
-          repoName: this.state.repoName,
+          repo,
           templateRepo: this.settings.templateRepo,
         });
       case "develop":
-        return buildDevelopPrompt(this.settings);
+        return buildDevelopPrompt(this.settings, repo);
       case "continue":
-        return buildContinuePrompt(this.settings, false);
+        return buildContinuePrompt(this.settings, false, repo);
       case "contract_refresh":
-        return buildContinuePrompt(this.settings, true);
+        return buildContinuePrompt(this.settings, true, repo);
       case "nudge":
-        return NUDGE_PROMPT;
+        return buildNudgePrompt(repo);
       case "user_text":
       case "queued_user_text":
-        return buildUserReply(text ?? "");
+        return buildUserReply(text ?? "", repo);
     }
   }
 
