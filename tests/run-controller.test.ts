@@ -438,11 +438,67 @@ describe("RunController network lifecycle", () => {
     });
     expect(controller.state.status).toBe("streaming");
 
-    await vi.advanceTimersByTimeAsync(50);
+    await vi.advanceTimersByTimeAsync(1_500);
     await flushAsync();
 
     expect(controller.state.nudges).toBe(1);
     expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
+  it("resumes a manual user turn from awaiting_user using the network start signal", () => {
+    let state = streamingState();
+    state = reduce(
+      state,
+      {
+        type: "REPLY_COMPLETE",
+        marker: { status: "NEEDS_INPUT", version: 1, raw: "NEEDS_INPUT" },
+        text: "",
+      },
+      settings,
+    ).state;
+    const controller = makeController(state);
+    expect(controller.state.status).toBe("awaiting_user");
+
+    emitChatState({ version: 1, event: "generation-start", requestId: "manual-1" });
+    expect(controller.state.status).toBe("streaming");
+
+    emitChatState({
+      version: 1,
+      event: "generation-complete",
+      requestId: "manual-1",
+      marker: {
+        status: "CONTINUE",
+        version: 1,
+        text: "CHATFREEPT_STATUS: CONTINUE\nV: 1",
+      },
+    });
+    expect(controller.state.status).toBe("cooldown");
+    controller.dispose();
+  });
+
+  it("cancels a pending cooldown when a user edits or sends a manual turn", () => {
+    vi.useFakeTimers();
+    const controller = makeController(streamingState());
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    expect(controller.state.status).toBe("cooldown");
+
+    emitChatState({ version: 1, event: "generation-start", requestId: "edit-1" });
+    expect(controller.state.status).toBe("streaming");
+    expect(controller.state.cooldownUntil).toBeUndefined();
+    controller.dispose();
+  });
+
+  it("pauses on an aborted turn even without a preceding stop request", () => {
+    const controller = makeController(streamingState());
+    emitChatState({
+      version: 1,
+      event: "generation-aborted",
+      requestId: "turn-abort",
+      reason: "AbortError",
+    });
+    expect(controller.state.status).toBe("paused");
+    expect(controller.state.nudges).toBe(0);
     controller.dispose();
   });
 
