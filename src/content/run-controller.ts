@@ -39,6 +39,7 @@ export class RunController {
   private cooldownTimer: ReturnType<typeof setTimeout> | undefined;
   private runtimeTimer: ReturnType<typeof setInterval> | undefined;
   private networkSettleTimer: ReturnType<typeof setTimeout> | undefined;
+  private networkCompletedCurrentTurn = false;
   private readonly unsubscribeChatState: () => void;
   private lastSignal: string | null = null;
   private observedAssistantKey: string | undefined;
@@ -79,7 +80,7 @@ export class RunController {
             kind: "watcher",
             detail: { event: "complete", textLength: text.length },
           });
-          this.consumeCompletedReply(text);
+          if (!this.networkCompletedCurrentTurn) this.consumeCompletedReply(text);
         },
         onStuck: () => {
           this.onDiagnosticEvent({ kind: "watcher", detail: { event: "stuck" } });
@@ -177,7 +178,13 @@ export class RunController {
     switch (event.event) {
       case "generation-start":
         this.clearNetworkSettleTimer();
-        if (this.state.status === "sending" || this.state.status === "streaming") {
+        this.networkCompletedCurrentTurn = false;
+        if (
+          this.state.status === "sending" ||
+          this.state.status === "streaming" ||
+          this.state.status === "cooldown" ||
+          this.state.status === "awaiting_user"
+        ) {
           this.dispatch({ type: "STREAM_STARTED" });
         }
         return;
@@ -194,6 +201,7 @@ export class RunController {
       case "generation-complete": {
         this.clearNetworkSettleTimer();
         if (this.state.status !== "sending" && this.state.status !== "streaming") return;
+        this.networkCompletedCurrentTurn = true;
         const markerText = event.marker?.text ?? "";
         this.dispatch({
           type: "REPLY_COMPLETE",
@@ -212,6 +220,13 @@ export class RunController {
         }
         return;
       case "generation-aborted":
+        this.clearNetworkSettleTimer();
+        if (this.state.status === "sending" || this.state.status === "streaming") {
+          this.dispatch({
+            type: "STREAM_INTERRUPTED",
+            reason: event.reason ? `Generation interrupted (${event.reason})` : "Generation interrupted",
+          });
+        }
         return;
     }
   }
@@ -258,6 +273,7 @@ export class RunController {
   }
 
   private reconcileLiveState(now: number): void {
+    if (this.networkCompletedCurrentTurn && this.state.status === "awaiting_user") return;
     const liveAssistant = lastAssistantMessage();
     this.onDiagnosticEvent({
       kind: "reconcile",
