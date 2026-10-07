@@ -32,6 +32,7 @@ export type MachineEvent =
       assistantKey?: string;
     }
   | { type: "STREAM_STUCK" }
+  | { type: "STREAM_INTERRUPTED"; reason?: string }
   | { type: "COOLDOWN_ELAPSED" }
   | { type: "PAGE_SIGNAL"; signal: PageSignal };
 
@@ -83,7 +84,7 @@ type SendEvent = Extract<
 >;
 type StreamEvent = Extract<
   MachineEvent,
-  { type: "STREAM_STARTED" | "REPLY_COMPLETE" | "STREAM_STUCK" }
+  { type: "STREAM_STARTED" | "REPLY_COMPLETE" | "STREAM_STUCK" | "STREAM_INTERRUPTED" }
 >;
 type SystemEvent = Extract<MachineEvent, { type: "COOLDOWN_ELAPSED" | "PAGE_SIGNAL" }>;
 
@@ -112,6 +113,7 @@ const STREAM_EVENTS = new Set<MachineEvent["type"]>([
   "STREAM_STARTED",
   "REPLY_COMPLETE",
   "STREAM_STUCK",
+  "STREAM_INTERRUPTED",
 ]);
 
 export function newRunState(conversationId: string, now: number): RunState {
@@ -424,6 +426,13 @@ function reduceStreamEvent(ctx: ReduceContext, event: StreamEvent): boolean {
       handleReply(ctx, event.marker, event.text);
       return true;
     }
+    case "STREAM_INTERRUPTED":
+      if (ctx.state.status === "idle" || ctx.state.status === "paused" || ctx.state.status === "complete") return false;
+      ctx.state.status = "paused";
+      ctx.state.pauseReason = event.reason ?? "Generation stopped in ChatGPT";
+      note(ctx, "info", "Generation interrupted — automation paused");
+      ctx.effects.push({ do: "badge", text: "II" });
+      return true;
     case "STREAM_STUCK":
       fail(
         ctx,
