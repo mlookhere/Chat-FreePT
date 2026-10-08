@@ -450,8 +450,7 @@ export class Panel {
     this.moveFocusOutsideNativeSurface(form);
     const children = Array.from(form.children)
       .filter(
-        (child): child is HTMLElement =>
-          child instanceof HTMLElement && child !== this.overlayHost,
+        (child): child is HTMLElement => child instanceof HTMLElement && child !== this.overlayHost,
       )
       .map((child) => this.hideNativeChild(child));
     this.nativeSurface = { form, children };
