@@ -31,10 +31,7 @@ function makePanel(onEvent = vi.fn()): { panel: Panel; onEvent: ReturnType<typeo
 
 beforeEach(() => {
   const stores = installChromeMock();
-  stores.local["cfpt:onboarding:v1"] = {
-    launcherTipSuppressed: true,
-    setupShown: true,
-  };
+  stores.local["cfpt:onboarding:v1"] = { setupShown: true };
   fixture();
 
   const original = HTMLElement.prototype.attachShadow;
