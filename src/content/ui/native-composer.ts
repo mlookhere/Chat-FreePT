@@ -133,9 +133,7 @@ export class NativeComposerHost {
 
   isGuardedPath(path: EventTarget[]): boolean {
     return (
-      this.automationDepth === 0 &&
-      this.snapshot !== null &&
-      path.includes(this.snapshot.surface)
+      this.automationDepth === 0 && this.snapshot !== null && path.includes(this.snapshot.surface)
     );
   }
 
