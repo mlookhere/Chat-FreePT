@@ -15,12 +15,21 @@ function fixture(): void {
       <div id="thread">
         <div id="thread-bottom">
           <div data-prompt-textarea-header></div>
-          <form data-type="unified-composer">
-            <div data-composer-surface="true" aria-hidden="false" style="pointer-events: auto">
-              <div class="left-controls">
-                <button data-testid="composer-plus-btn" aria-label="Add files">+</button>
+          <form data-chatgpt-composer data-composer-placement="home">
+            <div class="composer-mode-surface">
+              <div class="relative">
+                <div data-composer-body style="border-radius: 26px; pointer-events: auto">
+                  <div data-composer-footer>
+                    <div class="left-controls">
+                      <button data-testid="composer-plus-btn" aria-label="Add files">+</button>
+                    </div>
+                  </div>
+                  <div data-composer-input>
+                    <div id="prompt-textarea" class="ProseMirror" contenteditable="true"></div>
+                  </div>
+                  <button id="composer-submit-button" type="submit" aria-label="Send prompt"></button>
+                </div>
               </div>
-              <div id="prompt-textarea" class="ProseMirror" contenteditable="true"></div>
             </div>
           </form>
         </div>
@@ -71,13 +80,13 @@ function launcherButton(): HTMLButtonElement {
 }
 
 function nativeSurface(): HTMLElement {
-  const surface = document.querySelector<HTMLElement>('[data-composer-surface="true"]');
+  const surface = document.querySelector<HTMLElement>("[data-composer-body]");
   if (!surface) throw new Error("native composer surface missing");
   return surface;
 }
 
 function nativeForm(): HTMLFormElement {
-  const form = document.querySelector<HTMLFormElement>('form[data-type="unified-composer"]');
+  const form = document.querySelector<HTMLFormElement>("form[data-chatgpt-composer]");
   if (!form) throw new Error("native composer form missing");
   return form;
 }
@@ -147,12 +156,13 @@ describe("native composer launcher placement", () => {
     expect(PANEL_CSS).toContain("pointer-events: none");
   });
 
-  it("mounts the extended surface inside ChatGPT's native composer form", () => {
+  it("mounts the extended surface in the exact native composer-body slot", () => {
     onboardingDone();
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
 
-    expect(overlayHost().parentElement).toBe(nativeForm());
+    expect(overlayHost().parentElement).toBe(nativeSurface().parentElement);
+    expect(overlayHost().previousElementSibling).toBe(nativeSurface());
     expect(nativeSurface().contains(overlayHost())).toBe(false);
     expect(nativeForm().contains(overlayHost())).toBe(true);
     expect(host().dataset["cfptLauncher"]).toBe("airplane");
@@ -162,10 +172,12 @@ describe("native composer launcher placement", () => {
     onboardingDone();
     makePanel();
     const replacement = document.createElement("div");
-    replacement.setAttribute("data-composer-surface", "true");
+    replacement.setAttribute("data-composer-body", "");
     replacement.innerHTML = `
-      <div class="left-controls"><button data-testid="composer-plus-btn" aria-label="Add files">+</button></div>
-      <div id="prompt-textarea" contenteditable="true"></div>`;
+      <div data-composer-footer>
+        <div class="left-controls"><button data-testid="composer-plus-btn" aria-label="Add files">+</button></div>
+      </div>
+      <div data-composer-input><div id="prompt-textarea" contenteditable="true"></div></div>`;
     nativeSurface().replaceWith(replacement);
     await settle();
 
@@ -179,6 +191,9 @@ describe("native composer launcher placement", () => {
     expect(PANEL_CSS).toContain('data-cfpt-host="overlay"][data-expanded="true"]');
     expect(PANEL_CSS).toContain('data-cfpt-host="launcher"');
     expect(PANEL_CSS).toContain("position: relative");
+    expect(PANEL_CSS).toContain("--color-text-composer-reference");
+    expect(PANEL_CSS).toContain("--color-border-strong");
+    expect(PANEL_CSS).toContain("--cfpt-field-surface");
     expect(PANEL_CSS).not.toContain("position: fixed");
     expect(PANEL_CSS).not.toContain(".cfpt-dock");
   });
@@ -198,7 +213,9 @@ describe("composer takeover lifecycle", () => {
     expect(nativeSurface().style.position).toBe("absolute");
     expect(nativeSurface().style.opacity).toBe("0");
     expect(nativeSurface().style.pointerEvents).toBe("none");
-    expect(nativeSurface().inert ?? false).toBe(false);
+    expect(nativeSurface().style.visibility).toBe("hidden");
+    expect(nativeSurface().inert).toBe(true);
+    expect(nativeSurface().dataset["cfptNativeGuarded"]).toBe("true");
     expect(overlayHost().dataset["expanded"]).toBe("true");
     expect(host().dataset["expanded"]).toBe("true");
     expect(document.activeElement).not.toBe(nativeComposer());
@@ -207,6 +224,8 @@ describe("composer takeover lifecycle", () => {
     expect(nativeSurface().style.position).toBe("");
     expect(nativeSurface().style.opacity).toBe("");
     expect(nativeSurface().style.pointerEvents).toBe("auto");
+    expect(nativeSurface().style.visibility).toBe("");
+    expect(nativeSurface().inert).toBe(false);
     expect(nativeSurface().dataset["cfptNativeHidden"]).toBeUndefined();
     expect(nativeForm().dataset["cfptTakeover"]).toBeUndefined();
   });
@@ -294,39 +313,58 @@ describe("integrated composer interaction", () => {
     expect(host().dataset["expanded"]).toBe("false");
   });
 
-  it("keeps typing inside Chat FreePT and blocks ChatGPT document key handlers", () => {
+  it("keeps typing and paste inside Chat FreePT before ChatGPT capture handlers", () => {
     onboardingDone();
-    const nativeFocus = vi.fn();
     const documentKeydown = vi.fn();
-    nativeSurface().addEventListener("focusin", nativeFocus);
-    document.addEventListener("keydown", documentKeydown);
+    const documentPaste = vi.fn();
+    document.addEventListener("keydown", documentKeydown, true);
+    document.addEventListener("paste", documentPaste, true);
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
 
+    const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]');
     const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
-    if (!idea) throw new Error("planning input missing");
-    idea.focus();
-    idea.value = "x";
-    idea.dispatchEvent(new KeyboardEvent("keydown", { key: "x", bubbles: true, composed: true }));
-    idea.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: "x" }));
+    if (!repo || !idea) throw new Error("planning inputs missing");
 
+    repo.focus();
+    repo.value = "owner/repo";
+    repo.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, composed: true }));
+    idea.focus();
+    idea.value = "build this";
+    idea.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "b", bubbles: true, composed: true }),
+    );
+
+    expect(repo.value).toBe("owner/repo");
+    expect(idea.value).toBe("build this");
     expect(overlayShadow().activeElement).toBe(idea);
-    expect(nativeFocus).not.toHaveBeenCalled();
     expect(documentKeydown).not.toHaveBeenCalled();
-    document.removeEventListener("keydown", documentKeydown);
+    expect(documentPaste).not.toHaveBeenCalled();
+    expect(nativeSurface().inert).toBe(true);
+    document.removeEventListener("keydown", documentKeydown, true);
+    document.removeEventListener("paste", documentPaste, true);
   });
 
-  it("keeps the parked native composer available for automated focus and send", () => {
+  it("temporarily unlocks the parked native composer only for automation", () => {
     onboardingDone();
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
 
+    expect(nativeSurface().inert).toBe(true);
+    expect(nativeSurface().style.visibility).toBe("hidden");
+
+    panel.setNativeAutomationAccess(true);
+    expect(nativeSurface().inert).toBe(false);
+    expect(nativeSurface().style.visibility).toBe("");
+    expect(nativeSurface().dataset["cfptNativeHidden"]).toBe("true");
     nativeComposer().focus();
     expect(document.activeElement).toBe(nativeComposer());
-    expect(nativeSurface().inert ?? false).toBe(false);
-    expect(nativeSurface().dataset["cfptNativeHidden"]).toBe("true");
+
+    panel.setNativeAutomationAccess(false);
+    expect(nativeSurface().inert).toBe(true);
+    expect(nativeSurface().style.visibility).toBe("hidden");
   });
 });
 
