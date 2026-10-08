@@ -338,8 +338,9 @@ describe("integrated composer interaction", () => {
   it("redirects paste back to the active FreePT field even if ChatGPT steals native focus", async () => {
     onboardingDone();
     const documentPaste = vi.fn();
+    const onEvent = vi.fn();
     document.addEventListener("paste", documentPaste, true);
-    const panel = makePanel();
+    const panel = makePanel({ onEvent });
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
 
@@ -362,6 +363,11 @@ describe("integrated composer interaction", () => {
     await settle();
 
     expect(repo.value).toBe("https://github.com/owner/repo");
+    expect(onEvent).toHaveBeenCalledWith({
+      type: "USER_UPDATE_DRAFT",
+      repoName: "https://github.com/owner/repo",
+      idea: "",
+    });
     expect(syntheticInput).not.toHaveBeenCalled();
     expect(overlayShadow().activeElement).toBe(repo);
     expect(nativeComposer().textContent).toBe("");
