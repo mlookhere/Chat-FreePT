@@ -123,11 +123,8 @@ export class Panel {
     this.updateDiagnosticsDom();
   }
 
-  setNativeAutomationAccess(enabled: boolean): void {
-    this.nativeAutomationAccess = enabled;
-    if (this.host.dataset["expanded"] !== "true") return;
-    this.applyNativeTakeover();
-    if (!enabled) queueMicrotask(() => this.focusIntegratedSurface());
+  withNativeComposerAccess<T>(task: () => Promise<T>): Promise<T> {
+    return this.nativeComposer.withAutomationAccess(task);
   }
 
   toggle(force?: boolean): void {
@@ -140,11 +137,11 @@ export class Panel {
     this.launcher.setAttribute("aria-label", show ? "Close Chat FreePT" : "Open Chat FreePT");
     if (show) {
       this.mount();
-      this.applyNativeTakeover();
+      this.nativeComposer.activate();
       queueMicrotask(() => this.focusIntegratedSurface());
     } else {
       this.setupBackdropEl.classList.add("cfpt-hidden");
-      this.restoreNativeTakeover();
+      this.nativeComposer.restore();
     }
   }
 
@@ -169,26 +166,13 @@ export class Panel {
     this.disposed = true;
     this.mountObserver.disconnect();
     this.themeObserver.disconnect();
-    window.removeEventListener("resize", this.onViewportChange);
-    window.removeEventListener("scroll", this.onViewportChange, true);
     window.removeEventListener("focusin", this.guardNativeFocusCapture, true);
     for (const type of FREEPT_INPUT_EVENTS) {
       window.removeEventListener(type, this.isolateFreePtInputCapture, true);
     }
-    this.restoreNativeTakeover(false);
+    this.nativeComposer.restore(false);
     this.host.remove();
     this.overlayHost.remove();
-  }
-
-  async acknowledgeLauncherTip(suppress: boolean): Promise<void> {
-    this.launcherTipEl.classList.add("cfpt-hidden");
-    this.host.dataset["highlighted"] = "false";
-    if (suppress) this.onboarding.launcherTipSuppressed = true;
-    const tooltip = this.launcherShadow.querySelector<HTMLElement>("#cfpt-launcher-tooltip");
-    if (tooltip) tooltip.textContent = "Chat FreePT";
-    await this.persistOnboarding();
-    if (!this.onboarding.setupShown) this.showSetupModal();
-    else this.host.dataset["onboarding"] = "done";
   }
 
   async acknowledgeSetup(): Promise<void> {
@@ -196,10 +180,13 @@ export class Panel {
     if (this.host.dataset["expanded"] === "true") this.panelEl.classList.remove("cfpt-hidden");
     this.onboarding.setupShown = true;
     this.host.dataset["onboarding"] = "done";
+    this.host.dataset["highlighted"] = "false";
+    const tooltip = this.launcherShadow.querySelector<HTMLElement>("#cfpt-launcher-tooltip");
+    if (tooltip) tooltip.textContent = "Chat FreePT";
     await this.persistOnboarding();
   }
 
-  showCompletionModal(_state: RunState): void {
+  showCompletion(_state: RunState): void {
     this.toggle(true);
   }
 
@@ -250,7 +237,6 @@ export class Panel {
     shadow: ShadowRoot;
     backdrop: HTMLDivElement;
     panel: HTMLDivElement;
-    tip: HTMLDivElement;
     setup: HTMLDivElement;
   } {
     const host = document.createElement("div");
@@ -269,16 +255,10 @@ export class Panel {
     backdrop.appendChild(panel);
     shadow.appendChild(backdrop);
 
-    const tip = document.createElement("div");
-    tip.className = "cfpt-onboarding-toast cfpt-hidden";
-    tip.setAttribute("role", "status");
-    tip.innerHTML = launcherTipHtml();
-    shadow.appendChild(tip);
-
     const setup = document.createElement("div");
     setup.className = "cfpt-setup-backdrop cfpt-hidden";
     shadow.appendChild(setup);
-    return { host, shadow, backdrop, panel, tip, setup };
+    return { host, shadow, backdrop, panel, setup };
   }
 
   private bindEvents(): void {
@@ -313,8 +293,6 @@ export class Panel {
     this.setupBackdropEl.addEventListener("click", (event) => {
       if (event.target === this.setupBackdropEl) void this.acknowledgeSetup();
     });
-    window.addEventListener("resize", this.onViewportChange);
-    window.addEventListener("scroll", this.onViewportChange, true);
     window.addEventListener("focusin", this.guardNativeFocusCapture, true);
     for (const type of FREEPT_INPUT_EVENTS) {
       window.addEventListener(type, this.isolateFreePtInputCapture, true);
@@ -323,11 +301,9 @@ export class Panel {
 
   private readonly isolateFreePtInputCapture = (event: Event): void => {
     if (this.host.dataset["expanded"] !== "true") return;
-    const snapshot = this.nativeSurface;
     const path = event.composedPath();
     const fromFreePt = path.includes(this.overlayHost);
-    const fromGuardedNative =
-      snapshot !== null && !this.nativeAutomationAccess && path.includes(snapshot.surface);
+    const fromGuardedNative = this.nativeComposer.isGuardedPath(path);
     if (!fromFreePt && !fromGuardedNative) return;
 
     if (event.type === "paste" && this.redirectPaste(event)) {
@@ -370,25 +346,18 @@ export class Panel {
   }
 
   private readonly guardNativeFocusCapture = (event: FocusEvent): void => {
-    if (this.host.dataset["expanded"] !== "true" || this.nativeAutomationAccess) return;
-    const snapshot = this.nativeSurface;
-    const target = event.target;
-    if (!snapshot || !(target instanceof Node) || !snapshot.surface.contains(target)) return;
+    if (this.host.dataset["expanded"] !== "true") return;
+    if (!this.nativeComposer.isGuardedTarget(event.target)) return;
 
     event.stopImmediatePropagation();
     const field = this.activeIntegratedTextField();
     if (field) queueMicrotask(() => field.focus({ preventScroll: true }));
   };
 
-  private readonly onViewportChange = (): void => {
-    if (!this.launcherTipEl.classList.contains("cfpt-hidden")) this.positionLauncherTip();
-  };
-
   private stopComposerPropagation(event: Event): void {
     if (
       event.composedPath().includes(this.panelEl) ||
-      event.composedPath().includes(this.setupBackdropEl) ||
-      event.composedPath().includes(this.launcherTipEl)
+      event.composedPath().includes(this.setupBackdropEl)
     ) {
       event.stopPropagation();
     }
@@ -405,7 +374,8 @@ export class Panel {
 
   private onLauncherClick(): void {
     if (this.host.dataset["onboarding"] === "tip") {
-      void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
+      this.showSetupPanel();
+      return;
     }
     this.toggle();
   }
@@ -418,8 +388,7 @@ export class Panel {
       this.onboarding = { ...DEFAULT_ONBOARDING };
     }
     if (this.disposed) return;
-    if (!this.onboarding.launcherTipSuppressed) this.showLauncherTip();
-    else if (!this.onboarding.setupShown) this.showSetupModal();
+    if (!this.onboarding.setupShown) this.showLauncherTip();
     else this.host.dataset["onboarding"] = "done";
   }
 
@@ -433,16 +402,16 @@ export class Panel {
 
   private showLauncherTip(): void {
     this.setupBackdropEl.classList.add("cfpt-hidden");
-    this.launcherTipEl.classList.add("cfpt-hidden");
     this.host.dataset["onboarding"] = "tip";
     this.host.dataset["highlighted"] = "true";
     const tooltip = this.launcherShadow.querySelector<HTMLElement>("#cfpt-launcher-tooltip");
     if (tooltip) tooltip.textContent = "Chat FreePT — click to extend this composer";
   }
 
-  private showSetupModal(): void {
-    this.launcherTipEl.classList.add("cfpt-hidden");
+  private showSetupPanel(): void {
     this.host.dataset["highlighted"] = "false";
+    const tooltip = this.launcherShadow.querySelector<HTMLElement>("#cfpt-launcher-tooltip");
+    if (tooltip) tooltip.textContent = "Chat FreePT";
     this.toggle(true);
     this.panelEl.classList.add("cfpt-hidden");
     this.setupBackdropEl.innerHTML = repositorySetupHtml();
@@ -451,13 +420,6 @@ export class Panel {
     queueMicrotask(() => {
       this.setupBackdropEl.querySelector<HTMLButtonElement>("button")?.focus();
     });
-  }
-
-  private tipCheckboxChecked(): boolean {
-    const input = this.launcherTipEl.querySelector<HTMLInputElement>(
-      '[data-ref="suppress-launcher-tip"]',
-    );
-    return input?.checked === true;
   }
 
   private scheduleMount(): void {
@@ -469,286 +431,20 @@ export class Panel {
     });
   }
 
-  private nativeComposerSurface(): HTMLElement | null {
-    const surface = query("composerSurface");
-    if (surface instanceof HTMLElement && surface.tagName !== "FORM") return surface;
-    const composer = query("composer");
-    const form = composer instanceof HTMLElement ? composer.closest("form") : null;
-    const body = form?.querySelector<HTMLElement>("[data-composer-body]");
-    if (body) return body;
-    return surface instanceof HTMLElement ? surface : null;
-  }
-
-  private nativeComposerForm(): HTMLFormElement | null {
-    const surface = this.nativeComposerSurface();
-    const surfaceForm = surface?.closest("form");
-    if (surfaceForm instanceof HTMLFormElement) return surfaceForm;
-    const composer = query("composer");
-    const form = composer instanceof HTMLElement ? composer.closest("form") : null;
-    return form instanceof HTMLFormElement ? form : null;
-  }
-
   private mount(): void {
     const plus = queryGuideTarget("composerPlusButton");
     if (plus?.parentElement) {
       if (plus.nextElementSibling !== this.host) plus.insertAdjacentElement("afterend", this.host);
       this.host.dataset["fallback"] = "false";
     } else {
-      const anchor = this.nativeComposerSurface() ?? query("composerHeader");
+      const anchor = this.nativeComposer.surface() ?? query("composerHeader");
       if (anchor && this.host.parentElement !== anchor) anchor.appendChild(this.host);
       this.host.dataset["fallback"] = "true";
     }
 
-    const surface = this.nativeComposerSurface();
-    const slot = surface?.parentElement;
-    if (surface && slot) {
-      if (
-        this.overlayHost.parentElement !== slot ||
-        this.overlayHost.previousElementSibling !== surface
-      ) {
-        surface.insertAdjacentElement("afterend", this.overlayHost);
-      }
-    } else if (!this.overlayHost.isConnected) {
-      this.nativeComposerForm()?.appendChild(this.overlayHost);
-    }
-
-    this.syncOverlayTheme();
-    if (this.host.dataset["expanded"] === "true") this.applyNativeTakeover();
-    if (!this.launcherTipEl.classList.contains("cfpt-hidden")) this.positionLauncherTip();
-  }
-
-  private syncOverlayTheme(): void {
-    const surface = this.nativeComposerSurface();
-    if (!surface) return;
-    const form = this.nativeComposerForm();
-    const submit = form?.querySelector<HTMLElement>(
-      '#composer-submit-button, button[data-testid="send-button"], button[type="submit"]',
-    );
-    const styleElements = [surface, form, submit, document.body, document.documentElement].filter(
-      (element): element is HTMLElement => element instanceof HTMLElement,
-    );
-    const styles = styleElements.map((element) => getComputedStyle(element));
-    const surfaceStyle = styles[0];
-    if (!surfaceStyle) return;
-
-    const setVar = (name: string, value: string): void => {
-      if (value) this.overlayHost.style.setProperty(name, value);
-      else this.overlayHost.style.removeProperty(name);
-    };
-    const read = (...names: string[]): string => themeValue(styles, names);
-
-    setVar(
-      "--cfpt-native-surface",
-      read(
-        "--composer-surface-primary",
-        "--main-surface-primary",
-        "--color-background-composer-surface",
-        "--color-surface",
-      ) || effectiveBackground(surface),
-    );
-    setVar(
-      "--cfpt-native-text",
-      read("--text-primary", "--color-text-primary", "--color-text") || surfaceStyle.color,
-    );
-    setVar("--cfpt-native-radius", surfaceStyle.borderRadius);
-    const accent =
-      read(
-        "--theme-submit-btn-bg",
-        "--theme-submit-button-bg",
-        "--accent-primary",
-        "--accent-color",
-        "--color-accent",
-        "--color-text-composer-reference",
-        "--app-color-border-focus",
-        "--app-color-accent-blue",
-        "--accent-blue",
-      ) ||
-      (submit && !isTransparentColor(getComputedStyle(submit).backgroundColor)
-        ? getComputedStyle(submit).backgroundColor
-        : "");
-    setVar("--cfpt-accent", accent);
-    setVar(
-      "--cfpt-focus",
-      read("--app-color-border-focus", "--focus-ring", "--color-border-focus") || accent,
-    );
-    setVar(
-      "--cfpt-field-surface",
-      read(
-        "--composer-surface-secondary",
-        "--main-surface-secondary",
-        "--color-surface-secondary",
-        "--app-color-background-surface-under",
-      ),
-    );
-    setVar("--cfpt-border", read("--border-light", "--color-border", "--app-color-border"));
-    setVar(
-      "--cfpt-border-strong",
-      read("--border-medium", "--color-border-strong", "--app-color-border-heavy"),
-    );
-    setVar(
-      "--cfpt-muted",
-      read("--text-secondary", "--color-text-secondary", "--app-color-text-secondary"),
-    );
-    if (surfaceStyle.colorScheme) this.overlayHost.style.colorScheme = surfaceStyle.colorScheme;
-  }
-
-  private applyNativeTakeover(): void {
-    const surface = this.nativeComposerSurface();
-    const form = this.nativeComposerForm();
-    const parent = surface?.parentElement;
-    if (!surface || !form || !parent) return;
-
-    if (
-      this.overlayHost.parentElement !== parent ||
-      this.overlayHost.previousElementSibling !== surface
-    ) {
-      surface.insertAdjacentElement("afterend", this.overlayHost);
-    }
-
-    if (this.nativeSurface?.surface === surface) {
-      this.guardNativeSurface(!this.nativeAutomationAccess);
-      return;
-    }
-
-    this.restoreNativeTakeover(false);
-    this.moveFocusOutsideNativeSurface(surface);
-    const composerCandidate = query("composer");
-    const composer =
-      composerCandidate instanceof HTMLElement && surface.contains(composerCandidate)
-        ? composerCandidate
-        : null;
-    this.nativeSurface = {
-      form,
-      surface,
-      parent,
-      composer,
-      composerContentEditable: composer?.getAttribute("contenteditable") ?? null,
-      composerTabIndex: composer?.getAttribute("tabindex") ?? null,
-      composerAriaDisabled: composer?.getAttribute("aria-disabled") ?? null,
-      position: surface.style.position,
-      inset: surface.style.inset,
-      width: surface.style.width,
-      height: surface.style.height,
-      overflow: surface.style.overflow,
-      clipPath: surface.style.clipPath,
-      opacity: surface.style.opacity,
-      pointerEvents: surface.style.pointerEvents,
-      visibility: surface.style.visibility,
-      inert: surface.inert === true,
-      ariaHidden: surface.getAttribute("aria-hidden"),
-    };
-
-    surface.style.position = "absolute";
-    surface.style.inset = "0 auto auto 0";
-    surface.style.width = "1px";
-    surface.style.height = "1px";
-    surface.style.overflow = "hidden";
-    surface.style.clipPath = "inset(50%)";
-    surface.style.opacity = "0";
-    surface.style.pointerEvents = "none";
-    surface.dataset["cfptNativeHidden"] = "true";
-    form.dataset["cfptTakeover"] = "true";
-    this.guardNativeSurface(!this.nativeAutomationAccess);
-  }
-
-  private guardNativeSurface(guarded: boolean): void {
-    const snapshot = this.nativeSurface;
-    if (!snapshot) return;
-    snapshot.surface.inert = guarded;
-    snapshot.surface.style.visibility = guarded ? "hidden" : snapshot.visibility;
-    snapshot.surface.dataset["cfptNativeGuarded"] = String(guarded);
-    snapshot.surface.setAttribute("aria-hidden", "true");
-    this.setNativeComposerEditable(snapshot, !guarded);
-    if (guarded && snapshot.surface.contains(document.activeElement)) this.focusIntegratedSurface();
-  }
-
-  private setNativeComposerEditable(snapshot: NativeSurfaceSnapshot, editable: boolean): void {
-    const composer = snapshot.composer;
-    if (!composer) return;
-    if (!editable) {
-      composer.setAttribute("contenteditable", "false");
-      composer.setAttribute("tabindex", "-1");
-      composer.setAttribute("aria-disabled", "true");
-      return;
-    }
-    this.restoreAttribute(composer, "contenteditable", snapshot.composerContentEditable);
-    this.restoreAttribute(composer, "tabindex", snapshot.composerTabIndex);
-    this.restoreAttribute(composer, "aria-disabled", snapshot.composerAriaDisabled);
-  }
-
-  private restoreAttribute(element: HTMLElement, name: string, value: string | null): void {
-    if (value === null) element.removeAttribute(name);
-    else element.setAttribute(name, value);
-  }
-
-  private moveFocusOutsideNativeSurface(surface: HTMLElement): void {
-    const active = document.activeElement;
-    if (!(active instanceof HTMLElement) || !surface.contains(active)) return;
-    this.focusIntegratedSurface();
-    if (surface.contains(document.activeElement)) active.blur();
-  }
-
-  private focusIntegratedSurface(): void {
-    const target =
-      this.lastIntegratedField?.isConnected === true
-        ? this.lastIntegratedField
-        : (this.panelEl.querySelector<HTMLElement>(
-            '[data-ref="idea"], [data-ref="reply"], [data-ref="queue-next"], [data-ref="reponame"]',
-          ) ??
-          this.setupBackdropEl.querySelector<HTMLElement>("button, input, textarea") ??
-          this.panelEl.querySelector<HTMLElement>("button, input, textarea"));
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-      this.lastIntegratedField = target;
-    }
-    target?.focus({ preventScroll: true });
-  }
-
-  private restoreNativeTakeover(focusNative = true): void {
-    const snapshot = this.nativeSurface;
-    if (!snapshot) return;
-    snapshot.surface.style.position = snapshot.position;
-    snapshot.surface.style.inset = snapshot.inset;
-    snapshot.surface.style.width = snapshot.width;
-    snapshot.surface.style.height = snapshot.height;
-    snapshot.surface.style.overflow = snapshot.overflow;
-    snapshot.surface.style.clipPath = snapshot.clipPath;
-    snapshot.surface.style.opacity = snapshot.opacity;
-    snapshot.surface.style.pointerEvents = snapshot.pointerEvents;
-    snapshot.surface.style.visibility = snapshot.visibility;
-    snapshot.surface.inert = snapshot.inert;
-    this.setNativeComposerEditable(snapshot, true);
-    if (snapshot.ariaHidden === null) snapshot.surface.removeAttribute("aria-hidden");
-    else snapshot.surface.setAttribute("aria-hidden", snapshot.ariaHidden);
-    delete snapshot.surface.dataset["cfptNativeHidden"];
-    delete snapshot.surface.dataset["cfptNativeGuarded"];
-    delete snapshot.form.dataset["cfptTakeover"];
-    this.nativeSurface = null;
-    if (!focusNative) return;
-    queueMicrotask(() => {
-      const composer = query("composer");
-      if (composer instanceof HTMLElement) composer.focus({ preventScroll: true });
-    });
-  }
-
-  private positionLauncherTip(): void {
-    const form = this.nativeComposerForm();
-    if (!form) return;
-    const anchor = form.getBoundingClientRect();
-    const rect = this.host.getBoundingClientRect();
-    const width = Math.min(310, Math.max(220, anchor.width - 24));
-    const left = Math.min(
-      Math.max(12, rect.left - anchor.left - 10),
-      Math.max(12, anchor.width - width - 12),
-    );
-    const relativeTop = rect.top - anchor.top;
-    const top = relativeTop > 175 ? relativeTop - 165 : rect.bottom - anchor.top + 10;
-    Object.assign(this.launcherTipEl.style, {
-      width: `${Math.round(width)}px`,
-      left: `${Math.round(left)}px`,
-      right: "auto",
-      top: `${Math.round(top)}px`,
-      bottom: "auto",
-    });
+    this.nativeComposer.mountOverlay();
+    this.nativeComposer.syncTheme();
+    if (this.host.dataset["expanded"] === "true") this.nativeComposer.activate();
   }
 
   private panelShell(body: string): string {
@@ -1114,11 +810,8 @@ export class Panel {
       case "clearqueue":
         this.hooks.onEvent({ type: "USER_CLEAR_QUEUE" });
         break;
-      case "tip-continue":
-        void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
-        break;
       case "setup-open":
-        this.showSetupModal();
+        this.showSetupPanel();
         break;
       case "setup-done":
         void this.acknowledgeSetup();
@@ -1218,18 +911,6 @@ function airplaneSvg(): string {
     <svg class="cfpt-airplane" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="M12 2.5c-.8 0-1.4.6-1.4 1.4v5.3L3 13.8v2l7.6-2.4v4.2l-2.3 1.7v1.4l3.7-1.1 3.7 1.1v-1.4l-2.3-1.7v-4.2l7.6 2.4v-2l-7.6-4.6V3.9c0-.8-.6-1.4-1.4-1.4Z"></path>
     </svg>`;
-}
-
-function launcherTipHtml(): string {
-  return `
-    <button class="cfpt-icon-close" type="button" data-action="tip-continue" aria-label="Dismiss launcher tip">×</button>
-    <strong>Chat FreePT lives here</strong>
-    <p>The airplane sits beside ChatGPT's + button. Open it whenever you want Chat FreePT to take over the composer.</p>
-    <label class="cfpt-check-row">
-      <input type="checkbox" data-ref="suppress-launcher-tip" />
-      <span>Don't show this tip again</span>
-    </label>
-    <button class="cfpt-btn cfpt-btn-primary cfpt-toast-continue" type="button" data-action="tip-continue">Continue</button>`;
 }
 
 function repositorySetupHtml(): string {
