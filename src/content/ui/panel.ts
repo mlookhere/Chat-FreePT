@@ -258,7 +258,10 @@ export class Panel {
       this.stopComposerPropagation(event);
     });
     this.shadow.addEventListener("beforeinput", (event) => this.stopComposerPropagation(event));
-    this.shadow.addEventListener("input", (event) => this.stopComposerPropagation(event));
+    this.shadow.addEventListener("input", (event) => {
+      this.stopComposerPropagation(event);
+      this.persistProjectDraft(event);
+    });
     this.shadow.addEventListener("paste", (event) => this.stopComposerPropagation(event));
     this.shadow.addEventListener("compositionstart", (event) =>
       this.stopComposerPropagation(event),
@@ -328,6 +331,18 @@ export class Panel {
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
       this.lastIntegratedField = target;
     }
+  }
+
+  private persistProjectDraft(event: Event): void {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+    const ref = target.dataset["ref"];
+    if (ref !== "reponame" && ref !== "idea") return;
+    this.hooks.onEvent({
+      type: "USER_UPDATE_DRAFT",
+      repoName: this.refValue("reponame"),
+      idea: this.refValue("idea"),
+    });
   }
 
   private readonly guardNativeFocusCapture = (event: FocusEvent): void => {
