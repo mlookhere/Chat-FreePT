@@ -65,22 +65,11 @@ export class NativeComposerHost {
 
   surface(): HTMLElement | null {
     const surface = query("composerSurface");
-    if (surface instanceof HTMLElement && surface.tagName !== "FORM") return surface;
-
-    const composer = query("composer");
-    const form = composer instanceof HTMLElement ? composer.closest("form") : null;
-    return (
-      form?.querySelector<HTMLElement>("[data-composer-body]") ??
-      (surface instanceof HTMLElement ? surface : null)
-    );
+    return surface instanceof HTMLElement ? surface : null;
   }
 
   form(): HTMLFormElement | null {
-    const surfaceForm = this.surface()?.closest("form");
-    if (surfaceForm instanceof HTMLFormElement) return surfaceForm;
-
-    const composer = query("composer");
-    const form = composer instanceof HTMLElement ? composer.closest("form") : null;
+    const form = query("composerForm");
     return form instanceof HTMLFormElement ? form : null;
   }
 
@@ -191,9 +180,8 @@ export class NativeComposerHost {
     const surface = this.surface();
     if (!surface) return;
     const form = this.form();
-    const submit = form?.querySelector<HTMLElement>(
-      '#composer-submit-button, button[data-testid="send-button"], button[type="submit"]',
-    );
+    const submitCandidate = query("sendButton");
+    const submit = submitCandidate instanceof HTMLElement ? submitCandidate : null;
     const elements = [surface, form, submit, document.body, document.documentElement].filter(
       (element): element is HTMLElement => element instanceof HTMLElement,
     );
