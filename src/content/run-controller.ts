@@ -475,63 +475,76 @@ export class RunController {
   private async insertAndSend(kind: PromptKind, text?: string): Promise<void> {
     if (this.disposed) return;
 
-    // Panel guards the hidden native editor while FreePT owns the composer slot. Every
-    // selector/draft/insert/send operation must run inside this access window.
-    await this.withComposerAccess(async () => {
-  const health = await this.waitForComposerRestore();
-  if (this.disposed) return;
-  if (health.missing.length > 0) {
+    // The native composer owner guarantees its guard is restored even when this task exits early.
+    await this.withComposerAccess(() => this.performInsertAndSend(kind, text));
+  }
+
+  private async performInsertAndSend(kind: PromptKind, text?: string): Promise<void> {
+    if (!(await this.composerAvailable())) return;
+    if (!(await this.composerDraftSafe(kind))) return;
+
+    const inserted = await insertPrompt(this.buildPrompt(kind, text), () => this.disposed);
+    if (this.disposed) return;
+    if (!inserted.ok) {
+      this.dispatch({ type: "INSERT_FAIL", detail: inserted.error ?? "unknown" });
+      return;
+    }
+
+    this.dispatch({ type: "INSERT_OK" });
+    this.armExpectedReply();
+    await this.sendInsertedPrompt();
+  }
+
+  private async composerAvailable(): Promise<boolean> {
+    const health = await this.waitForComposerRestore();
+    if (this.disposed) return false;
+    if (health.missing.length === 0) return true;
+
     this.dispatch({
       type: "INSERT_FAIL",
       detail: `page structure changed (missing: ${health.missing.join(", ")})`,
     });
-    return;
+    return false;
   }
 
-  // A delayed/automatic send must never eat a draft the user is typing. Immediate user
-  // replies deliberately replace the composer; queued user text is delayed and must wait.
-  const delayed = kind !== "plan" && kind !== "develop" && kind !== "user_text";
-  if (delayed) {
-    let busyChecks = 0;
-    while (!composerIsEmpty()) {
-      busyChecks += 1;
-      if (busyChecks > COMPOSER_BUSY_RETRIES) {
+  private async composerDraftSafe(kind: PromptKind): Promise<boolean> {
+    const delayed = kind !== "plan" && kind !== "develop" && kind !== "user_text";
+    if (!delayed) return true;
+
+    for (let retry = 0; retry <= COMPOSER_BUSY_RETRIES; retry += 1) {
+      if (composerIsEmpty()) return true;
+      if (retry === COMPOSER_BUSY_RETRIES) {
         this.dispatch({ type: "INSERT_FAIL", detail: "the composer has your draft in it" });
-        return;
+        return false;
       }
       await sleep(COMPOSER_BUSY_WAIT_MS);
-      if (this.disposed) return;
+      if (this.disposed) return false;
     }
+    return false;
   }
 
-  const prompt = this.buildPrompt(kind, text);
-  const inserted = await insertPrompt(prompt, () => this.disposed);
-  if (this.disposed) return;
-  if (!inserted.ok) {
-    this.dispatch({ type: "INSERT_FAIL", detail: inserted.error ?? "unknown" });
-    return;
+  private armExpectedReply(): void {
+    const baselineAssistantKey = lastAssistantMessage()?.key;
+    this.dispatch(
+      baselineAssistantKey
+        ? { type: "REPLY_EXPECTED", baselineAssistantKey }
+        : { type: "REPLY_EXPECTED" },
+    );
+    this.watcher.expectReply();
   }
-  this.dispatch({ type: "INSERT_OK" });
 
-  const baselineAssistantKey = lastAssistantMessage()?.key;
-  this.dispatch(
-    baselineAssistantKey
-      ? { type: "REPLY_EXPECTED", baselineAssistantKey }
-      : { type: "REPLY_EXPECTED" },
-  );
-  this.watcher.expectReply();
-  const sent = await clickSend(
-    () => this.watcher.isStreaming(),
-    () => this.disposed,
-  );
-  if (this.disposed) return;
-  if (!sent.ok) {
-    this.watcher.cancelExpectedReply();
-    this.dispatch({ type: "SEND_FAIL", detail: sent.error ?? "unknown" });
-    return;
-  }
-  this.dispatch({ type: "SEND_OK" });
-    });
+  private async sendInsertedPrompt(): Promise<void> {
+    const sent = await clickSend(
+      () => this.watcher.isStreaming(),
+      () => this.disposed,
+    );
+    if (this.disposed) return;
+    if (!sent.ok) {
+      this.watcher.cancelExpectedReply();
+      this.dispatch({ type: "SEND_FAIL", detail: sent.error ?? "unknown" });
+      return;
+    }
+    this.dispatch({ type: "SEND_OK" });
   }
 
   private async waitForComposerRestore(): Promise<ReturnType<typeof healthCheck>> {
