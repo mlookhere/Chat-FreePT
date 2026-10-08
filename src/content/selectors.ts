@@ -54,13 +54,13 @@ const REGISTRY: Record<TargetId, Target> = {
   composerSurface: {
     required: false,
     candidates: [
-      { css: '[data-chatgpt-composer] [data-composer-body]' },
-      { css: 'form[data-chatgpt-composer] [data-composer-body]' },
-      { css: '[data-composer-body]' },
+      { css: "[data-chatgpt-composer] [data-composer-body]" },
+      { css: "form[data-chatgpt-composer] [data-composer-body]" },
+      { css: "[data-composer-body]" },
       { css: '#thread-bottom form[data-type="unified-composer"] [data-composer-surface="true"]' },
       { css: 'form[data-type="unified-composer"] [data-composer-surface="true"]' },
       { css: '[data-composer-surface="true"]' },
-      { css: 'form[data-chatgpt-composer]' },
+      { css: "form[data-chatgpt-composer]" },
       { css: 'form[data-type="unified-composer"]' },
     ],
   },
