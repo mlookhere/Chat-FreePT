@@ -335,7 +335,6 @@ describe("RunController native composer access", () => {
     expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
-
 });
 
 describe("RunController recovery and disposal", () => {
