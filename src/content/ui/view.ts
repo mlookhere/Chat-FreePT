@@ -205,9 +205,7 @@ function automationControlsHtml(state: RunState): string {
   const enabled = autoContinueEnabled(state);
   const queue = queuedMessages(state);
   const queueControls =
-    canQueueNext(state) || queue.length > 0
-      ? queueControlsHtml(queue, canQueueNext(state))
-      : "";
+    canQueueNext(state) || queue.length > 0 ? queueControlsHtml(queue, canQueueNext(state)) : "";
   return `
     <div class="cfpt-field">
       <label class="cfpt-check-row">
