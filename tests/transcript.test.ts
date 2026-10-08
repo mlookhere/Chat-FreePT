@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { lastAssistantMessage } from "../src/content/transcript";
+import { lastAssistantMessage, lastUserMessageText } from "../src/content/transcript";
 
 function mountAssistant(attrs: string, text: string): HTMLElement {
   document.body.innerHTML = `<main><div data-message-author-role="assistant" ${attrs}></div></main>`;
@@ -38,5 +38,18 @@ describe("assistant transcript identity", () => {
 
     el.textContent = "different reply";
     expect(lastAssistantMessage()?.key).not.toBe(first);
+  });
+});
+
+
+describe("user transcript context", () => {
+  it("reads the newest user turn through the structural fallback", () => {
+    document.body.innerHTML = `
+      <main>
+        <section data-testid="conversation-turn-1" data-turn="user">first instruction</section>
+        <section data-testid="conversation-turn-2" data-turn="assistant">working</section>
+        <section data-testid="conversation-turn-3" data-turn="user">latest user instruction</section>
+      </main>`;
+    expect(lastUserMessageText()).toBe("latest user instruction");
   });
 });
