@@ -417,8 +417,10 @@ describe("persisted conversation context", () => {
     const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
     if (!repo || !idea) throw new Error("repository setup inputs missing");
 
+    repo.focus();
     repo.value = "owner/persisted";
     repo.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    idea.focus();
     idea.value = "keep this project idea";
     idea.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
 
