@@ -162,6 +162,32 @@ describe("selector fallbacks and health", () => {
   });
 });
 
+describe("GitHub permission recovery target", () => {
+  it("finds Continue only inside nearby GitHub MCP permission copy", () => {
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<div role="dialog">
+        <p>Allow GitHub FreePT MCP access so ChatGPT can continue?</p>
+        <button>Cancel</button>
+        <button><span>Continue</span></button>
+      </div>`,
+    );
+    expect(queryGuideTarget("githubPermissionPrompt")?.getAttribute("role")).toBe("dialog");
+    expect(queryGuideTarget("githubPermissionContinueButton")?.textContent?.trim()).toBe(
+      "Continue",
+    );
+  });
+
+  it("does not match an unrelated Continue dialog", () => {
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<div role="dialog"><p>Continue deleting this item?</p><button>Continue</button></div>',
+    );
+    expect(queryGuideTarget("githubPermissionPrompt")).toBeNull();
+    expect(queryGuideTarget("githubPermissionContinueButton")).toBeNull();
+  });
+});
+
 describe("composer launcher target", () => {
   it("resolves the native composer + button", () => {
     expect(queryGuideTarget("composerPlusButton")?.dataset["testid"]).toBe("composer-plus-btn");

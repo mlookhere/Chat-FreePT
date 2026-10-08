@@ -534,7 +534,7 @@ function machineEventDetail(event: MachineEvent): Record<string, unknown> {
   if ("idea" in event) {
     return {
       idea: summarizeString(event.idea),
-      repoMode: event.repoMode,
+      repoMode: "repoMode" in event ? event.repoMode : undefined,
       repoName: summarizeString(event.repoName),
     };
   }

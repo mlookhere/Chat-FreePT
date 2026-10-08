@@ -73,6 +73,8 @@ export interface RunState {
   queuedUserText?: string;
   /** Ordered user-authored messages sent before generic automatic continuation. */
   queuedUserTexts?: string[];
+  /** Most recent human-authored project/reply/queued message for the integrated status surface. */
+  lastUserText?: string;
   /** Last accepted ChatGPT lifecycle signal used by the durable checkpoint summary. */
   lastLifecycleSignal?: string;
   /** Auto-sends used in the current phase (cap enforced per phase). */

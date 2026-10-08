@@ -295,6 +295,10 @@ export class Panel {
       event.stopImmediatePropagation();
       return;
     }
+    if (fromFreePt && event.type === "input") {
+      const field = this.activeIntegratedTextField();
+      if (field) this.persistProjectDraftField(field);
+    }
     if (event instanceof KeyboardEvent && event.key === "Escape") this.onKeyDown(event);
     event.stopImmediatePropagation();
   };
@@ -311,6 +315,7 @@ export class Panel {
     // Own the paste without emitting a composed synthetic input event. ChatGPT listens
     // globally for composer input; re-dispatching here can re-enter its event machinery.
     field.setRangeText(text, start, end, "end");
+    this.persistProjectDraftField(field);
     this.lastIntegratedField = field;
     field.focus({ preventScroll: true });
     queueMicrotask(() => field.focus({ preventScroll: true }));
@@ -328,6 +333,16 @@ export class Panel {
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
       this.lastIntegratedField = target;
     }
+  }
+
+  private persistProjectDraftField(field: HTMLInputElement | HTMLTextAreaElement): void {
+    const ref = field.dataset["ref"];
+    if (ref !== "reponame" && ref !== "idea") return;
+    this.hooks.onEvent({
+      type: "USER_UPDATE_DRAFT",
+      repoName: this.refValue("reponame"),
+      idea: this.refValue("idea"),
+    });
   }
 
   private readonly guardNativeFocusCapture = (event: FocusEvent): void => {

@@ -34,6 +34,67 @@ function toStreaming(state: RunState): RunState {
   return drive(state, [{ type: "INSERT_OK" }, { type: "SEND_OK" }]).state;
 }
 
+describe("state persistence context", () => {
+  it("persists idle repository and idea drafts before planning starts", () => {
+    const initial = newRunState("c1", 1000);
+    const result = reduce(
+      initial,
+      { type: "USER_UPDATE_DRAFT", repoName: "owner/draft", idea: "draft project" },
+      settings,
+    );
+    expect(result.state.repoName).toBe("owner/draft");
+    expect(result.state.idea).toBe("draft project");
+    expect(result.effects).toEqual([]);
+  });
+
+  it("tracks the latest human-authored message as queued messages are sent", () => {
+    let state = start();
+    expect(state.lastUserText).toBe("build a thing");
+    state = reduce(
+      state,
+      { type: "USER_QUEUE_NEXT", text: "run the release checks" },
+      settings,
+    ).state;
+    state = toStreaming(state);
+    state = reduce(
+      state,
+      { type: "REPLY_COMPLETE", marker: marker("CONTINUE"), text: "" },
+      settings,
+    ).state;
+    state = reduce(state, { type: "COOLDOWN_ELAPSED" }, settings).state;
+    expect(state.lastUserText).toBe("run the release checks");
+  });
+
+  it("resumes when ChatGPT starts generating after an interruption", () => {
+    const interrupted = reduce(
+      toStreaming(start()),
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    ).state;
+    const resumed = reduce(interrupted, { type: "STREAM_STARTED" }, settings);
+    expect(resumed.state.status).toBe("streaming");
+    expect(resumed.state.lastLifecycleSignal).toBe("generation-start");
+    expect(resumed.state.pauseReason).toBeUndefined();
+  });
+
+  it("recovers only an interrupted permission flow", () => {
+    const interrupted = reduce(
+      toStreaming(start()),
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    ).state;
+    const recovered = reduce(interrupted, { type: "PERMISSION_CONTINUED" }, settings);
+    expect(recovered.state.status).toBe("streaming");
+    expect(recovered.state.lastLifecycleSignal).toBe("permission-continued");
+    expect(recovered.effects).toContainEqual({ do: "reconcile" });
+
+    const manuallyPaused = reduce(toStreaming(start()), { type: "USER_PAUSE" }, settings).state;
+    expect(reduce(manuallyPaused, { type: "PERMISSION_CONTINUED" }, settings).state).toBe(
+      manuallyPaused,
+    );
+  });
+});
+
 describe("state machine continuation lifecycle", () => {
   it("USER_START enters planning and requests the plan prompt", () => {
     const initial = newRunState("c1", 1000);

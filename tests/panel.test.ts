@@ -338,8 +338,9 @@ describe("integrated composer interaction", () => {
   it("redirects paste back to the active FreePT field even if ChatGPT steals native focus", async () => {
     onboardingDone();
     const documentPaste = vi.fn();
+    const onEvent = vi.fn();
     document.addEventListener("paste", documentPaste, true);
-    const panel = makePanel();
+    const panel = makePanel({ onEvent });
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
 
@@ -362,6 +363,11 @@ describe("integrated composer interaction", () => {
     await settle();
 
     expect(repo.value).toBe("https://github.com/owner/repo");
+    expect(onEvent).toHaveBeenCalledWith({
+      type: "USER_UPDATE_DRAFT",
+      repoName: "https://github.com/owner/repo",
+      idea: "",
+    });
     expect(syntheticInput).not.toHaveBeenCalled();
     expect(overlayShadow().activeElement).toBe(repo);
     expect(nativeComposer().textContent).toBe("");
@@ -396,6 +402,68 @@ describe("integrated composer interaction", () => {
     ).rejects.toThrow("automation failed");
     expect(nativeSurface().inert).toBe(true);
     expect(nativeComposer().getAttribute("contenteditable")).toBe("false");
+  });
+});
+
+describe("persisted conversation context", () => {
+  it("persists and restores the repository and idea draft before planning", () => {
+    onboardingDone();
+    const onEvent = vi.fn();
+    const panel = makePanel({ onEvent });
+    panel.render(newRunState("conversation-1", 1));
+    panel.toggle(true);
+
+    const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]');
+    const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
+    if (!repo || !idea) throw new Error("repository setup inputs missing");
+
+    repo.focus();
+    repo.value = "owner/persisted";
+    repo.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    idea.focus();
+    idea.value = "keep this project idea";
+    idea.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+
+    expect(onEvent).toHaveBeenLastCalledWith({
+      type: "USER_UPDATE_DRAFT",
+      repoName: "owner/persisted",
+      idea: "keep this project idea",
+    });
+
+    const restored = {
+      ...newRunState("conversation-1", 2),
+      repoName: "owner/persisted",
+      idea: "keep this project idea",
+    };
+    panel.render(restored);
+    const restoredRepo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]');
+    const restoredIdea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
+    expect(restoredRepo?.value).toBe("owner/persisted");
+    expect(restoredIdea?.value).toBe("keep this project idea");
+  });
+
+  it("shows the latest user message and the complete queued message list", () => {
+    onboardingDone();
+    const panel = makePanel();
+    panel.render({
+      ...newRunState("conversation-1", 1),
+      phase: "plan_ready",
+      status: "awaiting_user",
+      repo: "owner/project",
+      repoName: "owner/project",
+      lastUserText: "Use the existing repo and keep the current architecture.",
+      queuedUserTexts: ["first queued request", "second queued request", "third queued request"],
+    });
+    panel.toggle(true);
+
+    expect(overlayShadow().textContent).toContain("Last user message");
+    expect(overlayShadow().textContent).toContain(
+      "Use the existing repo and keep the current architecture.",
+    );
+    expect(overlayShadow().querySelectorAll('[data-ref="queue-item"]')).toHaveLength(3);
+    expect(overlayShadow().textContent).toContain("first queued request");
+    expect(overlayShadow().textContent).toContain("second queued request");
+    expect(overlayShadow().textContent).toContain("third queued request");
   });
 });
 

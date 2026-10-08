@@ -19,7 +19,8 @@ export type TargetId =
   | "pageAlert"
   | "toolIndicator";
 
-export type GuideTargetId = "composerPlusButton";
+export type GuideTargetId =
+  "composerPlusButton" | "githubPermissionPrompt" | "githubPermissionContinueButton";
 
 export interface Candidate {
   css: string;
@@ -107,6 +108,7 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: '[data-message-author-role="assistant"][data-message-id]' },
       { css: '[data-message-author-role="assistant"]' },
       { css: '[data-testid^="conversation-turn"][data-turn="assistant"] .agent-turn' },
+      { css: '[data-testid^="conversation-turn"][data-turn="assistant"]' },
     ],
   },
   userMessage: {
@@ -115,6 +117,7 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: '[data-message-author-role="user"][data-message-id]' },
       { css: '[data-message-author-role="user"]' },
       { css: '[data-testid^="conversation-turn"][data-turn="user"] .user-turn' },
+      { css: '[data-testid^="conversation-turn"][data-turn="user"]' },
     ],
   },
   conversationRoot: {
@@ -241,10 +244,41 @@ export function healthCheck(root: ParentNode = document): HealthReport {
 /** Optional, text-aware targets used only by the composer integration and opt-in setup guide. */
 const GUIDE_RESOLVERS: Record<GuideTargetId, () => HTMLElement | null> = {
   composerPlusButton,
+  githubPermissionPrompt,
+  githubPermissionContinueButton,
 };
 
 export function queryGuideTarget(id: GuideTargetId): HTMLElement | null {
   return GUIDE_RESOLVERS[id]();
+}
+
+function githubPermissionPrompt(): HTMLElement | null {
+  return githubPermissionGate()?.prompt ?? null;
+}
+
+function githubPermissionContinueButton(): HTMLElement | null {
+  return githubPermissionGate()?.button ?? null;
+}
+
+function githubPermissionGate(): { prompt: HTMLElement; button: HTMLElement } | null {
+  const buttons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'));
+  for (const button of buttons) {
+    if (!isVisible(button) || !/^continue$/i.test((button.textContent ?? "").trim())) continue;
+    let current: HTMLElement | null = button.parentElement;
+    for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement) {
+      const text = (current.innerText ?? current.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (/github/i.test(text) && /(freept|mcp|connector|allow|permission|access)/i.test(text)) {
+        return { prompt: current, button };
+      }
+    }
+  }
+  return null;
+}
+
+function isVisible(element: HTMLElement): boolean {
+  if (element.hidden || element.getAttribute("aria-hidden") === "true") return false;
+  const style = getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
 }
 
 function composerPlusButton(): HTMLElement | null {

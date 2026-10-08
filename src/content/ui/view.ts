@@ -71,6 +71,9 @@ export function panelViewKey(state: RunState, passive: boolean): string {
     state.status,
     state.pauseReason ?? "",
     state.repo ?? "",
+    state.repoName,
+    state.idea,
+    state.lastUserText ?? "",
     state.lastMarker?.status ?? "",
     state.lastMarker?.item ?? "",
     state.lastMarker?.url ?? "",
@@ -104,12 +107,19 @@ export function renderPanelBody(state: RunState, passive: boolean): string {
     : "";
 
   if (passive) {
-    return warning + passiveHtml(state) + checkpointHtml(state) + diagnosticsHtml();
+    return (
+      warning +
+      passiveHtml(state) +
+      conversationContextHtml(state) +
+      checkpointHtml(state) +
+      diagnosticsHtml()
+    );
   }
   return (
     warning +
     automationControlsHtml(state) +
     statusBodyHtml(state) +
+    conversationContextHtml(state) +
     checkpointHtml(state) +
     diagnosticsHtml()
   );
@@ -194,7 +204,8 @@ function statusBodyHtml(state: RunState): string {
 function automationControlsHtml(state: RunState): string {
   const enabled = autoContinueEnabled(state);
   const queue = queuedMessages(state);
-  const queueControls = canQueueNext(state) ? queueControlsHtml(queue) : "";
+  const queueControls =
+    canQueueNext(state) || queue.length > 0 ? queueControlsHtml(queue, canQueueNext(state)) : "";
   return `
     <div class="cfpt-field">
       <label class="cfpt-check-row">
@@ -241,7 +252,7 @@ function diagnosticsHtml(): string {
   `;
 }
 
-function queueControlsHtml(queue: string[]): string {
+function queueControlsHtml(queue: string[], allowAdd: boolean): string {
   const items = queue
     .map(
       (message, index) => `
@@ -258,7 +269,7 @@ function queueControlsHtml(queue: string[]): string {
       <strong>Message queue · ${queue.length}</strong>
       <p class="cfpt-note">Queued messages run FIFO before generic auto-continue.</p>
       ${items}
-      <button class="cfpt-btn" type="button" data-action="showqueue">Add queued message</button>
+      ${allowAdd ? '<button class="cfpt-btn" type="button" data-action="showqueue">Add queued message</button>' : ""}
       ${queue.length > 0 ? '<button class="cfpt-btn" type="button" data-action="clearqueue">Clear all</button>' : ""}
       <div class="cfpt-field cfpt-hidden" data-ref="queue-editor">
         <label>Queued user message</label>
@@ -267,6 +278,17 @@ function queueControlsHtml(queue: string[]): string {
         <button class="cfpt-btn" type="button" data-action="hidequeue">Cancel</button>
       </div>
     </div>`;
+}
+
+function conversationContextHtml(state: RunState): string {
+  const lastUser = state.lastUserText?.trim();
+  if (!lastUser) return "";
+  return `
+    <div class="cfpt-field" data-ref="conversation-context">
+      <strong>Last user message</strong>
+      <p class="cfpt-message-preview">${esc(lastUser)}</p>
+    </div>
+  `;
 }
 
 function passiveHtml(state: RunState): string {
@@ -288,7 +310,7 @@ function ideaFormHtml(state: RunState): string {
        </div>`
     : `<div class="cfpt-field">
          <label>GitHub repository</label>
-         <input type="text" data-ref="reponame" value="" placeholder="owner/repo or https://github.com/owner/repo" />
+         <input type="text" data-ref="reponame" value="${esc(state.repoName)}" placeholder="owner/repo or https://github.com/owner/repo" />
          <p class="cfpt-note">Need a new one? <a class="cfpt-link" href="https://github.com/new" target="_blank" rel="noreferrer noopener">Create a private repository on GitHub</a>, then paste its owner/name or URL here.</p>
          <p class="cfpt-note" data-ref="repo-error"></p>
        </div>`;
