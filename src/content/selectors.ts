@@ -19,7 +19,10 @@ export type TargetId =
   | "pageAlert"
   | "toolIndicator";
 
-export type GuideTargetId = "composerPlusButton";
+export type GuideTargetId =
+  | "composerPlusButton"
+  | "githubPermissionPrompt"
+  | "githubPermissionContinueButton";
 
 export interface Candidate {
   css: string;
@@ -107,6 +110,7 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: '[data-message-author-role="assistant"][data-message-id]' },
       { css: '[data-message-author-role="assistant"]' },
       { css: '[data-testid^="conversation-turn"][data-turn="assistant"] .agent-turn' },
+      { css: '[data-testid^="conversation-turn"][data-turn="assistant"]' },
     ],
   },
   userMessage: {
@@ -115,6 +119,7 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: '[data-message-author-role="user"][data-message-id]' },
       { css: '[data-message-author-role="user"]' },
       { css: '[data-testid^="conversation-turn"][data-turn="user"] .user-turn' },
+      { css: '[data-testid^="conversation-turn"][data-turn="user"]' },
     ],
   },
   conversationRoot: {
@@ -241,10 +246,44 @@ export function healthCheck(root: ParentNode = document): HealthReport {
 /** Optional, text-aware targets used only by the composer integration and opt-in setup guide. */
 const GUIDE_RESOLVERS: Record<GuideTargetId, () => HTMLElement | null> = {
   composerPlusButton,
+  githubPermissionPrompt,
+  githubPermissionContinueButton,
 };
 
 export function queryGuideTarget(id: GuideTargetId): HTMLElement | null {
   return GUIDE_RESOLVERS[id]();
+}
+
+function githubPermissionPrompt(): HTMLElement | null {
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      '[role="dialog"], [role="alertdialog"], [role="alert"], [data-state="open"]',
+    ),
+  );
+  return (
+    candidates.find((element) => {
+      if (!isVisible(element)) return false;
+      const text = (element.innerText ?? element.textContent ?? "").replace(/\s+/g, " ").trim();
+      return (
+        /github/i.test(text) &&
+        /(freept|mcp|connector|allow|permission|access)/i.test(text) &&
+        /continue/i.test(text)
+      );
+    }) ?? null
+  );
+}
+
+function githubPermissionContinueButton(): HTMLElement | null {
+  const prompt = githubPermissionPrompt();
+  if (!prompt) return null;
+  const button = textElement(/^continue$/i, prompt, 'button, [role="button"]');
+  return button instanceof HTMLElement && isVisible(button) ? button : null;
+}
+
+function isVisible(element: HTMLElement): boolean {
+  if (element.hidden || element.getAttribute("aria-hidden") === "true") return false;
+  const style = getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
 }
 
 function composerPlusButton(): HTMLElement | null {
