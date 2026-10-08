@@ -6,8 +6,10 @@ const mocks = vi.hoisted(() => ({
   clickSend: vi.fn(),
   composerIsEmpty: vi.fn(),
   healthCheck: vi.fn(),
+  queryGuideTarget: vi.fn(),
   scanPageSignals: vi.fn(),
   lastAssistantMessage: vi.fn(),
+  lastUserMessageText: vi.fn(),
   lastMessageRole: vi.fn(),
   toolCallIndicatorVisible: vi.fn(),
   chatStateListeners: [] as Array<
@@ -59,6 +61,7 @@ vi.mock("../src/content/composer", () => ({
 
 vi.mock("../src/content/selectors", () => ({
   healthCheck: mocks.healthCheck,
+  queryGuideTarget: mocks.queryGuideTarget,
 }));
 
 vi.mock("../src/content/page-signals", () => ({
@@ -68,6 +71,7 @@ vi.mock("../src/content/page-signals", () => ({
 vi.mock("../src/content/transcript", () => ({
   lastAssistantMessage: mocks.lastAssistantMessage,
   lastMessageRole: mocks.lastMessageRole,
+  lastUserMessageText: mocks.lastUserMessageText,
   toolCallIndicatorVisible: mocks.toolCallIndicatorVisible,
 }));
 
@@ -172,8 +176,10 @@ beforeEach(() => {
   mocks.clickSend.mockReset().mockResolvedValue({ ok: true });
   mocks.composerIsEmpty.mockReset().mockReturnValue(true);
   mocks.healthCheck.mockReset().mockReturnValue({ missing: [], degraded: [] });
+  mocks.queryGuideTarget.mockReset().mockReturnValue(null);
   mocks.scanPageSignals.mockReset().mockReturnValue(null);
   mocks.lastAssistantMessage.mockReset().mockReturnValue(null);
+  mocks.lastUserMessageText.mockReset().mockReturnValue(null);
   mocks.lastMessageRole.mockReset().mockReturnValue(null);
   mocks.toolCallIndicatorVisible.mockReset().mockReturnValue(false);
   mocks.watchers.length = 0;
@@ -501,6 +507,71 @@ describe("RunController network lifecycle", () => {
     expect(controller.state.status).toBe("cooldown");
     expect(controller.state.lastProcessedAssistantKey).toBe("network:turn-1");
     expect(controller.state.lastLifecycleSignal).toBe("generation-complete");
+    controller.dispose();
+  });
+
+  it("clicks the GitHub MCP permission Continue control instead of pausing", () => {
+    const controller = makeController(streamingState());
+    const button = document.createElement("button");
+    button.textContent = "Continue";
+    const click = vi.spyOn(button, "click");
+    mocks.queryGuideTarget.mockImplementation((id: string) =>
+      id === "githubPermissionContinueButton" ? button : null,
+    );
+
+    emitChatState({
+      version: 1,
+      event: "generation-interrupted",
+      requestId: "turn-permission",
+      reason: "stop_conversation",
+    });
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(controller.state.status).toBe("streaming");
+    expect(controller.state.lastLifecycleSignal).toBe("permission-continued");
+    controller.dispose();
+  });
+
+  it("recovers a just-paused interruption when the GitHub permission control appears later", async () => {
+    vi.useFakeTimers();
+    const controller = makeController(streamingState());
+
+    emitChatState({
+      version: 1,
+      event: "generation-interrupted",
+      requestId: "turn-permission-delayed",
+      reason: "stop_conversation",
+    });
+    expect(controller.state.status).toBe("paused");
+
+    const button = document.createElement("button");
+    button.textContent = "Continue";
+    const click = vi.spyOn(button, "click");
+    mocks.queryGuideTarget.mockImplementation((id: string) =>
+      id === "githubPermissionContinueButton" ? button : null,
+    );
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(controller.state.status).toBe("streaming");
+    expect(controller.state.lastLifecycleSignal).toBe("permission-continued");
+    controller.dispose();
+  });
+
+  it("captures the latest visible user message when manually resuming", () => {
+    let state = streamingState();
+    state = reduce(
+      state,
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    ).state;
+    const controller = makeController(state);
+    mocks.lastUserMessageText.mockReturnValue("I approved the GitHub prompt");
+
+    controller.dispatch({ type: "USER_RESUME" });
+
+    expect(controller.state.lastUserText).toBe("I approved the GitHub prompt");
+    expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
 
