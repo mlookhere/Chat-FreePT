@@ -46,10 +46,10 @@ export class RunController {
   private observedAssistantText = "";
   private observedAssistantSince = 0;
   private readonly onChange: (state: RunState) => void;
-  private readonly onShowModal: () => void;
+  private readonly onShowCompletion: () => void;
   private readonly onContextInvalidated: () => void;
   private readonly onDiagnosticEvent: (event: ControllerDiagnosticEvent) => void;
-  private readonly onComposerAccessChange: (enabled: boolean) => void;
+  private readonly withComposerAccess: (task: () => Promise<void>) => Promise<void>;
   private disposed = false;
 
   constructor(
@@ -57,19 +57,19 @@ export class RunController {
     settings: Settings,
     hooks: {
       onChange: (state: RunState) => void;
-      onShowModal: () => void;
+      onShowCompletion: () => void;
       onContextInvalidated?: () => void;
       onDiagnosticEvent?: (event: ControllerDiagnosticEvent) => void;
-      onComposerAccessChange?: (enabled: boolean) => void;
+      withComposerAccess?: (task: () => Promise<void>) => Promise<void>;
     },
   ) {
     this.state = initial;
     this.settings = settings;
     this.onChange = hooks.onChange;
-    this.onShowModal = hooks.onShowModal;
+    this.onShowCompletion = hooks.onShowCompletion;
     this.onContextInvalidated = hooks.onContextInvalidated ?? (() => undefined);
     this.onDiagnosticEvent = hooks.onDiagnosticEvent ?? (() => undefined);
-    this.onComposerAccessChange = hooks.onComposerAccessChange ?? (() => undefined);
+    this.withComposerAccess = hooks.withComposerAccess ?? (async (task) => task());
     this.watcher = new StreamWatcher(
       {
         onStart: () => {
@@ -411,8 +411,8 @@ export class RunController {
         this.sendToBackground({ type: "badge", text: effect.text });
         break;
       }
-      case "showModal": {
-        this.onShowModal();
+      case "showCompletion": {
+        this.onShowCompletion();
         break;
       }
       case "reconcile": {
@@ -477,64 +477,61 @@ export class RunController {
 
     // Panel guards the hidden native editor while FreePT owns the composer slot. Every
     // selector/draft/insert/send operation must run inside this access window.
-    this.onComposerAccessChange(true);
-    try {
-      const health = await this.waitForComposerRestore();
-      if (this.disposed) return;
-      if (health.missing.length > 0) {
-        this.dispatch({
-          type: "INSERT_FAIL",
-          detail: `page structure changed (missing: ${health.missing.join(", ")})`,
-        });
+    await this.withComposerAccess(async () => {
+  const health = await this.waitForComposerRestore();
+  if (this.disposed) return;
+  if (health.missing.length > 0) {
+    this.dispatch({
+      type: "INSERT_FAIL",
+      detail: `page structure changed (missing: ${health.missing.join(", ")})`,
+    });
+    return;
+  }
+
+  // A delayed/automatic send must never eat a draft the user is typing. Immediate user
+  // replies deliberately replace the composer; queued user text is delayed and must wait.
+  const delayed = kind !== "plan" && kind !== "develop" && kind !== "user_text";
+  if (delayed) {
+    let busyChecks = 0;
+    while (!composerIsEmpty()) {
+      busyChecks += 1;
+      if (busyChecks > COMPOSER_BUSY_RETRIES) {
+        this.dispatch({ type: "INSERT_FAIL", detail: "the composer has your draft in it" });
         return;
       }
-
-      // A delayed/automatic send must never eat a draft the user is typing. Immediate user
-      // replies deliberately replace the composer; queued user text is delayed and must wait.
-      const delayed = kind !== "plan" && kind !== "develop" && kind !== "user_text";
-      if (delayed) {
-        let busyChecks = 0;
-        while (!composerIsEmpty()) {
-          busyChecks += 1;
-          if (busyChecks > COMPOSER_BUSY_RETRIES) {
-            this.dispatch({ type: "INSERT_FAIL", detail: "the composer has your draft in it" });
-            return;
-          }
-          await sleep(COMPOSER_BUSY_WAIT_MS);
-          if (this.disposed) return;
-        }
-      }
-
-      const prompt = this.buildPrompt(kind, text);
-      const inserted = await insertPrompt(prompt, () => this.disposed);
+      await sleep(COMPOSER_BUSY_WAIT_MS);
       if (this.disposed) return;
-      if (!inserted.ok) {
-        this.dispatch({ type: "INSERT_FAIL", detail: inserted.error ?? "unknown" });
-        return;
-      }
-      this.dispatch({ type: "INSERT_OK" });
-
-      const baselineAssistantKey = lastAssistantMessage()?.key;
-      this.dispatch(
-        baselineAssistantKey
-          ? { type: "REPLY_EXPECTED", baselineAssistantKey }
-          : { type: "REPLY_EXPECTED" },
-      );
-      this.watcher.expectReply();
-      const sent = await clickSend(
-        () => this.watcher.isStreaming(),
-        () => this.disposed,
-      );
-      if (this.disposed) return;
-      if (!sent.ok) {
-        this.watcher.cancelExpectedReply();
-        this.dispatch({ type: "SEND_FAIL", detail: sent.error ?? "unknown" });
-        return;
-      }
-      this.dispatch({ type: "SEND_OK" });
-    } finally {
-      this.onComposerAccessChange(false);
     }
+  }
+
+  const prompt = this.buildPrompt(kind, text);
+  const inserted = await insertPrompt(prompt, () => this.disposed);
+  if (this.disposed) return;
+  if (!inserted.ok) {
+    this.dispatch({ type: "INSERT_FAIL", detail: inserted.error ?? "unknown" });
+    return;
+  }
+  this.dispatch({ type: "INSERT_OK" });
+
+  const baselineAssistantKey = lastAssistantMessage()?.key;
+  this.dispatch(
+    baselineAssistantKey
+      ? { type: "REPLY_EXPECTED", baselineAssistantKey }
+      : { type: "REPLY_EXPECTED" },
+  );
+  this.watcher.expectReply();
+  const sent = await clickSend(
+    () => this.watcher.isStreaming(),
+    () => this.disposed,
+  );
+  if (this.disposed) return;
+  if (!sent.ok) {
+    this.watcher.cancelExpectedReply();
+    this.dispatch({ type: "SEND_FAIL", detail: sent.error ?? "unknown" });
+    return;
+  }
+  this.dispatch({ type: "SEND_OK" });
+    });
   }
 
   private async waitForComposerRestore(): Promise<ReturnType<typeof healthCheck>> {
