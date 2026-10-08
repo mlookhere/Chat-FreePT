@@ -255,29 +255,29 @@ export function queryGuideTarget(id: GuideTargetId): HTMLElement | null {
 }
 
 function githubPermissionPrompt(): HTMLElement | null {
-  const candidates = Array.from(
-    document.querySelectorAll<HTMLElement>(
-      '[role="dialog"], [role="alertdialog"], [role="alert"], [data-state="open"]',
-    ),
-  );
-  return (
-    candidates.find((element) => {
-      if (!isVisible(element)) return false;
-      const text = (element.innerText ?? element.textContent ?? "").replace(/\s+/g, " ").trim();
-      return (
-        /github/i.test(text) &&
-        /(freept|mcp|connector|allow|permission|access)/i.test(text) &&
-        /continue/i.test(text)
-      );
-    }) ?? null
-  );
+  return githubPermissionGate()?.prompt ?? null;
 }
 
 function githubPermissionContinueButton(): HTMLElement | null {
-  const prompt = githubPermissionPrompt();
-  if (!prompt) return null;
-  const button = textElement(/^continue$/i, prompt, 'button, [role="button"]');
-  return button instanceof HTMLElement && isVisible(button) ? button : null;
+  return githubPermissionGate()?.button ?? null;
+}
+
+function githubPermissionGate(): { prompt: HTMLElement; button: HTMLElement } | null {
+  const buttons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'));
+  for (const button of buttons) {
+    if (!isVisible(button) || !/^continue$/i.test((button.textContent ?? "").trim())) continue;
+    let current: HTMLElement | null = button.parentElement;
+    for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement) {
+      const text = (current.innerText ?? current.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (
+        /github/i.test(text) &&
+        /(freept|mcp|connector|allow|permission|access)/i.test(text)
+      ) {
+        return { prompt: current, button };
+      }
+    }
+  }
+  return null;
 }
 
 function isVisible(element: HTMLElement): boolean {
