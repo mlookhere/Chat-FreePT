@@ -399,7 +399,7 @@ describe("integrated composer interaction", () => {
   });
 });
 
-describe("conversation repository setup", () => {
+describe("persisted conversation context", () => {
   it("persists and restores the repository and idea draft before planning", () => {
     onboardingDone();
     const onEvent = vi.fn();
@@ -458,6 +458,9 @@ describe("conversation repository setup", () => {
     expect(overlayShadow().textContent).toContain("third queued request");
   });
 
+});
+
+describe("conversation repository setup", () => {
   it("normalizes a repository URL and starts planning against that exact repo", () => {
     onboardingDone();
     const onEvent = vi.fn();
