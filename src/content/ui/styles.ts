@@ -275,6 +275,12 @@ button, textarea, input, select { font: inherit; }
   font-size: 12px;
   margin-bottom: 10px;
 }
+.cfpt-message-preview {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--cfpt-text);
+}
 .cfpt-note { color: var(--cfpt-muted); font-size: 12px; margin: 8px 0; }
 .cfpt-field { margin-bottom: 12px; }
 .cfpt-field label {
