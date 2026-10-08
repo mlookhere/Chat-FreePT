@@ -101,9 +101,7 @@ describe("core selector resolution", () => {
 describe("selector fallbacks and health", () => {
   it("falls back down the composer, header, and surface candidates", () => {
     document.querySelector("[data-composer-input]")?.removeAttribute("data-composer-input");
-    document
-      .querySelector("form[data-chatgpt-composer]")
-      ?.removeAttribute("data-chatgpt-composer");
+    document.querySelector("form[data-chatgpt-composer]")?.removeAttribute("data-chatgpt-composer");
     document.getElementById("prompt-textarea")?.removeAttribute("id");
     document.getElementById("thread-bottom")?.removeAttribute("id");
     expect(resolve("composer")?.candidateIndex).toBeGreaterThan(0);
@@ -147,9 +145,7 @@ describe("selector fallbacks and health", () => {
 
   it("reports degradation when the primary composer drifts", () => {
     document.querySelector("[data-composer-input]")?.removeAttribute("data-composer-input");
-    document
-      .querySelector("form[data-chatgpt-composer]")
-      ?.removeAttribute("data-chatgpt-composer");
+    document.querySelector("form[data-chatgpt-composer]")?.removeAttribute("data-chatgpt-composer");
     document.getElementById("prompt-textarea")?.removeAttribute("id");
     expect(healthCheck().degraded.some((item) => item.id === "composer")).toBe(true);
   });
