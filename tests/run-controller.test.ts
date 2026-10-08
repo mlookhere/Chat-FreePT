@@ -121,7 +121,7 @@ function streamingState(): ReturnType<typeof newRunState> {
 function makeController(initial = newRunState("c1", Date.now())): Controller {
   return new RunController(initial, settings, {
     onChange: vi.fn(),
-    onShowModal: vi.fn(),
+    onShowCompletion: vi.fn(),
   });
 }
 
@@ -140,8 +140,15 @@ function makeAccessTraceController(trace: string[]): Controller {
   });
   return new RunController(newRunState("c1", Date.now()), settings, {
     onChange: vi.fn(),
-    onShowModal: vi.fn(),
-    onComposerAccessChange: (enabled) => trace.push(enabled ? "unlock" : "lock"),
+    onShowCompletion: vi.fn(),
+    withComposerAccess: async (task) => {
+      trace.push("unlock");
+      try {
+        await task();
+      } finally {
+        trace.push("lock");
+      }
+    },
   });
 }
 
