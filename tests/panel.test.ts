@@ -351,6 +351,8 @@ describe("integrated composer interaction", () => {
 
     repo.focus();
     expect(overlayShadow().activeElement).toBe(repo);
+    const syntheticInput = vi.fn();
+    repo.addEventListener("input", syntheticInput);
 
     nativeComposer().focus();
     const paste = new Event("paste", { bubbles: true, composed: true, cancelable: true });
@@ -363,6 +365,7 @@ describe("integrated composer interaction", () => {
     await settle();
 
     expect(repo.value).toBe("https://github.com/owner/repo");
+    expect(syntheticInput).not.toHaveBeenCalled();
     expect(overlayShadow().activeElement).toBe(repo);
     expect(nativeComposer().textContent).toBe("");
     expect(nativeComposer().getAttribute("contenteditable")).toBe("false");
