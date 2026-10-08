@@ -18,6 +18,13 @@ export function lastAssistantMessage(): AssistantMessage | null {
   return { el, text, key: assistantMessageKey(el, text) };
 }
 
+export function lastUserMessageText(): string | null {
+  const el = queryLast("userMessage") as HTMLElement | null;
+  if (!el) return null;
+  const text = (el.innerText ?? el.textContent ?? "").trim();
+  return text || null;
+}
+
 export function lastMessageRole(): "assistant" | "user" | null {
   const assistant = queryLast("assistantMessage") as HTMLElement | null;
   const user = queryLast("userMessage") as HTMLElement | null;
