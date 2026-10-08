@@ -11,9 +11,10 @@ import type {
 
 export type MachineEvent =
   | { type: "USER_START"; idea: string; repoMode: RepoMode; repoName: string }
+  | { type: "USER_UPDATE_DRAFT"; idea: string; repoName: string }
   | { type: "USER_START_DEVELOPMENT" }
   | { type: "USER_PAUSE" }
-  | { type: "USER_RESUME" }
+  | { type: "USER_RESUME"; lastUserText?: string }
   | { type: "USER_STOP" }
   | { type: "USER_NEW_PROJECT" }
   | { type: "USER_REPLY"; text: string }
@@ -36,6 +37,7 @@ export type MachineEvent =
     }
   | { type: "STREAM_STUCK" }
   | { type: "STREAM_INTERRUPTED"; reason?: string }
+  | { type: "PERMISSION_CONTINUED" }
   | { type: "COOLDOWN_ELAPSED" }
   | { type: "PAGE_SIGNAL"; signal: PageSignal };
 
@@ -67,6 +69,7 @@ type UserEvent = Extract<
   {
     type:
       | "USER_START"
+      | "USER_UPDATE_DRAFT"
       | "USER_START_DEVELOPMENT"
       | "USER_PAUSE"
       | "USER_RESUME"
@@ -99,6 +102,7 @@ const MAX_LOG = 200;
 const ACTIVE_STATUSES = new Set(["inserting", "sending", "streaming", "cooldown"]);
 const USER_EVENTS = new Set<MachineEvent["type"]>([
   "USER_START",
+  "USER_UPDATE_DRAFT",
   "USER_START_DEVELOPMENT",
   "USER_PAUSE",
   "USER_RESUME",
@@ -123,6 +127,7 @@ const STREAM_EVENTS = new Set<MachineEvent["type"]>([
   "REPLY_COMPLETE",
   "STREAM_STUCK",
   "STREAM_INTERRUPTED",
+  "PERMISSION_CONTINUED",
 ]);
 
 export function newRunState(conversationId: string, now: number): RunState {
@@ -234,12 +239,14 @@ function reduceUserEvent(ctx: ReduceContext, event: UserEvent): boolean {
   switch (event.type) {
     case "USER_START":
       return startRun(ctx, event);
+    case "USER_UPDATE_DRAFT":
+      return updateDraft(ctx, event.idea, event.repoName);
     case "USER_START_DEVELOPMENT":
       return startDevelopment(ctx);
     case "USER_PAUSE":
       return pauseRun(ctx);
     case "USER_RESUME":
-      return resumeRun(ctx);
+      return resumeRun(ctx, event.lastUserText);
     case "USER_STOP":
       return stopRun(ctx);
     case "USER_NEW_PROJECT":
@@ -257,6 +264,14 @@ function reduceUserEvent(ctx: ReduceContext, event: UserEvent): boolean {
     case "USER_CLEAR_QUEUE":
       return clearQueuedMessages(ctx);
   }
+}
+
+function updateDraft(ctx: ReduceContext, idea: string, repoName: string): boolean {
+  if (ctx.state.status !== "idle") return false;
+  if (ctx.state.idea === idea && ctx.state.repoName === repoName) return false;
+  ctx.state.idea = idea;
+  if (!ctx.state.repo) ctx.state.repoName = repoName;
+  return true;
 }
 
 function startRun(ctx: ReduceContext, event: StartEvent): boolean {
@@ -287,6 +302,7 @@ function startRun(ctx: ReduceContext, event: StartEvent): boolean {
   state.phase = "planning";
   state.status = "inserting";
   state.idea = event.idea;
+  state.lastUserText = event.idea.trim();
   state.autoSends = 0;
   state.nudges = 0;
   state.repliesSinceContract = 0;
@@ -326,11 +342,13 @@ function pauseRun(ctx: ReduceContext): boolean {
   return true;
 }
 
-function resumeRun(ctx: ReduceContext): boolean {
+function resumeRun(ctx: ReduceContext, lastUserText?: string): boolean {
   const state = ctx.state;
   if (state.status !== "paused" && state.status !== "error" && state.status !== "awaiting_user") {
     return false;
   }
+  const text = lastUserText?.trim();
+  if (text) state.lastUserText = text;
   state.status = "streaming";
   delete state.pauseReason;
   delete state.errorCode;
@@ -372,6 +390,7 @@ function sendUserReply(ctx: ReduceContext, event: UserReplyEvent): boolean {
   }
   state.status = "inserting";
   state.nudges = 0;
+  state.lastUserText = event.text.trim();
   delete state.pauseReason;
   delete state.errorCode;
   note(ctx, "send", "Sending your reply");
@@ -498,6 +517,8 @@ function reduceStreamEvent(ctx: ReduceContext, event: StreamEvent): boolean {
       return completeReply(ctx, event);
     case "STREAM_INTERRUPTED":
       return interruptStream(ctx, event.reason);
+    case "PERMISSION_CONTINUED":
+      return continuePermission(ctx);
     case "STREAM_STUCK":
       ctx.state.lastLifecycleSignal = "stream-stuck";
       fail(
@@ -547,6 +568,27 @@ function isDuplicateReply(state: RunState, assistantKey: string | undefined): bo
   );
 }
 
+function continuePermission(ctx: ReduceContext): boolean {
+  const state = ctx.state;
+  if (state.phase !== "planning" && state.phase !== "developing" && state.phase !== "plan_ready") {
+    return false;
+  }
+  if (
+    state.status !== "sending" &&
+    state.status !== "streaming" &&
+    !(state.status === "paused" && state.lastLifecycleSignal === "generation-interrupted")
+  ) {
+    return false;
+  }
+  state.status = "streaming";
+  state.lastLifecycleSignal = "permission-continued";
+  delete state.pauseReason;
+  delete state.errorCode;
+  note(ctx, "info", "GitHub permission continued automatically");
+  ctx.effects.push({ do: "reconcile" }, { do: "badge", text: "RUN" });
+  return true;
+}
+
 function interruptStream(ctx: ReduceContext, reason?: string): boolean {
   if (
     ctx.state.status === "idle" ||
@@ -584,6 +626,7 @@ function finishCooldown(ctx: ReduceContext): boolean {
   if (nextQueued) {
     setQueuedMessages(state, queue);
     state.status = "inserting";
+    state.lastUserText = nextQueued;
     note(ctx, "send", "Sending queued user message");
     ctx.effects.push({ do: "insertAndSend", kind: "queued_user_text", text: nextQueued });
     return true;
