@@ -314,6 +314,7 @@ export class Panel {
     // Own the paste without emitting a composed synthetic input event. ChatGPT listens
     // globally for composer input; re-dispatching here can re-enter its event machinery.
     field.setRangeText(text, start, end, "end");
+    this.persistProjectDraftField(field);
     this.lastIntegratedField = field;
     field.focus({ preventScroll: true });
     queueMicrotask(() => field.focus({ preventScroll: true }));
@@ -335,8 +336,13 @@ export class Panel {
 
   private persistProjectDraft(event: Event): void {
     const target = event.target;
-    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
-    const ref = target.dataset["ref"];
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      this.persistProjectDraftField(target);
+    }
+  }
+
+  private persistProjectDraftField(field: HTMLInputElement | HTMLTextAreaElement): void {
+    const ref = field.dataset["ref"];
     if (ref !== "reponame" && ref !== "idea") return;
     this.hooks.onEvent({
       type: "USER_UPDATE_DRAFT",
