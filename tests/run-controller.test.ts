@@ -561,6 +561,28 @@ describe("RunController permission recovery", () => {
     controller.dispose();
   });
 
+  it("recovers when the user handles the permission prompt before the heartbeat", () => {
+    const controller = makeController(streamingState());
+
+    emitChatState({
+      version: 1,
+      event: "generation-interrupted",
+      requestId: "turn-user-permission",
+      reason: "stop_conversation",
+    });
+    expect(controller.state.status).toBe("paused");
+
+    emitChatState({
+      version: 1,
+      event: "generation-start",
+      requestId: "turn-user-permission-resumed",
+    });
+
+    expect(controller.state.status).toBe("streaming");
+    expect(controller.state.lastLifecycleSignal).toBe("generation-start");
+    controller.dispose();
+  });
+
   it("captures the latest visible user message when manually resuming", () => {
     let state = streamingState();
     state = reduce(
