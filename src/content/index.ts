@@ -199,6 +199,7 @@ async function initConversation(convId: string): Promise<void> {
 }
 
 async function leaveConversationForUtilityPage(mode: ChatGptPageMode): Promise<void> {
+  panel?.toggle(false);
   stopTakeoverRetry();
   controller?.dispose();
   controller = null;
