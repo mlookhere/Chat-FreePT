@@ -400,6 +400,64 @@ describe("integrated composer interaction", () => {
 });
 
 describe("conversation repository setup", () => {
+  it("persists and restores the repository and idea draft before planning", () => {
+    onboardingDone();
+    const onEvent = vi.fn();
+    const panel = makePanel({ onEvent });
+    panel.render(newRunState("conversation-1", 1));
+    panel.toggle(true);
+
+    const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]');
+    const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
+    if (!repo || !idea) throw new Error("repository setup inputs missing");
+
+    repo.value = "owner/persisted";
+    repo.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    idea.value = "keep this project idea";
+    idea.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+
+    expect(onEvent).toHaveBeenLastCalledWith({
+      type: "USER_UPDATE_DRAFT",
+      repoName: "owner/persisted",
+      idea: "keep this project idea",
+    });
+
+    const restored = {
+      ...newRunState("conversation-1", 2),
+      repoName: "owner/persisted",
+      idea: "keep this project idea",
+    };
+    panel.render(restored);
+    const restoredRepo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]');
+    const restoredIdea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
+    expect(restoredRepo?.value).toBe("owner/persisted");
+    expect(restoredIdea?.value).toBe("keep this project idea");
+  });
+
+  it("shows the latest user message and the complete queued message list", () => {
+    onboardingDone();
+    const panel = makePanel();
+    panel.render({
+      ...newRunState("conversation-1", 1),
+      phase: "plan_ready",
+      status: "awaiting_user",
+      repo: "owner/project",
+      repoName: "owner/project",
+      lastUserText: "Use the existing repo and keep the current architecture.",
+      queuedUserTexts: ["first queued request", "second queued request", "third queued request"],
+    });
+    panel.toggle(true);
+
+    expect(overlayShadow().textContent).toContain("Last user message");
+    expect(overlayShadow().textContent).toContain(
+      "Use the existing repo and keep the current architecture.",
+    );
+    expect(overlayShadow().querySelectorAll('[data-ref="queue-item"]')).toHaveLength(3);
+    expect(overlayShadow().textContent).toContain("first queued request");
+    expect(overlayShadow().textContent).toContain("second queued request");
+    expect(overlayShadow().textContent).toContain("third queued request");
+  });
+
   it("normalizes a repository URL and starts planning against that exact repo", () => {
     onboardingDone();
     const onEvent = vi.fn();
