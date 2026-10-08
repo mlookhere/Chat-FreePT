@@ -510,7 +510,7 @@ export class RunController {
         return;
       }
       this.dispatch({ type: "INSERT_OK" });
-  
+
       const baselineAssistantKey = lastAssistantMessage()?.key;
       this.dispatch(
         baselineAssistantKey
@@ -529,8 +529,6 @@ export class RunController {
         return;
       }
       this.dispatch({ type: "SEND_OK" });
-    }
-  
     } finally {
       this.onComposerAccessChange(false);
     }
