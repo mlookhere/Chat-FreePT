@@ -29,13 +29,20 @@ export const PANEL_CSS = `
   bottom: 8px;
 }
 :host([data-cfpt-host="overlay"]) {
-  position: fixed;
+  position: absolute;
   inset: 0;
-  width: 100vw;
-  height: 100vh;
   display: block;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
-  z-index: 2147483646;
+  z-index: 20;
+}
+:host([data-cfpt-host="overlay"][data-expanded="true"]) {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: auto;
+  pointer-events: auto;
 }
 * {
   box-sizing: border-box;
@@ -114,27 +121,25 @@ button, textarea, input, select { font: inherit; }
   }
 }
 .cfpt-takeover-backdrop {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
+  position: relative;
+  width: 100%;
+  height: auto;
   pointer-events: auto;
-  background: rgba(0, 0, 0, 0.045);
+  background: transparent;
 }
 .cfpt-panel {
-  position: fixed;
+  position: relative;
+  width: 100%;
   pointer-events: auto;
   display: flex;
   flex-direction: column;
-  min-height: min(360px, 56vh);
-  max-height: min(72vh, 720px);
+  min-height: min(350px, 56vh);
+  max-height: min(68vh, 680px);
   color: var(--cfpt-text);
-  background: color-mix(in srgb, var(--cfpt-surface) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--cfpt-border) 80%, transparent);
-  border-radius: 28px;
-  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(22px) saturate(1.12);
-  -webkit-backdrop-filter: blur(22px) saturate(1.12);
+  background: var(--cfpt-surface);
+  border: 1px solid color-mix(in srgb, var(--cfpt-border) 88%, transparent);
+  border-radius: 26px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
   overflow: hidden;
 }
 .cfpt-panel-head {
@@ -242,7 +247,7 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--cfpt-accent
 .cfpt-link { color: #3b82f6; text-decoration: none; }
 .cfpt-link:hover { text-decoration: underline; }
 .cfpt-onboarding-toast {
-  position: fixed;
+  position: absolute;
   pointer-events: auto;
   width: min(310px, calc(100vw - 24px));
   padding: 14px;
@@ -278,29 +283,25 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--cfpt-accent
 .cfpt-check-row input { margin: 0; }
 .cfpt-toast-continue { margin-top: 10px; margin-right: 0; }
 .cfpt-setup-backdrop {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 18px;
+  position: relative;
+  width: 100%;
+  height: auto;
+  display: block;
+  padding: 0;
   pointer-events: auto;
-  background: rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: transparent;
 }
 .cfpt-setup-card {
   position: relative;
-  width: min(510px, calc(100vw - 28px));
-  max-height: min(82vh, 680px);
+  width: 100%;
+  max-height: min(68vh, 680px);
   overflow-y: auto;
   padding: 21px;
   border: 1px solid var(--cfpt-border);
   border-radius: 20px;
   background: color-mix(in srgb, var(--cfpt-surface) 94%, transparent);
   color: var(--cfpt-text);
-  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
 }
 .cfpt-setup-icon {
   width: 36px;
@@ -343,7 +344,7 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--cfpt-accent
 @media (max-width: 620px) {
   :host([data-cfpt-host="launcher"]) { width: 34px; height: 34px; }
   .cfpt-launcher { width: 34px; height: 34px; }
-  .cfpt-panel { min-height: min(330px, 62vh); border-radius: 22px; }
+  .cfpt-panel { min-height: min(320px, 58vh); border-radius: 22px; }
   .cfpt-body { padding: 13px 14px 15px; }
   .cfpt-btn { padding-inline: 11px; }
   .cfpt-setup-card { padding: 17px; }
