@@ -163,9 +163,7 @@ function watcher(): (typeof mocks.watchers)[number] {
 }
 
 async function flushAsync(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
 }
 
 beforeEach(() => {
