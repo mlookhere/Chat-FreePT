@@ -531,9 +531,17 @@ function reduceStreamEvent(ctx: ReduceContext, event: StreamEvent): boolean {
 }
 
 function startStream(ctx: ReduceContext): boolean {
-  if (ctx.state.status === "paused" || ctx.state.status === "idle") return false;
+  if (ctx.state.status === "idle") return false;
+  if (
+    ctx.state.status === "paused" &&
+    ctx.state.lastLifecycleSignal !== "generation-interrupted"
+  ) {
+    return false;
+  }
   ctx.state.status = "streaming";
   ctx.state.lastLifecycleSignal = "generation-start";
+  delete ctx.state.pauseReason;
+  delete ctx.state.errorCode;
   return true;
 }
 
