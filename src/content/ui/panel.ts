@@ -544,7 +544,7 @@ export class Panel {
       opacity: surface.style.opacity,
       pointerEvents: surface.style.pointerEvents,
       visibility: surface.style.visibility,
-      inert: surface.inert,
+      inert: surface.inert === true,
       ariaHidden: surface.getAttribute("aria-hidden"),
     };
 
