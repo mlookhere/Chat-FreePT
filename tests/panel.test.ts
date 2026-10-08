@@ -463,7 +463,6 @@ describe("persisted conversation context", () => {
     expect(overlayShadow().textContent).toContain("second queued request");
     expect(overlayShadow().textContent).toContain("third queued request");
   });
-
 });
 
 describe("conversation repository setup", () => {
