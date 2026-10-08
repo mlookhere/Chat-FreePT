@@ -314,6 +314,46 @@ describe("RunController recovery and disposal", () => {
     controller.dispose();
   });
 
+  it("unlocks the native composer before health checks and re-locks after send", async () => {
+    const access: boolean[] = [];
+    mocks.healthCheck.mockImplementation(() => {
+      expect(access.at(-1)).toBe(true);
+      return { missing: [], degraded: [] };
+    });
+    mocks.composerIsEmpty.mockImplementation(() => {
+      expect(access.at(-1)).toBe(true);
+      return true;
+    });
+    mocks.insertPrompt.mockImplementation(async () => {
+      expect(access.at(-1)).toBe(true);
+      return { ok: true, strategy: "test" };
+    });
+    mocks.clickSend.mockImplementation(async () => {
+      expect(access.at(-1)).toBe(true);
+      return { ok: true };
+    });
+    const controller = new RunController(newRunState("c1", Date.now()), settings, {
+      onChange: vi.fn(),
+      onShowModal: vi.fn(),
+      onComposerAccessChange: (enabled) => access.push(enabled),
+    });
+
+    controller.dispatch({
+      type: "USER_START",
+      idea: "build it",
+      repoMode: "existing",
+      repoName: "owner/project",
+    });
+    await flushAsync();
+
+    expect(access).toEqual([true, false]);
+    expect(mocks.healthCheck).toHaveBeenCalledTimes(1);
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.status).toBe("streaming");
+    controller.dispose();
+  });
+
   it("waits for a temporarily missing composer to restore before failing the send", async () => {
     vi.useFakeTimers();
     mocks.healthCheck
