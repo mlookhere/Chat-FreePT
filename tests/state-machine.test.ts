@@ -50,7 +50,11 @@ describe("state persistence context", () => {
   it("tracks the latest human-authored message as queued messages are sent", () => {
     let state = start();
     expect(state.lastUserText).toBe("build a thing");
-    state = reduce(state, { type: "USER_QUEUE_NEXT", text: "run the release checks" }, settings).state;
+    state = reduce(
+      state,
+      { type: "USER_QUEUE_NEXT", text: "run the release checks" },
+      settings,
+    ).state;
     state = toStreaming(state);
     state = reduce(
       state,
