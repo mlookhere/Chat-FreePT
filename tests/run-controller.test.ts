@@ -125,6 +125,26 @@ function makeController(initial = newRunState("c1", Date.now())): Controller {
   });
 }
 
+function makeAccessTraceController(trace: string[]): Controller {
+  mocks.healthCheck.mockImplementation(() => {
+    trace.push("health");
+    return { missing: [], degraded: [] };
+  });
+  mocks.insertPrompt.mockImplementation(async () => {
+    trace.push("insert");
+    return { ok: true, strategy: "test" };
+  });
+  mocks.clickSend.mockImplementation(async () => {
+    trace.push("send");
+    return { ok: true };
+  });
+  return new RunController(newRunState("c1", Date.now()), settings, {
+    onChange: vi.fn(),
+    onShowModal: vi.fn(),
+    onComposerAccessChange: (enabled) => trace.push(enabled ? "unlock" : "lock"),
+  });
+}
+
 function emitChatState(event: Parameters<(typeof mocks.chatStateListeners)[number]>[0]): void {
   for (const listener of [...mocks.chatStateListeners]) listener(event);
 }
@@ -294,6 +314,25 @@ describe("RunController queued draft safety", () => {
     expect(mocks.clickSend).not.toHaveBeenCalled();
     expect(controller.state.status).toBe("error");
     expect(controller.state.errorCode).toBe("composer-insert-failed");
+    controller.dispose();
+  });
+});
+
+describe("RunController native composer access", () => {
+  it("unlocks the native composer before health checks and re-locks after send", async () => {
+    const trace: string[] = [];
+    const controller = makeAccessTraceController(trace);
+
+    controller.dispatch({
+      type: "USER_START",
+      idea: "build it",
+      repoMode: "existing",
+      repoName: "owner/project",
+    });
+    await flushAsync();
+
+    expect(trace).toEqual(["unlock", "health", "insert", "send", "lock"]);
+    expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
 });

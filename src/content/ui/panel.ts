@@ -404,15 +404,9 @@ export class Panel {
     const text = clipboardData.getData("text/plain");
     const start = field.selectionStart ?? field.value.length;
     const end = field.selectionEnd ?? start;
+    // Own the paste without emitting a composed synthetic input event. ChatGPT listens
+    // globally for composer input; re-dispatching here can re-enter its event machinery.
     field.setRangeText(text, start, end, "end");
-    field.dispatchEvent(
-      new InputEvent("input", {
-        bubbles: true,
-        composed: true,
-        data: text,
-        inputType: "insertFromPaste",
-      }),
-    );
     this.lastIntegratedField = field;
     field.focus({ preventScroll: true });
     queueMicrotask(() => field.focus({ preventScroll: true }));

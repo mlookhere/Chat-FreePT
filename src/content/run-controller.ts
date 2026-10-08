@@ -474,34 +474,37 @@ export class RunController {
 
   private async insertAndSend(kind: PromptKind, text?: string): Promise<void> {
     if (this.disposed) return;
-    const health = await this.waitForComposerRestore();
-    if (this.disposed) return;
-    if (health.missing.length > 0) {
-      this.dispatch({
-        type: "INSERT_FAIL",
-        detail: `page structure changed (missing: ${health.missing.join(", ")})`,
-      });
-      return;
-    }
 
-    // A delayed/automatic send must never eat a draft the user is typing. Immediate user
-    // replies deliberately replace the composer; queued user text is delayed and must wait.
-    const delayed = kind !== "plan" && kind !== "develop" && kind !== "user_text";
-    if (delayed) {
-      let busyChecks = 0;
-      while (!composerIsEmpty()) {
-        busyChecks += 1;
-        if (busyChecks > COMPOSER_BUSY_RETRIES) {
-          this.dispatch({ type: "INSERT_FAIL", detail: "the composer has your draft in it" });
-          return;
-        }
-        await sleep(COMPOSER_BUSY_WAIT_MS);
-        if (this.disposed) return;
-      }
-    }
-
+    // Panel guards the hidden native editor while FreePT owns the composer slot. Every
+    // selector/draft/insert/send operation must run inside this access window.
     this.onComposerAccessChange(true);
     try {
+      const health = await this.waitForComposerRestore();
+      if (this.disposed) return;
+      if (health.missing.length > 0) {
+        this.dispatch({
+          type: "INSERT_FAIL",
+          detail: `page structure changed (missing: ${health.missing.join(", ")})`,
+        });
+        return;
+      }
+
+      // A delayed/automatic send must never eat a draft the user is typing. Immediate user
+      // replies deliberately replace the composer; queued user text is delayed and must wait.
+      const delayed = kind !== "plan" && kind !== "develop" && kind !== "user_text";
+      if (delayed) {
+        let busyChecks = 0;
+        while (!composerIsEmpty()) {
+          busyChecks += 1;
+          if (busyChecks > COMPOSER_BUSY_RETRIES) {
+            this.dispatch({ type: "INSERT_FAIL", detail: "the composer has your draft in it" });
+            return;
+          }
+          await sleep(COMPOSER_BUSY_WAIT_MS);
+          if (this.disposed) return;
+        }
+      }
+
       const prompt = this.buildPrompt(kind, text);
       const inserted = await insertPrompt(prompt, () => this.disposed);
       if (this.disposed) return;
