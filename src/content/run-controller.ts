@@ -191,7 +191,9 @@ export class RunController {
           this.state.status === "sending" ||
           this.state.status === "streaming" ||
           this.state.status === "cooldown" ||
-          this.state.status === "awaiting_user"
+          this.state.status === "awaiting_user" ||
+          (this.state.status === "paused" &&
+            this.state.lastLifecycleSignal === "generation-interrupted")
         ) {
           this.dispatch({ type: "STREAM_STARTED" });
         }
@@ -287,7 +289,8 @@ export class RunController {
     if (!recoverablePhase || !recoverableStatus) return false;
 
     const button = queryGuideTarget("githubPermissionContinueButton");
-    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+    if (!button || button.getAttribute("aria-disabled") === "true") return false;
+    if (button instanceof HTMLButtonElement && button.disabled) return false;
 
     this.onDiagnosticEvent({
       kind: "permission-recovery",
