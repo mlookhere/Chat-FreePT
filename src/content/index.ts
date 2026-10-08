@@ -109,6 +109,7 @@ function startController(state: RunState, settings: Settings): void {
     },
     onContextInvalidated: () => contextGuard.invalidate(),
     onDiagnosticEvent: (event) => diagnostics.recordControllerEvent(event),
+    onComposerAccessChange: (enabled) => panel?.setNativeAutomationAccess(enabled),
   });
   controller = ctl;
   panel?.render(state);

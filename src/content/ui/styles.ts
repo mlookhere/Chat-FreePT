@@ -2,12 +2,37 @@ export const PANEL_CSS = `
 :host {
   all: initial;
   color-scheme: inherit;
-  --cfpt-surface: var(--cfpt-native-surface, var(--composer-surface-primary, Canvas));
-  --cfpt-text: var(--cfpt-native-text, var(--token-text-primary, CanvasText));
-  --cfpt-muted: var(--token-text-secondary, color-mix(in srgb, CanvasText 65%, transparent));
-  --cfpt-border: var(--token-border-light, color-mix(in srgb, CanvasText 16%, transparent));
-  --cfpt-hover: var(--token-surface-hover, color-mix(in srgb, CanvasText 8%, transparent));
-  --cfpt-accent: var(--theme-submit-btn-bg, #10a37f);
+  --cfpt-surface: var(
+    --cfpt-native-surface,
+    var(--color-background-composer-surface, var(--color-surface, Canvas))
+  );
+  --cfpt-text: var(--cfpt-native-text, var(--color-text-primary, var(--color-text, CanvasText)));
+  --cfpt-muted: var(
+    --color-text-secondary,
+    color-mix(in srgb, var(--cfpt-text) 62%, transparent)
+  );
+  --cfpt-border: var(
+    --color-border,
+    color-mix(in srgb, var(--cfpt-text) 18%, transparent)
+  );
+  --cfpt-border-strong: var(
+    --color-border-strong,
+    color-mix(in srgb, var(--cfpt-text) 28%, transparent)
+  );
+  --cfpt-field-surface: var(
+    --color-surface-secondary,
+    color-mix(in srgb, var(--cfpt-surface) 82%, var(--cfpt-text) 18%)
+  );
+  --cfpt-hover: var(
+    --color-surface-tertiary,
+    color-mix(in srgb, var(--cfpt-text) 9%, transparent)
+  );
+  --cfpt-accent: var(
+    --color-text-composer-reference,
+    var(--app-color-border-focus, var(--app-color-accent-blue, var(--accent-blue, #3a83f7)))
+  );
+  --cfpt-focus: var(--app-color-border-focus, var(--cfpt-accent));
+  --cfpt-radius: var(--cfpt-native-radius, var(--composer-border-radius, 26px));
 }
 :host([data-cfpt-host="launcher"]) {
   position: relative;
@@ -40,8 +65,10 @@ export const PANEL_CSS = `
 :host([data-cfpt-host="overlay"][data-expanded="true"]) {
   position: relative;
   inset: auto;
+  display: block;
   width: 100%;
   height: auto;
+  min-width: 0;
   pointer-events: auto;
 }
 * {
@@ -130,16 +157,18 @@ button, textarea, input, select { font: inherit; }
 .cfpt-panel {
   position: relative;
   width: 100%;
+  min-width: 0;
   pointer-events: auto;
   display: flex;
   flex-direction: column;
-  min-height: min(350px, 56vh);
-  max-height: min(68vh, 680px);
+  max-height: min(64vh, 640px);
   color: var(--cfpt-text);
   background: var(--cfpt-surface);
-  border: 1px solid color-mix(in srgb, var(--cfpt-border) 88%, transparent);
-  border-radius: 26px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--cfpt-border-strong);
+  border-radius: var(--cfpt-radius);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--cfpt-accent) 18%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.08);
   overflow: hidden;
 }
 .cfpt-panel-head {
@@ -147,26 +176,49 @@ button, textarea, input, select { font: inherit; }
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 48px;
-  padding: 9px 12px 7px 16px;
-  border-bottom: 1px solid color-mix(in srgb, var(--cfpt-border) 70%, transparent);
+  min-height: 46px;
+  padding: 8px 10px 7px 15px;
+  background: color-mix(in srgb, var(--cfpt-accent) 7%, var(--cfpt-surface));
+  border-bottom: 1px solid var(--cfpt-border);
 }
-.cfpt-panel-head strong { font-size: 13px; letter-spacing: 0.01em; }
+.cfpt-panel-head strong {
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  color: var(--cfpt-text);
+}
 .cfpt-panel-close {
-  width: 32px;
+  min-width: 72px;
   height: 32px;
-  display: grid;
-  place-items: center;
-  border: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--cfpt-accent) 45%, var(--cfpt-border));
   border-radius: 999px;
-  background: transparent;
-  color: var(--cfpt-muted);
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--cfpt-accent) 10%, var(--cfpt-surface));
+  color: var(--cfpt-accent);
   cursor: pointer;
-  font-size: 20px;
+  font-size: 12px;
+  font-weight: 650;
   line-height: 1;
 }
-.cfpt-panel-close:hover { background: var(--cfpt-hover); color: var(--cfpt-text); }
-.cfpt-body { flex: 1 1 auto; min-height: 0; padding: 16px 18px 18px; overflow-y: auto; font-size: 13px; line-height: 1.45; }
+.cfpt-panel-close .cfpt-airplane { width: 15px; height: 15px; }
+.cfpt-panel-close:hover {
+  background: color-mix(in srgb, var(--cfpt-accent) 16%, var(--cfpt-surface));
+}
+.cfpt-panel-close:focus-visible {
+  outline: 2px solid var(--cfpt-focus);
+  outline-offset: 2px;
+}
+.cfpt-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.45;
+}
 .cfpt-body h3 { margin: 0 0 8px; color: var(--cfpt-text); font-size: 14px; }
 .cfpt-warn {
   background: color-mix(in srgb, #d97706 18%, var(--cfpt-surface));
@@ -178,41 +230,65 @@ button, textarea, input, select { font: inherit; }
   margin-bottom: 10px;
 }
 .cfpt-note { color: var(--cfpt-muted); font-size: 12px; margin: 8px 0; }
-.cfpt-field { margin-bottom: 11px; }
-.cfpt-field label { display: block; font-size: 12px; color: var(--cfpt-muted); margin-bottom: 4px; }
+.cfpt-field { margin-bottom: 12px; }
+.cfpt-field label {
+  display: block;
+  margin-bottom: 5px;
+  color: color-mix(in srgb, var(--cfpt-text) 78%, var(--cfpt-muted));
+  font-size: 12px;
+  font-weight: 600;
+}
 textarea, input[type="text"] {
   width: 100%;
-  background: color-mix(in srgb, var(--cfpt-surface) 90%, CanvasText 10%);
+  background: var(--cfpt-field-surface);
   color: var(--cfpt-text);
-  border: 1px solid var(--cfpt-border);
+  border: 1px solid var(--cfpt-border-strong);
   border-radius: 12px;
   padding: 10px 12px;
   font-size: 13px;
+  caret-color: var(--cfpt-accent);
   resize: vertical;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
-textarea:focus, input:focus, select:focus { outline: 2px solid var(--cfpt-accent); outline-offset: 1px; }
+textarea:hover, input[type="text"]:hover {
+  border-color: color-mix(in srgb, var(--cfpt-accent) 38%, var(--cfpt-border-strong));
+}
+textarea:focus, input:focus, select:focus {
+  outline: none;
+  border-color: var(--cfpt-focus);
+  box-shadow:
+    0 0 0 1px var(--cfpt-focus),
+    0 0 0 4px color-mix(in srgb, var(--cfpt-accent) 14%, transparent);
+}
 .cfpt-radio-row { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 9px; font-size: 13px; }
 .cfpt-radio-row label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
 .cfpt-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--cfpt-border);
+  border: 1px solid var(--cfpt-border-strong);
   border-radius: 10px;
   padding: 8px 14px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 650;
   line-height: 1.2;
   cursor: pointer;
-  background: var(--cfpt-hover);
+  background: var(--cfpt-field-surface);
   color: var(--cfpt-text);
   margin-right: 8px;
   margin-top: 6px;
   text-decoration: none;
 }
-.cfpt-btn:hover { filter: brightness(1.06); }
-.cfpt-btn:focus-visible { outline: 2px solid var(--cfpt-accent); outline-offset: 2px; }
-.cfpt-btn-primary { background: var(--cfpt-accent); color: #fff; border-color: transparent; }
+.cfpt-btn:hover {
+  border-color: color-mix(in srgb, var(--cfpt-accent) 38%, var(--cfpt-border-strong));
+  background: color-mix(in srgb, var(--cfpt-accent) 7%, var(--cfpt-field-surface));
+}
+.cfpt-btn:focus-visible { outline: 2px solid var(--cfpt-focus); outline-offset: 2px; }
+.cfpt-btn-primary {
+  background: var(--cfpt-accent);
+  color: var(--color-text-on-accent, #fff);
+  border-color: var(--cfpt-accent);
+}
 .cfpt-btn-danger {
   background: color-mix(in srgb, #dc2626 18%, var(--cfpt-surface));
   color: #dc2626;
@@ -250,15 +326,12 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--cfpt-accent
   position: absolute;
   pointer-events: auto;
   width: min(310px, calc(100vw - 24px));
-  padding: 14px;
-  padding-top: 16px;
-  border: 1px solid var(--cfpt-border);
-  border-radius: 15px;
-  background: color-mix(in srgb, var(--cfpt-surface) 94%, transparent);
+  padding: 12px;
+  border: 1px solid var(--cfpt-border-strong);
+  border-radius: 12px;
+  background: var(--cfpt-surface);
   color: var(--cfpt-text);
-  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.24);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -294,14 +367,16 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--cfpt-accent
 .cfpt-setup-card {
   position: relative;
   width: 100%;
-  max-height: min(68vh, 680px);
+  max-height: min(64vh, 640px);
   overflow-y: auto;
-  padding: 21px;
-  border: 1px solid var(--cfpt-border);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--cfpt-surface) 94%, transparent);
+  padding: 18px;
+  border: 1px solid var(--cfpt-border-strong);
+  border-radius: var(--cfpt-radius);
+  background: var(--cfpt-surface);
   color: var(--cfpt-text);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--cfpt-accent) 18%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.08);
 }
 .cfpt-setup-icon {
   width: 36px;
@@ -344,7 +419,7 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--cfpt-accent
 @media (max-width: 620px) {
   :host([data-cfpt-host="launcher"]) { width: 34px; height: 34px; }
   .cfpt-launcher { width: 34px; height: 34px; }
-  .cfpt-panel { min-height: min(320px, 58vh); border-radius: 22px; }
+  .cfpt-panel { max-height: min(68vh, 620px); }
   .cfpt-body { padding: 13px 14px 15px; }
   .cfpt-btn { padding-inline: 11px; }
   .cfpt-setup-card { padding: 17px; }

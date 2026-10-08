@@ -24,8 +24,10 @@ interface OnboardingState {
   setupShown: boolean;
 }
 
-interface NativeChildSnapshot {
-  element: HTMLElement;
+interface NativeSurfaceSnapshot {
+  form: HTMLFormElement;
+  surface: HTMLElement;
+  parent: HTMLElement;
   position: string;
   inset: string;
   width: string;
@@ -34,12 +36,21 @@ interface NativeChildSnapshot {
   clipPath: string;
   opacity: string;
   pointerEvents: string;
+  visibility: string;
+  inert: boolean;
+  ariaHidden: string | null;
 }
 
-interface NativeSurfaceSnapshot {
-  form: HTMLFormElement;
-  children: NativeChildSnapshot[];
-}
+const FREEPT_INPUT_EVENTS = [
+  "keydown",
+  "keyup",
+  "beforeinput",
+  "input",
+  "paste",
+  "compositionstart",
+  "compositionupdate",
+  "compositionend",
+] as const;
 
 const ONBOARDING_KEY = "cfpt:onboarding:v1";
 const DEFAULT_ONBOARDING: OnboardingState = {
@@ -96,6 +107,7 @@ export class Panel {
   private disposed = false;
   private onboarding = { ...DEFAULT_ONBOARDING };
   private nativeSurface: NativeSurfaceSnapshot | null = null;
+  private nativeAutomationAccess = false;
   private diagnosticsStatus: DiagnosticsStatus = { recording: false, records: 0, dropped: 0 };
 
   constructor(private readonly hooks: PanelHooks) {
@@ -123,6 +135,13 @@ export class Panel {
   setDiagnosticsStatus(status: DiagnosticsStatus): void {
     this.diagnosticsStatus = status;
     this.updateDiagnosticsDom();
+  }
+
+  setNativeAutomationAccess(enabled: boolean): void {
+    this.nativeAutomationAccess = enabled;
+    if (this.host.dataset["expanded"] !== "true") return;
+    this.applyNativeTakeover();
+    if (!enabled) queueMicrotask(() => this.focusIntegratedSurface());
   }
 
   toggle(force?: boolean): void {
@@ -165,6 +184,9 @@ export class Panel {
     this.mountObserver.disconnect();
     window.removeEventListener("resize", this.onViewportChange);
     window.removeEventListener("scroll", this.onViewportChange, true);
+    for (const type of FREEPT_INPUT_EVENTS) {
+      window.removeEventListener(type, this.isolateFreePtInputCapture, true);
+    }
     this.restoreNativeTakeover(false);
     this.host.remove();
     this.overlayHost.remove();
@@ -174,6 +196,8 @@ export class Panel {
     this.launcherTipEl.classList.add("cfpt-hidden");
     this.host.dataset["highlighted"] = "false";
     if (suppress) this.onboarding.launcherTipSuppressed = true;
+    const tooltip = this.launcherShadow.querySelector<HTMLElement>("#cfpt-launcher-tooltip");
+    if (tooltip) tooltip.textContent = "Chat FreePT";
     await this.persistOnboarding();
     if (!this.onboarding.setupShown) this.showSetupModal();
     else this.host.dataset["onboarding"] = "done";
@@ -300,7 +324,17 @@ export class Panel {
     });
     window.addEventListener("resize", this.onViewportChange);
     window.addEventListener("scroll", this.onViewportChange, true);
+    for (const type of FREEPT_INPUT_EVENTS) {
+      window.addEventListener(type, this.isolateFreePtInputCapture, true);
+    }
   }
+
+  private readonly isolateFreePtInputCapture = (event: Event): void => {
+    if (this.host.dataset["expanded"] !== "true") return;
+    if (!event.composedPath().includes(this.overlayHost)) return;
+    if (event instanceof KeyboardEvent && event.key === "Escape") this.onKeyDown(event);
+    event.stopPropagation();
+  };
 
   private readonly onViewportChange = (): void => {
     if (!this.launcherTipEl.classList.contains("cfpt-hidden")) this.positionLauncherTip();
@@ -326,7 +360,7 @@ export class Panel {
   }
 
   private onLauncherClick(): void {
-    if (!this.launcherTipEl.classList.contains("cfpt-hidden")) {
+    if (this.host.dataset["onboarding"] === "tip") {
       void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
     }
     this.toggle();
@@ -355,10 +389,11 @@ export class Panel {
 
   private showLauncherTip(): void {
     this.setupBackdropEl.classList.add("cfpt-hidden");
-    this.launcherTipEl.classList.remove("cfpt-hidden");
+    this.launcherTipEl.classList.add("cfpt-hidden");
     this.host.dataset["onboarding"] = "tip";
     this.host.dataset["highlighted"] = "true";
-    this.positionLauncherTip();
+    const tooltip = this.launcherShadow.querySelector<HTMLElement>("#cfpt-launcher-tooltip");
+    if (tooltip) tooltip.textContent = "Chat FreePT — click to extend this composer";
   }
 
   private showSetupModal(): void {
@@ -390,14 +425,22 @@ export class Panel {
     });
   }
 
-  private nativeComposerForm(): HTMLFormElement | null {
-    const composer = query("composer");
-    if (composer instanceof HTMLElement) {
-      const form = composer.closest("form");
-      if (form instanceof HTMLFormElement) return form;
-    }
+  private nativeComposerSurface(): HTMLElement | null {
     const surface = query("composerSurface");
-    const form = surface instanceof HTMLElement ? surface.closest("form") : null;
+    if (surface instanceof HTMLElement && surface.tagName !== "FORM") return surface;
+    const composer = query("composer");
+    const form = composer instanceof HTMLElement ? composer.closest("form") : null;
+    const body = form?.querySelector<HTMLElement>("[data-composer-body]");
+    if (body) return body;
+    return surface instanceof HTMLElement ? surface : null;
+  }
+
+  private nativeComposerForm(): HTMLFormElement | null {
+    const surface = this.nativeComposerSurface();
+    const surfaceForm = surface?.closest("form");
+    if (surfaceForm instanceof HTMLFormElement) return surfaceForm;
+    const composer = query("composer");
+    const form = composer instanceof HTMLElement ? composer.closest("form") : null;
     return form instanceof HTMLFormElement ? form : null;
   }
 
@@ -407,16 +450,22 @@ export class Panel {
       if (plus.nextElementSibling !== this.host) plus.insertAdjacentElement("afterend", this.host);
       this.host.dataset["fallback"] = "false";
     } else {
-      const anchor = query("composerSurface") ?? query("composerHeader");
+      const anchor = this.nativeComposerSurface() ?? query("composerHeader");
       if (anchor && this.host.parentElement !== anchor) anchor.appendChild(this.host);
       this.host.dataset["fallback"] = "true";
     }
 
-    const form = this.nativeComposerForm();
-    if (form && this.overlayHost.parentElement !== form) form.appendChild(this.overlayHost);
-    if (!form && !this.overlayHost.isConnected) {
-      const anchor = query("composerSurface") ?? query("composerHeader");
-      anchor?.parentElement?.appendChild(this.overlayHost);
+    const surface = this.nativeComposerSurface();
+    const slot = surface?.parentElement;
+    if (surface && slot) {
+      if (
+        this.overlayHost.parentElement !== slot ||
+        this.overlayHost.previousElementSibling !== surface
+      ) {
+        surface.insertAdjacentElement("afterend", this.overlayHost);
+      }
+    } else if (!this.overlayHost.isConnected) {
+      this.nativeComposerForm()?.appendChild(this.overlayHost);
     }
 
     this.syncOverlayTheme();
@@ -425,73 +474,114 @@ export class Panel {
   }
 
   private syncOverlayTheme(): void {
-    const surface = query("composerSurface");
-    if (!(surface instanceof HTMLElement)) return;
-    const style = getComputedStyle(surface);
-    if (style.backgroundColor)
-      this.overlayHost.style.setProperty("--cfpt-native-surface", style.backgroundColor);
-    if (style.color) this.overlayHost.style.setProperty("--cfpt-native-text", style.color);
+    const surface = this.nativeComposerSurface();
+    if (!surface) return;
+    const surfaceStyle = getComputedStyle(surface);
+    const rootStyle = getComputedStyle(document.documentElement);
+    const readVar = (...names: string[]): string => {
+      for (const name of names) {
+        const value =
+          surfaceStyle.getPropertyValue(name).trim() || rootStyle.getPropertyValue(name).trim();
+        if (value) return value;
+      }
+      return "";
+    };
+    const setVar = (name: string, value: string): void => {
+      if (value) this.overlayHost.style.setProperty(name, value);
+    };
+
+    setVar("--cfpt-native-surface", surfaceStyle.backgroundColor);
+    setVar("--cfpt-native-text", surfaceStyle.color);
+    setVar("--cfpt-native-radius", surfaceStyle.borderRadius);
+    setVar(
+      "--cfpt-accent",
+      readVar(
+        "--color-text-composer-reference",
+        "--app-color-border-focus",
+        "--app-color-accent-blue",
+        "--accent-blue",
+      ),
+    );
+    setVar(
+      "--cfpt-field-surface",
+      readVar("--color-surface-secondary", "--app-color-background-surface-under"),
+    );
+    setVar("--cfpt-border", readVar("--color-border", "--app-color-border"));
+    setVar("--cfpt-border-strong", readVar("--color-border-strong", "--app-color-border-heavy"));
+    setVar("--cfpt-muted", readVar("--color-text-secondary", "--app-color-text-secondary"));
   }
 
   private applyNativeTakeover(): void {
+    const surface = this.nativeComposerSurface();
     const form = this.nativeComposerForm();
-    if (!form) return;
+    const parent = surface?.parentElement;
+    if (!surface || !form || !parent) return;
 
-    if (this.nativeSurface?.form === form) {
-      for (const child of Array.from(form.children)) {
-        if (!(child instanceof HTMLElement) || child === this.overlayHost) continue;
-        if (this.nativeSurface.children.some((snapshot) => snapshot.element === child)) continue;
-        this.nativeSurface.children.push(this.hideNativeChild(child));
-      }
+    if (
+      this.overlayHost.parentElement !== parent ||
+      this.overlayHost.previousElementSibling !== surface
+    ) {
+      surface.insertAdjacentElement("afterend", this.overlayHost);
+    }
+
+    if (this.nativeSurface?.surface === surface) {
+      this.guardNativeSurface(!this.nativeAutomationAccess);
       return;
     }
 
     this.restoreNativeTakeover(false);
-    this.moveFocusOutsideNativeSurface(form);
-    const children = Array.from(form.children)
-      .filter(
-        (child): child is HTMLElement => child instanceof HTMLElement && child !== this.overlayHost,
-      )
-      .map((child) => this.hideNativeChild(child));
-    this.nativeSurface = { form, children };
-    form.dataset["cfptTakeover"] = "true";
-  }
-
-  private hideNativeChild(element: HTMLElement): NativeChildSnapshot {
-    const snapshot: NativeChildSnapshot = {
-      element,
-      position: element.style.position,
-      inset: element.style.inset,
-      width: element.style.width,
-      height: element.style.height,
-      overflow: element.style.overflow,
-      clipPath: element.style.clipPath,
-      opacity: element.style.opacity,
-      pointerEvents: element.style.pointerEvents,
+    this.moveFocusOutsideNativeSurface(surface);
+    this.nativeSurface = {
+      form,
+      surface,
+      parent,
+      position: surface.style.position,
+      inset: surface.style.inset,
+      width: surface.style.width,
+      height: surface.style.height,
+      overflow: surface.style.overflow,
+      clipPath: surface.style.clipPath,
+      opacity: surface.style.opacity,
+      pointerEvents: surface.style.pointerEvents,
+      visibility: surface.style.visibility,
+      inert: surface.inert === true,
+      ariaHidden: surface.getAttribute("aria-hidden"),
     };
-    element.style.position = "absolute";
-    element.style.inset = "0 auto auto 0";
-    element.style.width = "1px";
-    element.style.height = "1px";
-    element.style.overflow = "hidden";
-    element.style.clipPath = "inset(50%)";
-    element.style.opacity = "0";
-    element.style.pointerEvents = "none";
-    element.dataset["cfptNativeHidden"] = "true";
-    return snapshot;
+
+    surface.style.position = "absolute";
+    surface.style.inset = "0 auto auto 0";
+    surface.style.width = "1px";
+    surface.style.height = "1px";
+    surface.style.overflow = "hidden";
+    surface.style.clipPath = "inset(50%)";
+    surface.style.opacity = "0";
+    surface.style.pointerEvents = "none";
+    surface.dataset["cfptNativeHidden"] = "true";
+    form.dataset["cfptTakeover"] = "true";
+    this.guardNativeSurface(!this.nativeAutomationAccess);
   }
 
-  private moveFocusOutsideNativeSurface(form: HTMLFormElement): void {
+  private guardNativeSurface(guarded: boolean): void {
+    const snapshot = this.nativeSurface;
+    if (!snapshot) return;
+    snapshot.surface.inert = guarded;
+    snapshot.surface.style.visibility = guarded ? "hidden" : snapshot.visibility;
+    snapshot.surface.dataset["cfptNativeGuarded"] = String(guarded);
+    snapshot.surface.setAttribute("aria-hidden", "true");
+    if (guarded && snapshot.surface.contains(document.activeElement)) this.focusIntegratedSurface();
+  }
+
+  private moveFocusOutsideNativeSurface(surface: HTMLElement): void {
     const active = document.activeElement;
-    if (!(active instanceof HTMLElement) || !form.contains(active)) return;
+    if (!(active instanceof HTMLElement) || !surface.contains(active)) return;
     this.focusIntegratedSurface();
-    if (form.contains(document.activeElement)) active.blur();
+    if (surface.contains(document.activeElement)) active.blur();
   }
 
   private focusIntegratedSurface(): void {
     const target =
       this.panelEl.querySelector<HTMLElement>(
-        '[data-ref="idea"], [data-ref="reply"], [data-ref="queue-next"]',
+        '[data-ref="idea"], [data-ref="reply"], [data-ref="queue-next"], [data-ref="reponame"]',
       ) ??
       this.setupBackdropEl.querySelector<HTMLElement>("button, input, textarea") ??
       this.panelEl.querySelector<HTMLElement>("button, input, textarea");
@@ -501,17 +591,20 @@ export class Panel {
   private restoreNativeTakeover(focusNative = true): void {
     const snapshot = this.nativeSurface;
     if (!snapshot) return;
-    for (const child of snapshot.children) {
-      child.element.style.position = child.position;
-      child.element.style.inset = child.inset;
-      child.element.style.width = child.width;
-      child.element.style.height = child.height;
-      child.element.style.overflow = child.overflow;
-      child.element.style.clipPath = child.clipPath;
-      child.element.style.opacity = child.opacity;
-      child.element.style.pointerEvents = child.pointerEvents;
-      delete child.element.dataset["cfptNativeHidden"];
-    }
+    snapshot.surface.style.position = snapshot.position;
+    snapshot.surface.style.inset = snapshot.inset;
+    snapshot.surface.style.width = snapshot.width;
+    snapshot.surface.style.height = snapshot.height;
+    snapshot.surface.style.overflow = snapshot.overflow;
+    snapshot.surface.style.clipPath = snapshot.clipPath;
+    snapshot.surface.style.opacity = snapshot.opacity;
+    snapshot.surface.style.pointerEvents = snapshot.pointerEvents;
+    snapshot.surface.style.visibility = snapshot.visibility;
+    snapshot.surface.inert = snapshot.inert;
+    if (snapshot.ariaHidden === null) snapshot.surface.removeAttribute("aria-hidden");
+    else snapshot.surface.setAttribute("aria-hidden", snapshot.ariaHidden);
+    delete snapshot.surface.dataset["cfptNativeHidden"];
+    delete snapshot.surface.dataset["cfptNativeGuarded"];
     delete snapshot.form.dataset["cfptTakeover"];
     this.nativeSurface = null;
     if (!focusNative) return;
@@ -546,7 +639,7 @@ export class Panel {
     return `
       <div class="cfpt-panel-head">
         <strong>Chat FreePT</strong>
-        <button class="cfpt-panel-close" type="button" data-action="close" aria-label="Close Chat FreePT">×</button>
+        <button class="cfpt-panel-close" type="button" data-action="close" aria-label="Return to the native ChatGPT composer">${airplaneSvg()}<span>Native</span></button>
       </div>
       <div class="cfpt-body">${body}</div>
     `;

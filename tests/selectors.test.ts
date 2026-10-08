@@ -36,13 +36,21 @@ const CHATGPT_FIXTURE = `
       </div>
       <div id="thread-bottom">
         <div data-prompt-textarea-header></div>
-        <form data-type="unified-composer">
-          <div data-composer-surface="true">
-            <div class="left-controls">
-              <button data-testid="composer-plus-btn" aria-label="Add files">+</button>
+        <form data-chatgpt-composer data-composer-placement="home">
+          <div class="composer-mode-surface">
+            <div class="relative">
+              <div data-composer-body>
+                <div data-composer-footer>
+                  <div class="left-controls">
+                    <button data-testid="composer-plus-btn" aria-label="Add files">+</button>
+                  </div>
+                </div>
+                <div data-composer-input>
+                  <div id="prompt-textarea" class="ProseMirror" contenteditable="true"><p></p></div>
+                </div>
+                <button data-testid="send-button" type="submit" aria-label="Send prompt"></button>
+              </div>
             </div>
-            <div id="prompt-textarea" class="ProseMirror" contenteditable="true"><p></p></div>
-            <button data-testid="send-button" aria-label="Send prompt"></button>
           </div>
         </form>
       </div>
@@ -92,6 +100,8 @@ describe("core selector resolution", () => {
 
 describe("selector fallbacks and health", () => {
   it("falls back down the composer, header, and surface candidates", () => {
+    document.querySelector("[data-composer-input]")?.removeAttribute("data-composer-input");
+    document.querySelector("form[data-chatgpt-composer]")?.removeAttribute("data-chatgpt-composer");
     document.getElementById("prompt-textarea")?.removeAttribute("id");
     document.getElementById("thread-bottom")?.removeAttribute("id");
     expect(resolve("composer")?.candidateIndex).toBeGreaterThan(0);
@@ -99,13 +109,12 @@ describe("selector fallbacks and health", () => {
     expect(resolve("composerSurface")?.candidateIndex).toBeGreaterThan(0);
   });
 
-  it("falls back to the unified form when the surface attribute disappears", () => {
-    document
-      .querySelector('[data-composer-surface="true"]')
-      ?.removeAttribute("data-composer-surface");
+  it("falls back to the current ChatGPT form when the composer body disappears", () => {
+    document.querySelector("[data-composer-body]")?.removeAttribute("data-composer-body");
     const surface = resolve("composerSurface");
     expect(surface?.element.tagName).toBe("FORM");
-    expect(surface?.candidateIndex).toBe(3);
+    expect(surface?.element.hasAttribute("data-chatgpt-composer")).toBe(true);
+    expect(surface?.candidateIndex).toBe(6);
   });
 
   it("filters text-matched Send candidates", () => {
@@ -135,6 +144,8 @@ describe("selector fallbacks and health", () => {
   });
 
   it("reports degradation when the primary composer drifts", () => {
+    document.querySelector("[data-composer-input]")?.removeAttribute("data-composer-input");
+    document.querySelector("form[data-chatgpt-composer]")?.removeAttribute("data-chatgpt-composer");
     document.getElementById("prompt-textarea")?.removeAttribute("id");
     expect(healthCheck().degraded.some((item) => item.id === "composer")).toBe(true);
   });
