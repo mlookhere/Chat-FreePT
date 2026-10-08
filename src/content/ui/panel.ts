@@ -8,6 +8,7 @@ import { PANEL_CSS } from "./styles";
 import {
   airplaneSvg,
   launcherState,
+  panelViewKey,
   renderPanelBody,
   renderPanelShell,
   repositorySetupHtml,
@@ -134,7 +135,7 @@ export class Panel {
     this.host.dataset["phase"] = state.phase;
     this.launcher.dataset["state"] = visualState;
 
-    const viewKey = `${state.phase}|${state.status}|${state.pauseReason ?? ""}|${state.repo ?? ""}|${state.lastMarker?.status ?? ""}|${state.lastMarker?.item ?? ""}|${state.lastMarker?.url ?? ""}|${state.lastLifecycleSignal ?? ""}|${queuedMessages(state).join("\u001f")}|${autoContinueEnabled(state)}|${passive}`;
+    const viewKey = panelViewKey(state, passive);
     if (viewKey !== this.lastViewKey) {
       this.lastViewKey = viewKey;
       this.stopArmed = false;
