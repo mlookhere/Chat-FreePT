@@ -173,7 +173,9 @@ describe("GitHub permission recovery target", () => {
       </div>`,
     );
     expect(queryGuideTarget("githubPermissionPrompt")?.getAttribute("role")).toBe("dialog");
-    expect(queryGuideTarget("githubPermissionContinueButton")?.textContent?.trim()).toBe("Continue");
+    expect(queryGuideTarget("githubPermissionContinueButton")?.textContent?.trim()).toBe(
+      "Continue",
+    );
   });
 
   it("does not match an unrelated Continue dialog", () => {
