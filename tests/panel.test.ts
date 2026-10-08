@@ -370,29 +370,32 @@ describe("integrated composer interaction", () => {
     document.removeEventListener("paste", documentPaste, true);
   });
 
-  it("temporarily unlocks the parked native composer only for automation", () => {
+  it("scopes native composer access to automation and always restores the guard", async () => {
     onboardingDone();
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
 
     expect(nativeSurface().inert).toBe(true);
-    expect(nativeSurface().style.visibility).toBe("hidden");
+    await panel.withNativeComposerAccess(async () => {
+      expect(nativeSurface().inert).toBe(false);
+      expect(nativeSurface().style.visibility).toBe("");
+      expect(nativeComposer().getAttribute("contenteditable")).toBe("true");
+      nativeComposer().focus();
+      expect(document.activeElement).toBe(nativeComposer());
+    });
 
-    await panel.withNativeComposerAccess(async () => {;
-    expect(nativeSurface().inert).toBe(false);
-    expect(nativeSurface().style.visibility).toBe("");
-    expect(nativeSurface().dataset["cfptNativeHidden"]).toBe("true");
-    expect(nativeComposer().getAttribute("contenteditable")).toBe("true");
-    expect(nativeComposer().getAttribute("aria-disabled")).toBeNull();
-    nativeComposer().focus();
-    expect(document.activeElement).toBe(nativeComposer());
-
-    });;
     expect(nativeSurface().inert).toBe(true);
     expect(nativeSurface().style.visibility).toBe("hidden");
     expect(nativeComposer().getAttribute("contenteditable")).toBe("false");
-    expect(nativeComposer().getAttribute("aria-disabled")).toBe("true");
+
+    await expect(
+      panel.withNativeComposerAccess(async () => {
+        throw new Error("automation failed");
+      }),
+    ).rejects.toThrow("automation failed");
+    expect(nativeSurface().inert).toBe(true);
+    expect(nativeComposer().getAttribute("contenteditable")).toBe("false");
   });
 });
 
@@ -465,22 +468,22 @@ describe("conversation repository setup", () => {
 });
 
 describe("first-run and plan-aware setup", () => {
-  it("keeps the working launcher-tip then setup sequence", async () => {
+  it("uses one inline first-run setup state without a floating toast", async () => {
     const panel = makePanel();
     await settle();
     expect(host().dataset["onboarding"]).toBe("tip");
     expect(host().dataset["highlighted"]).toBe("true");
+    expect(overlayShadow().querySelector(".cfpt-onboarding-toast")).toBeNull();
 
-    await panel.acknowledgeLauncherTip(true);
+    launcherButton().click();
     expect(host().dataset["onboarding"]).toBe("setup");
     expect(host().dataset["highlighted"]).toBe("false");
+    expect(overlayShadow().textContent).toContain("Choose the GitHub repository first");
 
     await panel.acknowledgeSetup();
     expect(host().dataset["onboarding"]).toBe("done");
-    expect(stores.local["cfpt:onboarding:v1"]).toEqual({
-      launcherTipSuppressed: true,
-      setupShown: true,
-    });
+    expect(stores.local["cfpt:onboarding:v1"]).toEqual({ setupShown: true });
+    expect(PANEL_CSS).not.toContain(".cfpt-onboarding-toast");
   });
 
   it("uses repository-first onboarding", async () => {
@@ -496,7 +499,7 @@ describe("first-run and plan-aware setup", () => {
     expect(overlayShadow().textContent).not.toContain("Follow along");
   });
 
-  it("does not re-show onboarding after suppression and completion", async () => {
+  it("does not re-show onboarding after setup completion", async () => {
     onboardingDone();
     makePanel();
     await settle();
