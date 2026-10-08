@@ -8,6 +8,7 @@ export type TargetId =
   | "composer"
   | "composerHeader"
   | "composerSurface"
+  | "composerForm"
   | "sendButton"
   | "stopButton"
   | "assistantMessage"
@@ -64,6 +65,14 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: '[data-composer-surface="true"]' },
       { css: "form[data-chatgpt-composer]" },
       { css: 'form[data-type="unified-composer"]' },
+    ],
+  },
+  composerForm: {
+    required: false,
+    candidates: [
+      { css: "form[data-chatgpt-composer]" },
+      { css: 'form[data-type="unified-composer"]' },
+      { css: "#thread-bottom form" },
     ],
   },
   sendButton: {
