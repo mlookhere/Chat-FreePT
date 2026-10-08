@@ -20,9 +20,7 @@ export type TargetId =
   | "toolIndicator";
 
 export type GuideTargetId =
-  | "composerPlusButton"
-  | "githubPermissionPrompt"
-  | "githubPermissionContinueButton";
+  "composerPlusButton" | "githubPermissionPrompt" | "githubPermissionContinueButton";
 
 export interface Candidate {
   css: string;
@@ -269,10 +267,7 @@ function githubPermissionGate(): { prompt: HTMLElement; button: HTMLElement } | 
     let current: HTMLElement | null = button.parentElement;
     for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement) {
       const text = (current.innerText ?? current.textContent ?? "").replace(/\s+/g, " ").trim();
-      if (
-        /github/i.test(text) &&
-        /(freept|mcp|connector|allow|permission|access)/i.test(text)
-      ) {
+      if (/github/i.test(text) && /(freept|mcp|connector|allow|permission|access)/i.test(text)) {
         return { prompt: current, button };
       }
     }
