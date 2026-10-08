@@ -197,6 +197,25 @@ describe("native composer launcher placement", () => {
     expect(PANEL_CSS).not.toContain("position: fixed");
     expect(PANEL_CSS).not.toContain(".cfpt-dock");
   });
+
+  it("mirrors the active ChatGPT composer theme and selected accent", () => {
+    onboardingDone();
+    nativeSurface().style.setProperty("--composer-surface-primary", "rgb(20, 21, 22)");
+    nativeSurface().style.setProperty("--composer-surface-secondary", "rgb(35, 36, 37)");
+    nativeSurface().style.setProperty("--theme-submit-btn-bg", "rgb(126, 74, 214)");
+    nativeSurface().style.setProperty("--text-primary", "rgb(241, 242, 243)");
+    nativeSurface().style.setProperty("--text-secondary", "rgb(170, 171, 172)");
+    nativeSurface().style.setProperty("--border-light", "rgb(70, 71, 72)");
+    makePanel();
+
+    expect(overlayHost().style.getPropertyValue("--cfpt-native-surface")).toBe("rgb(20, 21, 22)");
+    expect(overlayHost().style.getPropertyValue("--cfpt-field-surface")).toBe("rgb(35, 36, 37)");
+    expect(overlayHost().style.getPropertyValue("--cfpt-accent")).toBe("rgb(126, 74, 214)");
+    expect(overlayHost().style.getPropertyValue("--cfpt-native-text")).toBe("rgb(241, 242, 243)");
+    expect(PANEL_CSS).toContain("--theme-submit-btn-bg");
+    expect(PANEL_CSS).toContain("--composer-surface-primary");
+    expect(PANEL_CSS).toContain("font-family: inherit");
+  });
 });
 
 describe("composer takeover lifecycle", () => {
@@ -216,6 +235,9 @@ describe("composer takeover lifecycle", () => {
     expect(nativeSurface().style.visibility).toBe("hidden");
     expect(nativeSurface().inert).toBe(true);
     expect(nativeSurface().dataset["cfptNativeGuarded"]).toBe("true");
+    expect(nativeComposer().getAttribute("contenteditable")).toBe("false");
+    expect(nativeComposer().getAttribute("tabindex")).toBe("-1");
+    expect(nativeComposer().getAttribute("aria-disabled")).toBe("true");
     expect(overlayHost().dataset["expanded"]).toBe("true");
     expect(host().dataset["expanded"]).toBe("true");
     expect(document.activeElement).not.toBe(nativeComposer());
@@ -226,6 +248,9 @@ describe("composer takeover lifecycle", () => {
     expect(nativeSurface().style.pointerEvents).toBe("auto");
     expect(nativeSurface().style.visibility).toBe("");
     expect(nativeSurface().inert).toBe(false);
+    expect(nativeComposer().getAttribute("contenteditable")).toBe("true");
+    expect(nativeComposer().getAttribute("tabindex")).toBeNull();
+    expect(nativeComposer().getAttribute("aria-disabled")).toBeNull();
     expect(nativeSurface().dataset["cfptNativeHidden"]).toBeUndefined();
     expect(nativeForm().dataset["cfptTakeover"]).toBeUndefined();
   });
@@ -313,34 +338,35 @@ describe("integrated composer interaction", () => {
     expect(host().dataset["expanded"]).toBe("false");
   });
 
-  it("keeps typing and paste inside Chat FreePT before ChatGPT capture handlers", () => {
+  it("redirects paste back to the active FreePT field even if ChatGPT steals native focus", async () => {
     onboardingDone();
-    const documentKeydown = vi.fn();
     const documentPaste = vi.fn();
-    document.addEventListener("keydown", documentKeydown, true);
     document.addEventListener("paste", documentPaste, true);
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
 
     const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]');
-    const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
-    if (!repo || !idea) throw new Error("planning inputs missing");
+    if (!repo) throw new Error("repository input missing");
 
     repo.focus();
-    repo.value = "owner/repo";
-    repo.dispatchEvent(new Event("paste", { bubbles: true, composed: true }));
-    idea.focus();
-    idea.value = "build this";
-    idea.dispatchEvent(new KeyboardEvent("keydown", { key: "b", bubbles: true, composed: true }));
+    expect(overlayShadow().activeElement).toBe(repo);
 
-    expect(repo.value).toBe("owner/repo");
-    expect(idea.value).toBe("build this");
-    expect(overlayShadow().activeElement).toBe(idea);
-    expect(documentKeydown).not.toHaveBeenCalled();
+    nativeComposer().focus();
+    const paste = new Event("paste", { bubbles: true, composed: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", {
+      value: {
+        getData: (type: string) => (type === "text/plain" ? "https://github.com/owner/repo" : ""),
+      },
+    });
+    nativeComposer().dispatchEvent(paste);
+    await settle();
+
+    expect(repo.value).toBe("https://github.com/owner/repo");
+    expect(overlayShadow().activeElement).toBe(repo);
+    expect(nativeComposer().textContent).toBe("");
+    expect(nativeComposer().getAttribute("contenteditable")).toBe("false");
     expect(documentPaste).not.toHaveBeenCalled();
-    expect(nativeSurface().inert).toBe(true);
-    document.removeEventListener("keydown", documentKeydown, true);
     document.removeEventListener("paste", documentPaste, true);
   });
 
@@ -357,12 +383,16 @@ describe("integrated composer interaction", () => {
     expect(nativeSurface().inert).toBe(false);
     expect(nativeSurface().style.visibility).toBe("");
     expect(nativeSurface().dataset["cfptNativeHidden"]).toBe("true");
+    expect(nativeComposer().getAttribute("contenteditable")).toBe("true");
+    expect(nativeComposer().getAttribute("aria-disabled")).toBeNull();
     nativeComposer().focus();
     expect(document.activeElement).toBe(nativeComposer());
 
     panel.setNativeAutomationAccess(false);
     expect(nativeSurface().inert).toBe(true);
     expect(nativeSurface().style.visibility).toBe("hidden");
+    expect(nativeComposer().getAttribute("contenteditable")).toBe("false");
+    expect(nativeComposer().getAttribute("aria-disabled")).toBe("true");
   });
 });
 
