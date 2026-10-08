@@ -67,6 +67,7 @@ describe("core selector resolution", () => {
     expect(resolve("composer")?.candidateIndex).toBe(0);
     expect(resolve("composerHeader")?.candidateIndex).toBe(0);
     expect(resolve("composerSurface")?.candidateIndex).toBe(0);
+    expect(resolve("composerForm")?.candidateIndex).toBe(0);
     expect(resolve("sendButton")?.candidateIndex).toBe(0);
     expect(resolve("conversationRoot")?.candidateIndex).toBe(0);
     expect(resolve("assistantMessage")?.candidateIndex).toBe(0);
