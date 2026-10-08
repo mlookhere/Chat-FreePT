@@ -337,6 +337,22 @@ export class Panel {
     if (field) queueMicrotask(() => field.focus({ preventScroll: true }));
   };
 
+  private focusIntegratedSurface(): void {
+    const target =
+      this.lastIntegratedField?.isConnected === true
+        ? this.lastIntegratedField
+        : (this.panelEl.querySelector<HTMLElement>(
+            '[data-ref="idea"], [data-ref="reply"], [data-ref="queue-next"], [data-ref="reponame"]',
+          ) ??
+          this.setupBackdropEl.querySelector<HTMLElement>("button, input, textarea") ??
+          this.panelEl.querySelector<HTMLElement>("button, input, textarea"));
+
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      this.lastIntegratedField = target;
+    }
+    target?.focus({ preventScroll: true });
+  }
+
   private stopComposerPropagation(event: Event): void {
     if (
       event.composedPath().includes(this.panelEl) ||
