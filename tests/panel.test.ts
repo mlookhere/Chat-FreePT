@@ -25,7 +25,7 @@ function fixture(): void {
                     </div>
                   </div>
                   <div data-composer-input>
-                    <div id="prompt-textarea" class="ProseMirror" contenteditable="true"></div>
+                    <div id="prompt-textarea" class="ProseMirror" role="textbox" contenteditable="true"></div>
                   </div>
                   <button id="composer-submit-button" type="submit" aria-label="Send prompt"></button>
                 </div>
@@ -98,10 +98,7 @@ function nativeComposer(): HTMLElement {
 }
 
 function onboardingDone(): void {
-  stores.local["cfpt:onboarding:v1"] = {
-    launcherTipSuppressed: true,
-    setupShown: true,
-  };
+  stores.local["cfpt:onboarding:v1"] = { setupShown: true };
 }
 
 async function settle(): Promise<void> {
@@ -177,7 +174,7 @@ describe("native composer launcher placement", () => {
       <div data-composer-footer>
         <div class="left-controls"><button data-testid="composer-plus-btn" aria-label="Add files">+</button></div>
       </div>
-      <div data-composer-input><div id="prompt-textarea" contenteditable="true"></div></div>`;
+      <div data-composer-input><div id="prompt-textarea" role="textbox" contenteditable="true"></div></div>`;
     nativeSurface().replaceWith(replacement);
     await settle();
 
@@ -382,7 +379,7 @@ describe("integrated composer interaction", () => {
     expect(nativeSurface().inert).toBe(true);
     expect(nativeSurface().style.visibility).toBe("hidden");
 
-    panel.setNativeAutomationAccess(true);
+    await panel.withNativeComposerAccess(async () => {;
     expect(nativeSurface().inert).toBe(false);
     expect(nativeSurface().style.visibility).toBe("");
     expect(nativeSurface().dataset["cfptNativeHidden"]).toBe("true");
@@ -391,7 +388,7 @@ describe("integrated composer interaction", () => {
     nativeComposer().focus();
     expect(document.activeElement).toBe(nativeComposer());
 
-    panel.setNativeAutomationAccess(false);
+    });;
     expect(nativeSurface().inert).toBe(true);
     expect(nativeSurface().style.visibility).toBe("hidden");
     expect(nativeComposer().getAttribute("contenteditable")).toBe("false");
@@ -518,7 +515,7 @@ describe("first-run and plan-aware setup", () => {
       repo: "owner/project",
     };
     panel.render(complete);
-    panel.showCompletionModal(complete);
+    panel.showCompletion(complete);
 
     expect(host().dataset["expanded"]).toBe("true");
     expect(nativeForm().dataset["cfptTakeover"]).toBe("true");
