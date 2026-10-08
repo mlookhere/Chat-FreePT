@@ -35,6 +35,8 @@ const REGISTRY: Record<TargetId, Target> = {
   composer: {
     required: true,
     candidates: [
+      { css: '[data-chatgpt-composer] [data-composer-input] [contenteditable="true"]' },
+      { css: 'form[data-chatgpt-composer] [contenteditable="true"]' },
       { css: "#prompt-textarea" },
       { css: 'div.ProseMirror[contenteditable="true"]' },
       { css: 'form[data-type="unified-composer"] [contenteditable="true"]' },
@@ -52,9 +54,13 @@ const REGISTRY: Record<TargetId, Target> = {
   composerSurface: {
     required: false,
     candidates: [
+      { css: '[data-chatgpt-composer] [data-composer-body]' },
+      { css: 'form[data-chatgpt-composer] [data-composer-body]' },
+      { css: '[data-composer-body]' },
       { css: '#thread-bottom form[data-type="unified-composer"] [data-composer-surface="true"]' },
       { css: 'form[data-type="unified-composer"] [data-composer-surface="true"]' },
       { css: '[data-composer-surface="true"]' },
+      { css: 'form[data-chatgpt-composer]' },
       { css: 'form[data-type="unified-composer"]' },
     ],
   },
@@ -67,6 +73,7 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: "#composer-submit-button" },
       { css: 'button[aria-label="Send prompt"]' },
       { css: 'button[aria-label="Send"]' },
+      { css: '[data-chatgpt-composer] button[type="submit"]' },
       { css: 'form[data-type="unified-composer"] button[type="submit"]' },
       { css: "form button", textRe: /^send$/i },
     ],
@@ -79,6 +86,7 @@ const REGISTRY: Record<TargetId, Target> = {
       { css: 'button[aria-label="Stop generating"]' },
       // Keep broad label fallbacks inside the composer so unrelated page controls cannot match.
       { css: '#thread-bottom form button[aria-label*="Stop"]' },
+      { css: 'form[data-chatgpt-composer] button[aria-label*="Stop"]' },
       { css: 'form[data-type="unified-composer"] button[aria-label*="Stop"]' },
     ],
   },
@@ -242,6 +250,7 @@ function composerPlusButton(): HTMLElement | null {
   }
   const form =
     query("composerSurface")?.closest("form") ??
+    document.querySelector("form[data-chatgpt-composer]") ??
     document.querySelector('form[data-type="unified-composer"]');
   if (!form) return null;
   return textElement(/^\+$/i, form, "button") as HTMLElement | null;
