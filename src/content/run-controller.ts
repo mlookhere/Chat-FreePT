@@ -16,11 +16,12 @@ import { clickSend, composerIsEmpty, insertPrompt } from "./composer";
 import type { ControllerDiagnosticEvent } from "./diagnostics";
 import { isExtensionContextInvalidated } from "./extension-context";
 import { scanPageSignals } from "./page-signals";
-import { healthCheck } from "./selectors";
+import { healthCheck, queryGuideTarget } from "./selectors";
 import { StreamWatcher } from "./stream-watch";
 import {
   lastAssistantMessage,
   lastMessageRole,
+  lastUserMessageText,
   toolCallIndicatorVisible,
   type AssistantMessage,
 } from "./transcript";
@@ -120,14 +121,18 @@ export class RunController {
 
   dispatch(event: MachineEvent): void {
     if (this.disposed) return;
+    const effectiveEvent =
+      event.type === "USER_RESUME" && !event.lastUserText
+        ? { ...event, lastUserText: lastUserMessageText() ?? undefined }
+        : event;
     const previous = this.state;
-    this.onDiagnosticEvent({ kind: "machine-event", event });
-    const { state, effects } = reduce(this.state, event, this.settings);
+    this.onDiagnosticEvent({ kind: "machine-event", event: effectiveEvent });
+    const { state, effects } = reduce(this.state, effectiveEvent, this.settings);
     if (state === this.state) return;
     this.state = state;
     this.onDiagnosticEvent({
       kind: "state-transition",
-      event,
+      event: effectiveEvent,
       detail: {
         fromPhase: previous.phase,
         fromStatus: previous.status,
@@ -193,6 +198,7 @@ export class RunController {
         return;
       case "generation-interrupted":
         this.clearNetworkSettleTimer();
+        if (this.maybeContinueGitHubPermission()) return;
         if (
           this.state.phase === "planning" ||
           this.state.phase === "developing" ||
@@ -224,6 +230,7 @@ export class RunController {
         return;
       case "generation-aborted":
         this.clearNetworkSettleTimer();
+        if (this.maybeContinueGitHubPermission()) return;
         if (this.state.status === "sending" || this.state.status === "streaming") {
           this.dispatch({
             type: "STREAM_INTERRUPTED",
@@ -263,9 +270,32 @@ export class RunController {
 
   private checkRuntime(): void {
     if (this.disposed) return;
+    if (this.maybeContinueGitHubPermission()) return;
     if (!isActive(this.state) && this.state.status !== "awaiting_user") return;
     this.pollSignals();
     this.reconcileLiveState(Date.now());
+  }
+
+  private maybeContinueGitHubPermission(): boolean {
+    const state = this.state;
+    const recoverablePhase =
+      state.phase === "planning" || state.phase === "developing" || state.phase === "plan_ready";
+    const recoverableStatus =
+      state.status === "sending" ||
+      state.status === "streaming" ||
+      (state.status === "paused" && state.lastLifecycleSignal === "generation-interrupted");
+    if (!recoverablePhase || !recoverableStatus) return false;
+
+    const button = queryGuideTarget("githubPermissionContinueButton");
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+
+    this.onDiagnosticEvent({
+      kind: "permission-recovery",
+      detail: { event: "continue-clicked" },
+    });
+    button.click();
+    this.dispatch({ type: "PERMISSION_CONTINUED" });
+    return true;
   }
 
   private pollSignals(): void {
