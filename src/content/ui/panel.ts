@@ -258,10 +258,7 @@ export class Panel {
       this.stopComposerPropagation(event);
     });
     this.shadow.addEventListener("beforeinput", (event) => this.stopComposerPropagation(event));
-    this.shadow.addEventListener("input", (event) => {
-      this.stopComposerPropagation(event);
-      this.persistProjectDraft(event);
-    });
+    this.shadow.addEventListener("input", (event) => this.stopComposerPropagation(event));
     this.shadow.addEventListener("paste", (event) => this.stopComposerPropagation(event));
     this.shadow.addEventListener("compositionstart", (event) =>
       this.stopComposerPropagation(event),
@@ -298,6 +295,10 @@ export class Panel {
       event.stopImmediatePropagation();
       return;
     }
+    if (fromFreePt && event.type === "input") {
+      const field = this.activeIntegratedTextField();
+      if (field) this.persistProjectDraftField(field);
+    }
     if (event instanceof KeyboardEvent && event.key === "Escape") this.onKeyDown(event);
     event.stopImmediatePropagation();
   };
@@ -331,13 +332,6 @@ export class Panel {
     const target = event.target;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
       this.lastIntegratedField = target;
-    }
-  }
-
-  private persistProjectDraft(event: Event): void {
-    const target = event.target;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-      this.persistProjectDraftField(target);
     }
   }
 
