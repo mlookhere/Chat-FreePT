@@ -329,7 +329,7 @@ describe("integrated composer interaction", () => {
 
     repo.focus();
     repo.value = "owner/repo";
-    repo.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, composed: true }));
+    repo.dispatchEvent(new Event("paste", { bubbles: true, composed: true }));
     idea.focus();
     idea.value = "build this";
     idea.dispatchEvent(new KeyboardEvent("keydown", { key: "b", bubbles: true, composed: true }));
