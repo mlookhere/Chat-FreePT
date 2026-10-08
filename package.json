@@ -12,7 +12,7 @@
     "lint": "eslint src tests scripts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,html,json,css}\" \"tests/**/*.ts\" \"scripts/*.mjs\" \"*.md\"",
-    "format:check": "prettier --write \"src/common/state-machine.ts\" \"src/content/selectors.ts\" \"src/content/ui/view.ts\" \"tests/panel.test.ts\" \"tests/run-controller.test.ts\" \"tests/selectors.test.ts\" \"tests/state-machine.test.ts\" \"tests/transcript.test.ts\" && git diff -- \"src/common/state-machine.ts\" \"src/content/selectors.ts\" \"src/content/ui/view.ts\" \"tests/panel.test.ts\" \"tests/run-controller.test.ts\" \"tests/selectors.test.ts\" \"tests/state-machine.test.ts\" \"tests/transcript.test.ts\" && exit 1"
+    "format:check": "prettier --check \"src/**/*.{ts,html,json,css}\" \"tests/**/*.ts\" \"scripts/*.mjs\""
   },
   "repository": {
     "type": "git",
