@@ -61,6 +61,18 @@ describe("state persistence context", () => {
     expect(state.lastUserText).toBe("run the release checks");
   });
 
+  it("resumes when ChatGPT starts generating after an interruption", () => {
+    const interrupted = reduce(
+      toStreaming(start()),
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    ).state;
+    const resumed = reduce(interrupted, { type: "STREAM_STARTED" }, settings);
+    expect(resumed.state.status).toBe("streaming");
+    expect(resumed.state.lastLifecycleSignal).toBe("generation-start");
+    expect(resumed.state.pauseReason).toBeUndefined();
+  });
+
   it("recovers only an interrupted permission flow", () => {
     const interrupted = reduce(
       toStreaming(start()),
