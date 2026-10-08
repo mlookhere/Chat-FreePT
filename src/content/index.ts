@@ -104,12 +104,15 @@ function startController(state: RunState, settings: Settings): void {
       panel?.render(next);
       diagnostics.captureSnapshot("controller-change", true);
     },
-    onShowModal: () => {
-      if (controller) panel?.showCompletionModal(controller.state);
+    onShowCompletion: () => {
+      if (controller) panel?.showCompletion(controller.state);
     },
     onContextInvalidated: () => contextGuard.invalidate(),
     onDiagnosticEvent: (event) => diagnostics.recordControllerEvent(event),
-    onComposerAccessChange: (enabled) => panel?.setNativeAutomationAccess(enabled),
+    withComposerAccess: async (task) => {
+      if (panel) return panel.withNativeComposerAccess(task);
+      return task();
+    },
   });
   controller = ctl;
   panel?.render(state);
@@ -222,8 +225,6 @@ async function activateComposerPage(): Promise<void> {
     return;
   }
   if (contextGuard.invalidated || chatGptPageMode(location.href) !== "composer" || panel) return;
-
-  if (contextGuard.invalidated || panel) return;
 
   panel = new Panel({
     onEvent: (event) => controller?.dispatch(event),
