@@ -4,7 +4,7 @@ This repository is Chat FreePT, a Chrome MV3 extension embedded into chatgpt.com
 ChatGPT conversation into an autonomous development loop: the extension injects CI-pipeline
 "skill" prompts, ChatGPT does all GitHub work itself through its GitHub MCP connector, and the
 extension orchestrates the conversation (detects when streaming stops, reads a status marker,
-auto-sends "continue", and shows a completion modal when the project is done).
+auto-sends "continue", and shows completion state inside the integrated composer when the project is done).
 
 The repository vendors the CI-Pipline control plane (`.claude/`, `ci/`, `workflow/`,
 `scripts/`, `flow`, `.claude-workflow.json`, `.github/`). Do not edit vendored plane code
@@ -23,16 +23,16 @@ configuration.
 ## Layout
 
 - `src/` — extension TypeScript. `src/content/` runs inside chatgpt.com, `src/background/`
-  is the MV3 service worker, `src/options/` the options page, `src/common/` shared modules,
-  `src/prompts/` the skill prompt templates.
-- `tests/` — vitest unit tests (jsdom). DOM-driver tests run against fixture snapshots in
-  `tests/fixtures/`.
+  is the MV3 service worker, `src/options/` the options page, and `src/common/` shared state,
+  settings, storage, repository, marker, and prompt modules.
+- `tests/` — vitest unit and jsdom integration tests for state, selectors, composer behavior,
+  persistence, lifecycle recovery, and diagnostics.
 - `scripts/build.mjs` — esbuild bundling into `dist/`; `npm run package` zips `dist/` into
   `artifacts/chat-freept.zip`.
 
 ## Engineering behavior
 
-- Work on `work/ISSUE-slug`, never on `dev` or `master` directly.
+- Work on `work/ISSUE-slug`, never on `dev` or `main` directly.
 - Trace the real execution path before editing. The chatgpt.com DOM is not ours: every
   selector lives in `src/content/selectors.ts` with ordered fallbacks, and nothing else may
   query the host page directly.
