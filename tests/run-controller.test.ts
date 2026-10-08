@@ -509,7 +509,6 @@ describe("RunController network lifecycle", () => {
     expect(controller.state.lastLifecycleSignal).toBe("generation-complete");
     controller.dispose();
   });
-
 });
 
 describe("RunController permission recovery", () => {
@@ -599,7 +598,6 @@ describe("RunController permission recovery", () => {
     expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
-
 });
 
 describe("RunController interrupted network lifecycle", () => {
