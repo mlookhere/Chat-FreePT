@@ -76,6 +76,12 @@ function nativeSurface(): HTMLElement {
   return surface;
 }
 
+function nativeForm(): HTMLFormElement {
+  const form = document.querySelector<HTMLFormElement>('form[data-type="unified-composer"]');
+  if (!form) throw new Error("native composer form missing");
+  return form;
+}
+
 function nativeComposer(): HTMLElement {
   const composer = document.getElementById("prompt-textarea");
   if (!composer) throw new Error("native composer input missing");
@@ -141,12 +147,14 @@ describe("native composer launcher placement", () => {
     expect(PANEL_CSS).toContain("pointer-events: none");
   });
 
-  it("keeps the expanded surface outside the native composer DOM", () => {
+  it("mounts the extended surface inside ChatGPT's native composer form", () => {
     onboardingDone();
-    makePanel();
+    const panel = makePanel();
+    panel.render(newRunState("conversation-1", 1));
 
-    expect(overlayHost().parentElement).toBe(document.body);
+    expect(overlayHost().parentElement).toBe(nativeForm());
     expect(nativeSurface().contains(overlayHost())).toBe(false);
+    expect(nativeForm().contains(overlayHost())).toBe(true);
     expect(host().dataset["cfptLauncher"]).toBe("airplane");
   });
 
@@ -166,17 +174,18 @@ describe("native composer launcher placement", () => {
     expect(document.querySelectorAll("#cfpt-root")).toHaveLength(1);
   });
 
-  it("uses integrated takeover styles rather than the old detached dock", () => {
+  it("uses inline composer styles rather than a viewport overlay", () => {
     expect(PANEL_CSS).toContain(".cfpt-takeover-backdrop");
-    expect(PANEL_CSS).toContain("backdrop-filter: blur(22px)");
+    expect(PANEL_CSS).toContain('data-cfpt-host="overlay"][data-expanded="true"]');
     expect(PANEL_CSS).toContain('data-cfpt-host="launcher"');
-    expect(PANEL_CSS).toContain("z-index: 2147483646");
+    expect(PANEL_CSS).toContain("position: relative");
+    expect(PANEL_CSS).not.toContain("position: fixed");
     expect(PANEL_CSS).not.toContain(".cfpt-dock");
   });
 });
 
 describe("composer takeover lifecycle", () => {
-  it("moves native focus, uses inert, and restores the exact native state on close", () => {
+  it("visually replaces the native bar and restores its exact inline state on close", () => {
     onboardingDone();
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
@@ -184,29 +193,38 @@ describe("composer takeover lifecycle", () => {
     expect(document.activeElement).toBe(nativeComposer());
 
     panel.toggle(true);
+    expect(nativeForm().dataset["cfptTakeover"]).toBe("true");
+    expect(nativeSurface().dataset["cfptNativeHidden"]).toBe("true");
+    expect(nativeSurface().style.position).toBe("absolute");
+    expect(nativeSurface().style.opacity).toBe("0");
     expect(nativeSurface().style.pointerEvents).toBe("none");
-    expect(nativeSurface().inert).toBe(true);
-    expect(nativeSurface().getAttribute("aria-hidden")).toBe("false");
-    expect(nativeSurface().dataset["cfptTakeover"]).toBe("true");
-    expect(document.activeElement).not.toBe(nativeComposer());
+    expect(nativeSurface().inert ?? false).toBe(false);
+    expect(overlayHost().dataset["expanded"]).toBe("true");
     expect(host().dataset["expanded"]).toBe("true");
+    expect(document.activeElement).not.toBe(nativeComposer());
 
     panel.toggle(false);
+    expect(nativeSurface().style.position).toBe("");
+    expect(nativeSurface().style.opacity).toBe("");
     expect(nativeSurface().style.pointerEvents).toBe("auto");
-    expect(nativeSurface().inert ?? false).toBe(false);
-    expect(nativeSurface().getAttribute("aria-hidden")).toBe("false");
-    expect(nativeSurface().dataset["cfptTakeover"]).toBeUndefined();
+    expect(nativeSurface().dataset["cfptNativeHidden"]).toBeUndefined();
+    expect(nativeForm().dataset["cfptTakeover"]).toBeUndefined();
   });
 
-  it("restores a composer that was already inert before takeover", () => {
+  it("restores pre-existing native inline styles exactly", () => {
     onboardingDone();
-    nativeSurface().inert = true;
+    nativeSurface().style.position = "relative";
+    nativeSurface().style.opacity = "0.8";
+    nativeSurface().style.pointerEvents = "auto";
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
 
     panel.toggle(true);
     panel.toggle(false);
-    expect(nativeSurface().inert).toBe(true);
+
+    expect(nativeSurface().style.position).toBe("relative");
+    expect(nativeSurface().style.opacity).toBe("0.8");
+    expect(nativeSurface().style.pointerEvents).toBe("auto");
   });
 
   it("does not leak launcher events into ChatGPT composer controls", () => {
@@ -250,15 +268,18 @@ describe("composer takeover lifecycle", () => {
     });
     expect(overlayShadow().textContent).toContain("page structure changed");
   });
+});
 
-  it("closes when the user clicks outside the integrated panel", () => {
+describe("integrated composer interaction", () => {
+  it("restores the native composer from the integrated close control", () => {
     onboardingDone();
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
 
-    overlayShadow().querySelector<HTMLElement>(".cfpt-takeover-backdrop")?.click();
+    overlayShadow().querySelector<HTMLButtonElement>('[data-action="close"]')?.click();
     expect(host().dataset["expanded"]).toBe("false");
+    expect(overlayHost().dataset["expanded"]).toBe("false");
     expect(nativeSurface().style.pointerEvents).toBe("auto");
   });
 
@@ -273,18 +294,39 @@ describe("composer takeover lifecycle", () => {
     expect(host().dataset["expanded"]).toBe("false");
   });
 
-  it("keeps planning input focus outside ChatGPT's composer focus handlers", () => {
+  it("keeps typing inside Chat FreePT and blocks ChatGPT document key handlers", () => {
     onboardingDone();
     const nativeFocus = vi.fn();
+    const documentKeydown = vi.fn();
     nativeSurface().addEventListener("focusin", nativeFocus);
+    document.addEventListener("keydown", documentKeydown);
     const panel = makePanel();
     panel.render(newRunState("conversation-1", 1));
     panel.toggle(true);
 
     const idea = overlayShadow().querySelector<HTMLTextAreaElement>('[data-ref="idea"]');
-    idea?.focus();
+    if (!idea) throw new Error("planning input missing");
+    idea.focus();
+    idea.value = "x";
+    idea.dispatchEvent(new KeyboardEvent("keydown", { key: "x", bubbles: true, composed: true }));
+    idea.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: "x" }));
+
     expect(overlayShadow().activeElement).toBe(idea);
     expect(nativeFocus).not.toHaveBeenCalled();
+    expect(documentKeydown).not.toHaveBeenCalled();
+    document.removeEventListener("keydown", documentKeydown);
+  });
+
+  it("keeps the parked native composer available for automated focus and send", () => {
+    onboardingDone();
+    const panel = makePanel();
+    panel.render(newRunState("conversation-1", 1));
+    panel.toggle(true);
+
+    nativeComposer().focus();
+    expect(document.activeElement).toBe(nativeComposer());
+    expect(nativeSurface().inert ?? false).toBe(false);
+    expect(nativeSurface().dataset["cfptNativeHidden"]).toBe("true");
   });
 });
 
@@ -384,6 +426,7 @@ describe("first-run and plan-aware setup", () => {
 
     expect(overlayShadow().textContent).toContain("One conversation · one repository");
     expect(overlayShadow().textContent).toContain("NEEDS_INPUT");
+    expect(overlayShadow().querySelector('[aria-modal="true"]')).toBeNull();
     expect(overlayShadow().textContent).not.toContain("Follow along");
   });
 
@@ -409,6 +452,7 @@ describe("first-run and plan-aware setup", () => {
     panel.showCompletionModal(complete);
 
     expect(host().dataset["expanded"]).toBe("true");
-    expect(nativeSurface().dataset["cfptTakeover"]).toBe("true");
+    expect(nativeForm().dataset["cfptTakeover"]).toBe("true");
+    expect(nativeSurface().dataset["cfptNativeHidden"]).toBe("true");
   });
 });
