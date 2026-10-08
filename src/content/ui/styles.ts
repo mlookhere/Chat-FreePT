@@ -368,21 +368,6 @@ textarea:focus, input:focus, select:focus {
 .cfpt-log .marker { color: #059669; }
 .cfpt-link { color: #3b82f6; text-decoration: none; }
 .cfpt-link:hover { text-decoration: underline; }
-.cfpt-onboarding-toast {
-  position: absolute;
-  pointer-events: auto;
-  width: min(310px, calc(100vw - 24px));
-  padding: 12px;
-  border: 1px solid var(--cfpt-border-strong);
-  border-radius: 12px;
-  background: var(--cfpt-surface);
-  color: var(--cfpt-text);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  font-size: 12px;
-  line-height: 1.4;
-}
-.cfpt-onboarding-toast strong { display: block; padding-right: 22px; font-size: 13px; }
-.cfpt-onboarding-toast p { margin: 6px 0 10px; color: var(--cfpt-muted); }
 .cfpt-icon-close {
   position: absolute;
   top: 7px;
@@ -400,7 +385,6 @@ textarea:focus, input:focus, select:focus {
 .cfpt-icon-close:hover { background: var(--cfpt-hover); color: var(--cfpt-text); }
 .cfpt-check-row { display: flex; align-items: center; gap: 7px; color: var(--cfpt-muted); cursor: pointer; }
 .cfpt-check-row input { margin: 0; }
-.cfpt-toast-continue { margin-top: 10px; margin-right: 0; }
 .cfpt-setup-backdrop {
   position: relative;
   width: 100%;

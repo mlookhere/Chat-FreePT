@@ -20,11 +20,17 @@ contract, translated for ChatGPT — and then orchestrates the conversation end 
    - `CONTINUE` — more work remains; the extension sends "continue" automatically.
    - `NEEDS_INPUT` — ChatGPT needs a decision; the extension pauses and notifies you.
    - `PLAN_READY` — the master plan is finished; the panel offers **Start development**.
-   - `COMPLETE` — everything is merged and green; a completion modal takes over the screen.
+   - `COMPLETE` — everything is merged and green; the integrated FreePT composer shows completion controls.
 
 The extension never talks to GitHub and never holds GitHub credentials. ChatGPT's available
 GitHub tools own every repository operation; Chat FreePT is the prompt injector, conversation
 orchestrator, repository lock, and UI.
+
+The airplane switches the same composer slot between native ChatGPT and Chat FreePT. FreePT's
+panel code owns only its UI and actions; a dedicated native-composer adapter owns every
+temporary mutation to ChatGPT's composer and restores the exact native state when FreePT closes.
+Automation receives native-editor access only for the scoped insert/send operation, then the
+guard is restored automatically.
 
 ## Requirements
 

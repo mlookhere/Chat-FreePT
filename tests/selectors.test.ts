@@ -46,7 +46,7 @@ const CHATGPT_FIXTURE = `
                   </div>
                 </div>
                 <div data-composer-input>
-                  <div id="prompt-textarea" class="ProseMirror" contenteditable="true"><p></p></div>
+                  <div id="prompt-textarea" class="ProseMirror" role="textbox" contenteditable="true"><p></p></div>
                 </div>
                 <button data-testid="send-button" type="submit" aria-label="Send prompt"></button>
               </div>
@@ -67,6 +67,7 @@ describe("core selector resolution", () => {
     expect(resolve("composer")?.candidateIndex).toBe(0);
     expect(resolve("composerHeader")?.candidateIndex).toBe(0);
     expect(resolve("composerSurface")?.candidateIndex).toBe(0);
+    expect(resolve("composerForm")?.candidateIndex).toBe(0);
     expect(resolve("sendButton")?.candidateIndex).toBe(0);
     expect(resolve("conversationRoot")?.candidateIndex).toBe(0);
     expect(resolve("assistantMessage")?.candidateIndex).toBe(0);
@@ -89,6 +90,16 @@ describe("core selector resolution", () => {
     const turn = queryLast("assistantMessage") as HTMLElement;
     turn.insertAdjacentHTML("beforeend", '<span data-testid="tool-call">GitHub</span>');
     expect(query("toolIndicator", turn)?.textContent).toBe("GitHub");
+  });
+
+  it("still resolves the structural composer while FreePT guards editability", () => {
+    const composer = document.getElementById("prompt-textarea");
+    composer?.setAttribute("contenteditable", "false");
+    composer?.setAttribute("aria-disabled", "true");
+
+    expect(resolve("composer")?.candidateIndex).toBe(0);
+    expect(query("composer")).toBe(composer);
+    expect(healthCheck().missing).not.toContain("composer");
   });
 
   it("treats an empty-composer Send button absence as healthy", () => {

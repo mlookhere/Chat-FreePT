@@ -174,6 +174,18 @@ describe("diagnostics event correlation", () => {
     expect(new Set(seq).size).toBe(seq.length);
   });
 
+  it("starts a fresh diagnostics session id for each recording", () => {
+    const recorder = makeRecorder(stateWithSecrets());
+    recorder.start();
+    const first = recorder.buildExport().sessionId;
+    recorder.stop();
+
+    recorder.start();
+    const second = recorder.buildExport().sessionId;
+
+    expect(second).not.toBe(first);
+  });
+
   it("stops recording without discarding the captured session", () => {
     const recorder = makeRecorder(stateWithSecrets());
     recorder.start();

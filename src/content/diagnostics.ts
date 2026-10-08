@@ -59,7 +59,7 @@ interface RecorderHooks {
 }
 
 export class DiagnosticsRecorder {
-  private readonly sessionId = crypto.randomUUID();
+  private sessionId = crypto.randomUUID();
   private readonly channel = crypto.randomUUID();
   private records: DiagnosticRecord[] = [];
   private active = false;
@@ -120,6 +120,7 @@ export class DiagnosticsRecorder {
 
   start(): void {
     if (this.active) return;
+    this.sessionId = crypto.randomUUID();
     this.records = [];
     this.dropped = 0;
     this.seq = 0;

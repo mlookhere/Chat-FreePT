@@ -339,7 +339,7 @@ describe("state machine marker transitions", () => {
     );
     expect(done.phase).toBe("complete");
     expect(done.status).toBe("complete");
-    expect(effects.some((e) => e.do === "showModal")).toBe(true);
+    expect(effects.some((e) => e.do === "showCompletion")).toBe(true);
   });
 });
 
