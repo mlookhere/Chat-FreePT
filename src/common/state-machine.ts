@@ -94,7 +94,14 @@ type SendEvent = Extract<
 >;
 type StreamEvent = Extract<
   MachineEvent,
-  { type: "STREAM_STARTED" | "REPLY_COMPLETE" | "STREAM_STUCK" | "STREAM_INTERRUPTED" }
+  {
+    type:
+      | "STREAM_STARTED"
+      | "REPLY_COMPLETE"
+      | "STREAM_STUCK"
+      | "STREAM_INTERRUPTED"
+      | "PERMISSION_CONTINUED";
+  }
 >;
 type SystemEvent = Extract<MachineEvent, { type: "COOLDOWN_ELAPSED" | "PAGE_SIGNAL" }>;
 
