@@ -510,6 +510,9 @@ describe("RunController network lifecycle", () => {
     controller.dispose();
   });
 
+});
+
+describe("RunController permission recovery", () => {
   it("clicks the GitHub MCP permission Continue control instead of pausing", () => {
     const controller = makeController(streamingState());
     const button = document.createElement("button");
@@ -575,6 +578,9 @@ describe("RunController network lifecycle", () => {
     controller.dispose();
   });
 
+});
+
+describe("RunController interrupted network lifecycle", () => {
   it("pauses automation when ChatGPT stop_conversation is observed", () => {
     const controller = makeController(streamingState());
 
