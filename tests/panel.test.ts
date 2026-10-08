@@ -268,7 +268,9 @@ describe("composer takeover lifecycle", () => {
     });
     expect(overlayShadow().textContent).toContain("page structure changed");
   });
+});
 
+describe("integrated composer interaction", () => {
   it("restores the native composer from the integrated close control", () => {
     onboardingDone();
     const panel = makePanel();
