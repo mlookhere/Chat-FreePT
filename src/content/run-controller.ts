@@ -121,10 +121,11 @@ export class RunController {
 
   dispatch(event: MachineEvent): void {
     if (this.disposed) return;
-    const effectiveEvent =
-      event.type === "USER_RESUME" && !event.lastUserText
-        ? { ...event, lastUserText: lastUserMessageText() ?? undefined }
-        : event;
+    let effectiveEvent: MachineEvent = event;
+    if (event.type === "USER_RESUME" && !event.lastUserText) {
+      const lastUserText = lastUserMessageText();
+      if (lastUserText) effectiveEvent = { ...event, lastUserText };
+    }
     const previous = this.state;
     this.onDiagnosticEvent({ kind: "machine-event", event: effectiveEvent });
     const { state, effects } = reduce(this.state, effectiveEvent, this.settings);
