@@ -65,6 +65,22 @@ export function launcherState(state: RunState): string {
   return "run";
 }
 
+export function panelViewKey(state: RunState, passive: boolean): string {
+  return [
+    state.phase,
+    state.status,
+    state.pauseReason ?? "",
+    state.repo ?? "",
+    state.lastMarker?.status ?? "",
+    state.lastMarker?.item ?? "",
+    state.lastMarker?.url ?? "",
+    state.lastLifecycleSignal ?? "",
+    queuedMessages(state).join("\u001f"),
+    String(autoContinueEnabled(state)),
+    String(passive),
+  ].join("|");
+}
+
 export function renderPanelShell(body: string): string {
   return `
     <div class="cfpt-panel-head">
