@@ -643,10 +643,7 @@ export class Panel {
         "--app-color-background-surface-under",
       ),
     );
-    setVar(
-      "--cfpt-border",
-      read("--border-light", "--color-border", "--app-color-border"),
-    );
+    setVar("--cfpt-border", read("--border-light", "--color-border", "--app-color-border"));
     setVar(
       "--cfpt-border-strong",
       read("--border-medium", "--color-border-strong", "--app-color-border-heavy"),
