@@ -41,7 +41,6 @@ describe("assistant transcript identity", () => {
   });
 });
 
-
 describe("user transcript context", () => {
   it("reads the newest user turn through the structural fallback", () => {
     document.body.innerHTML = `
