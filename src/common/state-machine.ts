@@ -47,7 +47,7 @@ export type Effect =
   | { do: "startCooldown"; ms: number }
   | { do: "notify"; title: string; message: string }
   | { do: "badge"; text: string }
-  | { do: "showModal" }
+  | { do: "showCompletion" }
   | { do: "reconcile" };
 
 export interface ReduceResult {
@@ -704,7 +704,7 @@ function handleMarker(ctx: ReduceContext, marker: Marker, text: string): void {
       state.status = "complete";
       ctx.effects.push(
         { do: "badge", text: "DONE" },
-        { do: "showModal" },
+        { do: "showCompletion" },
         {
           do: "notify",
           title: "Development complete",
