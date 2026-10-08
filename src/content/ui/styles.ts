@@ -2,36 +2,82 @@ export const PANEL_CSS = `
 :host {
   all: initial;
   color-scheme: inherit;
+  font-family: inherit;
   --cfpt-surface: var(
     --cfpt-native-surface,
-    var(--color-background-composer-surface, var(--color-surface, Canvas))
+    var(
+      --composer-surface-primary,
+      var(
+        --main-surface-primary,
+        var(--color-background-composer-surface, var(--color-surface, Canvas))
+      )
+    )
   );
-  --cfpt-text: var(--cfpt-native-text, var(--color-text-primary, var(--color-text, CanvasText)));
+  --cfpt-text: var(
+    --cfpt-native-text,
+    var(--text-primary, var(--color-text-primary, var(--color-text, CanvasText)))
+  );
   --cfpt-muted: var(
-    --color-text-secondary,
-    color-mix(in srgb, var(--cfpt-text) 62%, transparent)
+    --cfpt-native-muted,
+    var(
+      --text-secondary,
+      var(--color-text-secondary, color-mix(in srgb, var(--cfpt-text) 62%, transparent))
+    )
   );
   --cfpt-border: var(
-    --color-border,
-    color-mix(in srgb, var(--cfpt-text) 18%, transparent)
+    --cfpt-native-border,
+    var(--border-light, var(--color-border, color-mix(in srgb, var(--cfpt-text) 18%, transparent)))
   );
   --cfpt-border-strong: var(
-    --color-border-strong,
-    color-mix(in srgb, var(--cfpt-text) 28%, transparent)
+    --cfpt-native-border-strong,
+    var(
+      --border-medium,
+      var(--color-border-strong, color-mix(in srgb, var(--cfpt-text) 28%, transparent))
+    )
   );
   --cfpt-field-surface: var(
-    --color-surface-secondary,
-    color-mix(in srgb, var(--cfpt-surface) 82%, var(--cfpt-text) 18%)
+    --cfpt-native-field-surface,
+    var(
+      --composer-surface-secondary,
+      var(
+        --main-surface-secondary,
+        var(
+          --color-surface-secondary,
+          color-mix(in srgb, var(--cfpt-surface) 88%, var(--cfpt-text) 12%)
+        )
+      )
+    )
   );
   --cfpt-hover: var(
     --color-surface-tertiary,
-    color-mix(in srgb, var(--cfpt-text) 9%, transparent)
+    color-mix(in srgb, var(--cfpt-accent) 8%, var(--cfpt-surface))
   );
   --cfpt-accent: var(
-    --color-text-composer-reference,
-    var(--app-color-border-focus, var(--app-color-accent-blue, var(--accent-blue, #3a83f7)))
+    --theme-submit-btn-bg,
+    var(
+      --theme-submit-button-bg,
+      var(
+        --accent-primary,
+        var(
+          --accent-color,
+          var(
+            --color-accent,
+            var(
+              --color-text-composer-reference,
+              var(
+                --app-color-border-focus,
+                var(--app-color-accent-blue, var(--accent-blue, #3a83f7))
+              )
+            )
+          )
+        )
+      )
+    )
   );
-  --cfpt-focus: var(--app-color-border-focus, var(--cfpt-accent));
+  --cfpt-focus: var(
+    --cfpt-native-focus,
+    var(--app-color-border-focus, var(--color-border-focus, var(--cfpt-accent)))
+  );
   --cfpt-radius: var(--cfpt-native-radius, var(--composer-border-radius, 26px));
 }
 :host([data-cfpt-host="launcher"]) {
@@ -73,7 +119,7 @@ export const PANEL_CSS = `
 }
 * {
   box-sizing: border-box;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: inherit;
 }
 button, textarea, input, select { font: inherit; }
 .cfpt-hidden { display: none !important; }
