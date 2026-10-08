@@ -149,20 +149,25 @@ export function updatePanelDynamic(
 
 export function updateDiagnosticsDom(panel: HTMLElement, status: DiagnosticsStatus): void {
   const line = panel.querySelector<HTMLElement>('[data-ref="diagnostics-status"]');
-  if (line) {
-    line.textContent = status.recording
-      ? `Recording · ${status.records} events${status.dropped ? ` · ${status.dropped} trimmed` : ""}`
-      : status.records > 0
-        ? `Stopped · ${status.records} events ready to export`
-        : "Not recording";
-  }
+  if (line) line.textContent = diagnosticsStatusText(status);
 
-  const start = panel.querySelector<HTMLButtonElement>('[data-action="diagnostics-start"]');
-  const stop = panel.querySelector<HTMLButtonElement>('[data-action="diagnostics-stop"]');
-  const exportButton = panel.querySelector<HTMLButtonElement>('[data-action="diagnostics-export"]');
-  if (start) start.disabled = status.recording;
-  if (stop) stop.disabled = !status.recording;
-  if (exportButton) exportButton.disabled = status.records === 0;
+  setActionDisabled(panel, "diagnostics-start", status.recording);
+  setActionDisabled(panel, "diagnostics-stop", !status.recording);
+  setActionDisabled(panel, "diagnostics-export", status.records === 0);
+}
+
+function diagnosticsStatusText(status: DiagnosticsStatus): string {
+  if (status.recording) {
+    const trimmed = status.dropped ? ` · ${status.dropped} trimmed` : "";
+    return `Recording · ${status.records} events${trimmed}`;
+  }
+  if (status.records > 0) return `Stopped · ${status.records} events ready to export`;
+  return "Not recording";
+}
+
+function setActionDisabled(panel: HTMLElement, action: string, disabled: boolean): void {
+  const button = panel.querySelector<HTMLButtonElement>(`[data-action="${action}"]`);
+  if (button) button.disabled = disabled;
 }
 
 function statusBodyHtml(state: RunState): string {
