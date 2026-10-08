@@ -196,6 +196,8 @@ export class Panel {
     this.launcherTipEl.classList.add("cfpt-hidden");
     this.host.dataset["highlighted"] = "false";
     if (suppress) this.onboarding.launcherTipSuppressed = true;
+    const tooltip = this.launcherShadow.querySelector<HTMLElement>("#cfpt-launcher-tooltip");
+    if (tooltip) tooltip.textContent = "Chat FreePT";
     await this.persistOnboarding();
     if (!this.onboarding.setupShown) this.showSetupModal();
     else this.host.dataset["onboarding"] = "done";
@@ -358,7 +360,7 @@ export class Panel {
   }
 
   private onLauncherClick(): void {
-    if (!this.launcherTipEl.classList.contains("cfpt-hidden")) {
+    if (this.host.dataset["onboarding"] === "tip") {
       void this.acknowledgeLauncherTip(this.tipCheckboxChecked());
     }
     this.toggle();
@@ -387,10 +389,11 @@ export class Panel {
 
   private showLauncherTip(): void {
     this.setupBackdropEl.classList.add("cfpt-hidden");
-    this.launcherTipEl.classList.remove("cfpt-hidden");
+    this.launcherTipEl.classList.add("cfpt-hidden");
     this.host.dataset["onboarding"] = "tip";
     this.host.dataset["highlighted"] = "true";
-    this.positionLauncherTip();
+    const tooltip = this.launcherShadow.querySelector<HTMLElement>("#cfpt-launcher-tooltip");
+    if (tooltip) tooltip.textContent = "Chat FreePT — click to extend this composer";
   }
 
   private showSetupModal(): void {
@@ -553,7 +556,6 @@ export class Panel {
     surface.style.clipPath = "inset(50%)";
     surface.style.opacity = "0";
     surface.style.pointerEvents = "none";
-    surface.style.visibility = "hidden";
     surface.dataset["cfptNativeHidden"] = "true";
     form.dataset["cfptTakeover"] = "true";
     this.guardNativeSurface(!this.nativeAutomationAccess);
@@ -563,6 +565,7 @@ export class Panel {
     const snapshot = this.nativeSurface;
     if (!snapshot) return;
     snapshot.surface.inert = guarded;
+    snapshot.surface.style.visibility = guarded ? "hidden" : snapshot.visibility;
     snapshot.surface.dataset["cfptNativeGuarded"] = String(guarded);
     snapshot.surface.setAttribute("aria-hidden", "true");
     if (guarded && snapshot.surface.contains(document.activeElement)) this.focusIntegratedSurface();
