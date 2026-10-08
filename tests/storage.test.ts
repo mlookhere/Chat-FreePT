@@ -117,6 +117,9 @@ describe("run state", () => {
     const state = {
       ...newRunState("ultra", 123),
       repo: "owner/project",
+      repoName: "owner/project",
+      idea: "persist my draft",
+      lastUserText: "last human instruction",
       queuedUserTexts: ["first", "second"],
       lastLifecycleSignal: "generation-complete",
       lastMarker: {
