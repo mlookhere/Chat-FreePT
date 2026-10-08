@@ -8,6 +8,7 @@ import { normalizeRepositoryInput } from "../../common/repository";
 import type { RunState } from "../../common/types";
 import type { DiagnosticsStatus } from "../diagnostics";
 import { healthCheck, query, queryGuideTarget } from "../selectors";
+import { NativeComposerHost } from "./native-composer";
 import { PANEL_CSS } from "./styles";
 
 export interface PanelHooks {
@@ -20,29 +21,7 @@ export interface PanelHooks {
 }
 
 interface OnboardingState {
-  launcherTipSuppressed: boolean;
   setupShown: boolean;
-}
-
-interface NativeSurfaceSnapshot {
-  form: HTMLFormElement;
-  surface: HTMLElement;
-  parent: HTMLElement;
-  composer: HTMLElement | null;
-  composerContentEditable: string | null;
-  composerTabIndex: string | null;
-  composerAriaDisabled: string | null;
-  position: string;
-  inset: string;
-  width: string;
-  height: string;
-  overflow: string;
-  clipPath: string;
-  opacity: string;
-  pointerEvents: string;
-  visibility: string;
-  inert: boolean;
-  ariaHidden: string | null;
 }
 
 const FREEPT_INPUT_EVENTS = [
@@ -58,7 +37,6 @@ const FREEPT_INPUT_EVENTS = [
 
 const ONBOARDING_KEY = "cfpt:onboarding:v1";
 const DEFAULT_ONBOARDING: OnboardingState = {
-  launcherTipSuppressed: false,
   setupShown: false,
 };
 
@@ -83,44 +61,11 @@ function esc(text: string): string {
 function normalizeOnboarding(value: unknown): OnboardingState {
   if (!value || typeof value !== "object") return { ...DEFAULT_ONBOARDING };
   const candidate = value as Partial<OnboardingState>;
-  return {
-    launcherTipSuppressed: candidate.launcherTipSuppressed === true,
-    setupShown: candidate.setupShown === true,
-  };
+  return { setupShown: candidate.setupShown === true };
 }
 
 function canQueueNext(state: RunState): boolean {
   return state.phase === "planning" || state.phase === "developing";
-}
-
-function themeValue(styles: CSSStyleDeclaration[], names: string[]): string {
-  for (const name of names) {
-    for (const style of styles) {
-      const value = style.getPropertyValue(name).trim();
-      if (value) return value;
-    }
-  }
-  return "";
-}
-
-function isTransparentColor(value: string): boolean {
-  const normalized = value.replace(/\s+/g, "").toLowerCase();
-  return (
-    !normalized ||
-    normalized === "transparent" ||
-    normalized === "rgba(0,0,0,0)" ||
-    normalized === "rgb(0 0 0/0)"
-  );
-}
-
-function effectiveBackground(element: HTMLElement): string {
-  let current: HTMLElement | null = element;
-  while (current) {
-    const value = getComputedStyle(current).backgroundColor;
-    if (!isTransparentColor(value)) return value;
-    current = current.parentElement;
-  }
-  return "";
 }
 
 /** Native-feeling launcher plus an in-place extended composer that replaces ChatGPT's visible bar. */
@@ -132,8 +77,8 @@ export class Panel {
   private readonly shadow: ShadowRoot;
   private readonly takeoverBackdropEl: HTMLDivElement;
   private readonly panelEl: HTMLDivElement;
-  private readonly launcherTipEl: HTMLDivElement;
   private readonly setupBackdropEl: HTMLDivElement;
+  private readonly nativeComposer: NativeComposerHost;
   private readonly mountObserver: MutationObserver;
   private readonly themeObserver: MutationObserver;
   private lastViewKey = "";
@@ -141,8 +86,6 @@ export class Panel {
   private mountQueued = false;
   private disposed = false;
   private onboarding = { ...DEFAULT_ONBOARDING };
-  private nativeSurface: NativeSurfaceSnapshot | null = null;
-  private nativeAutomationAccess = false;
   private lastIntegratedField: HTMLInputElement | HTMLTextAreaElement | null = null;
   private diagnosticsStatus: DiagnosticsStatus = { recording: false, records: 0, dropped: 0 };
 
@@ -158,13 +101,13 @@ export class Panel {
     this.shadow = overlay.shadow;
     this.takeoverBackdropEl = overlay.backdrop;
     this.panelEl = overlay.panel;
-    this.launcherTipEl = overlay.tip;
     this.setupBackdropEl = overlay.setup;
+    this.nativeComposer = new NativeComposerHost(this.overlayHost, () => this.focusIntegratedSurface());
 
     this.bindEvents();
     this.mountObserver = new MutationObserver(() => this.scheduleMount());
     this.mountObserver.observe(document.documentElement, { childList: true, subtree: true });
-    this.themeObserver = new MutationObserver(() => this.syncOverlayTheme());
+    this.themeObserver = new MutationObserver(() => this.nativeComposer.syncTheme());
     const themeOptions: MutationObserverInit = {
       attributes: true,
       attributeFilter: ["class", "style", "data-theme", "data-color-scheme"],
