@@ -318,22 +318,7 @@ describe("RunController queued draft safety", () => {
   });
 });
 
-describe("RunController recovery and disposal", () => {
-  it("accepts a user reply after NEEDS_INPUT and re-enters streaming", async () => {
-    const controller = makeController(streamingState());
-
-    watcher().callbacks.onComplete("CHATFREEPT_STATUS: NEEDS_INPUT\nNOTE: choose a database");
-    expect(controller.state.status).toBe("awaiting_user");
-
-    controller.dispatch({ type: "USER_REPLY", text: "Use SQLite." });
-    await flushAsync();
-
-    expect(String(mocks.insertPrompt.mock.calls[0]?.[0])).toContain("Use SQLite.");
-    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
-    expect(controller.state.status).toBe("streaming");
-    controller.dispose();
-  });
-
+describe("RunController native composer access", () => {
   it("unlocks the native composer before health checks and re-locks after send", async () => {
     const trace: string[] = [];
     const controller = makeAccessTraceController(trace);
@@ -347,6 +332,24 @@ describe("RunController recovery and disposal", () => {
     await flushAsync();
 
     expect(trace).toEqual(["unlock", "health", "insert", "send", "lock"]);
+    expect(controller.state.status).toBe("streaming");
+    controller.dispose();
+  });
+
+});
+
+describe("RunController recovery and disposal", () => {
+  it("accepts a user reply after NEEDS_INPUT and re-enters streaming", async () => {
+    const controller = makeController(streamingState());
+
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: NEEDS_INPUT\nNOTE: choose a database");
+    expect(controller.state.status).toBe("awaiting_user");
+
+    controller.dispatch({ type: "USER_REPLY", text: "Use SQLite." });
+    await flushAsync();
+
+    expect(String(mocks.insertPrompt.mock.calls[0]?.[0])).toContain("Use SQLite.");
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
     expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
