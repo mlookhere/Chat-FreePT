@@ -28,6 +28,10 @@ interface NativeSurfaceSnapshot {
   form: HTMLFormElement;
   surface: HTMLElement;
   parent: HTMLElement;
+  composer: HTMLElement | null;
+  composerContentEditable: string | null;
+  composerTabIndex: string | null;
+  composerAriaDisabled: string | null;
   position: string;
   inset: string;
   width: string;
@@ -89,6 +93,36 @@ function canQueueNext(state: RunState): boolean {
   return state.phase === "planning" || state.phase === "developing";
 }
 
+function themeValue(styles: CSSStyleDeclaration[], names: string[]): string {
+  for (const name of names) {
+    for (const style of styles) {
+      const value = style.getPropertyValue(name).trim();
+      if (value) return value;
+    }
+  }
+  return "";
+}
+
+function isTransparentColor(value: string): boolean {
+  const normalized = value.replace(/\s+/g, "").toLowerCase();
+  return (
+    !normalized ||
+    normalized === "transparent" ||
+    normalized === "rgba(0,0,0,0)" ||
+    normalized === "rgb(0 0 0/0)"
+  );
+}
+
+function effectiveBackground(element: HTMLElement): string {
+  let current: HTMLElement | null = element;
+  while (current) {
+    const value = getComputedStyle(current).backgroundColor;
+    if (!isTransparentColor(value)) return value;
+    current = current.parentElement;
+  }
+  return "";
+}
+
 /** Native-feeling launcher plus an in-place extended composer that replaces ChatGPT's visible bar. */
 export class Panel {
   private readonly host: HTMLSpanElement;
@@ -101,6 +135,7 @@ export class Panel {
   private readonly launcherTipEl: HTMLDivElement;
   private readonly setupBackdropEl: HTMLDivElement;
   private readonly mountObserver: MutationObserver;
+  private readonly themeObserver: MutationObserver;
   private lastViewKey = "";
   private stopArmed = false;
   private mountQueued = false;
@@ -108,6 +143,7 @@ export class Panel {
   private onboarding = { ...DEFAULT_ONBOARDING };
   private nativeSurface: NativeSurfaceSnapshot | null = null;
   private nativeAutomationAccess = false;
+  private lastIntegratedField: HTMLInputElement | HTMLTextAreaElement | null = null;
   private diagnosticsStatus: DiagnosticsStatus = { recording: false, records: 0, dropped: 0 };
 
   constructor(private readonly hooks: PanelHooks) {
@@ -128,6 +164,13 @@ export class Panel {
     this.bindEvents();
     this.mountObserver = new MutationObserver(() => this.scheduleMount());
     this.mountObserver.observe(document.documentElement, { childList: true, subtree: true });
+    this.themeObserver = new MutationObserver(() => this.syncOverlayTheme());
+    const themeOptions: MutationObserverInit = {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme", "data-color-scheme"],
+    };
+    this.themeObserver.observe(document.documentElement, themeOptions);
+    if (document.body) this.themeObserver.observe(document.body, themeOptions);
     this.mount();
     void this.initOnboarding();
   }
@@ -182,8 +225,10 @@ export class Panel {
   dispose(): void {
     this.disposed = true;
     this.mountObserver.disconnect();
+    this.themeObserver.disconnect();
     window.removeEventListener("resize", this.onViewportChange);
     window.removeEventListener("scroll", this.onViewportChange, true);
+    window.removeEventListener("focusin", this.guardNativeFocusCapture, true);
     for (const type of FREEPT_INPUT_EVENTS) {
       window.removeEventListener(type, this.isolateFreePtInputCapture, true);
     }
@@ -300,7 +345,10 @@ export class Panel {
     });
     this.shadow.addEventListener("pointerdown", (event) => this.stopComposerPropagation(event));
     this.shadow.addEventListener("mousedown", (event) => this.stopComposerPropagation(event));
-    this.shadow.addEventListener("focusin", (event) => this.stopComposerPropagation(event));
+    this.shadow.addEventListener("focusin", (event) => {
+      this.rememberIntegratedFocus(event);
+      this.stopComposerPropagation(event);
+    });
     this.shadow.addEventListener("beforeinput", (event) => this.stopComposerPropagation(event));
     this.shadow.addEventListener("input", (event) => this.stopComposerPropagation(event));
     this.shadow.addEventListener("paste", (event) => this.stopComposerPropagation(event));
@@ -324,6 +372,7 @@ export class Panel {
     });
     window.addEventListener("resize", this.onViewportChange);
     window.addEventListener("scroll", this.onViewportChange, true);
+    window.addEventListener("focusin", this.guardNativeFocusCapture, true);
     for (const type of FREEPT_INPUT_EVENTS) {
       window.addEventListener(type, this.isolateFreePtInputCapture, true);
     }
@@ -331,9 +380,67 @@ export class Panel {
 
   private readonly isolateFreePtInputCapture = (event: Event): void => {
     if (this.host.dataset["expanded"] !== "true") return;
-    if (!event.composedPath().includes(this.overlayHost)) return;
+    const snapshot = this.nativeSurface;
+    const path = event.composedPath();
+    const fromFreePt = path.includes(this.overlayHost);
+    const fromGuardedNative =
+      snapshot !== null && !this.nativeAutomationAccess && path.includes(snapshot.surface);
+    if (!fromFreePt && !fromGuardedNative) return;
+
+    if (event.type === "paste" && this.redirectPaste(event)) {
+      event.stopImmediatePropagation();
+      return;
+    }
     if (event instanceof KeyboardEvent && event.key === "Escape") this.onKeyDown(event);
-    event.stopPropagation();
+    event.stopImmediatePropagation();
+  };
+
+  private redirectPaste(event: Event): boolean {
+    const field = this.activeIntegratedTextField();
+    const clipboardData = (event as ClipboardEvent).clipboardData;
+    if (!field || field.readOnly || field.disabled || !clipboardData) return false;
+
+    event.preventDefault();
+    const text = clipboardData.getData("text/plain");
+    const start = field.selectionStart ?? field.value.length;
+    const end = field.selectionEnd ?? start;
+    field.setRangeText(text, start, end, "end");
+    field.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        composed: true,
+        data: text,
+        inputType: "insertFromPaste",
+      }),
+    );
+    this.lastIntegratedField = field;
+    field.focus({ preventScroll: true });
+    queueMicrotask(() => field.focus({ preventScroll: true }));
+    return true;
+  }
+
+  private activeIntegratedTextField(): HTMLInputElement | HTMLTextAreaElement | null {
+    const active = this.shadow.activeElement;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return active;
+    return this.lastIntegratedField?.isConnected === true ? this.lastIntegratedField : null;
+  }
+
+  private rememberIntegratedFocus(event: Event): void {
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      this.lastIntegratedField = target;
+    }
+  }
+
+  private readonly guardNativeFocusCapture = (event: FocusEvent): void => {
+    if (this.host.dataset["expanded"] !== "true" || this.nativeAutomationAccess) return;
+    const snapshot = this.nativeSurface;
+    const target = event.target;
+    if (!snapshot || !(target instanceof Node) || !snapshot.surface.contains(target)) return;
+
+    event.stopImmediatePropagation();
+    const field = this.activeIntegratedTextField();
+    if (field) queueMicrotask(() => field.focus({ preventScroll: true }));
   };
 
   private readonly onViewportChange = (): void => {
@@ -476,39 +583,76 @@ export class Panel {
   private syncOverlayTheme(): void {
     const surface = this.nativeComposerSurface();
     if (!surface) return;
-    const surfaceStyle = getComputedStyle(surface);
-    const rootStyle = getComputedStyle(document.documentElement);
-    const readVar = (...names: string[]): string => {
-      for (const name of names) {
-        const value =
-          surfaceStyle.getPropertyValue(name).trim() || rootStyle.getPropertyValue(name).trim();
-        if (value) return value;
-      }
-      return "";
-    };
+    const form = this.nativeComposerForm();
+    const submit = form?.querySelector<HTMLElement>(
+      '#composer-submit-button, button[data-testid="send-button"], button[type="submit"]',
+    );
+    const styleElements = [surface, form, submit, document.body, document.documentElement].filter(
+      (element): element is HTMLElement => element instanceof HTMLElement,
+    );
+    const styles = styleElements.map((element) => getComputedStyle(element));
+    const surfaceStyle = styles[0];
+    if (!surfaceStyle) return;
+
     const setVar = (name: string, value: string): void => {
       if (value) this.overlayHost.style.setProperty(name, value);
+      else this.overlayHost.style.removeProperty(name);
     };
+    const read = (...names: string[]): string => themeValue(styles, names);
 
-    setVar("--cfpt-native-surface", surfaceStyle.backgroundColor);
-    setVar("--cfpt-native-text", surfaceStyle.color);
-    setVar("--cfpt-native-radius", surfaceStyle.borderRadius);
     setVar(
-      "--cfpt-accent",
-      readVar(
+      "--cfpt-native-surface",
+      read(
+        "--composer-surface-primary",
+        "--main-surface-primary",
+        "--color-background-composer-surface",
+        "--color-surface",
+      ) || effectiveBackground(surface),
+    );
+    setVar(
+      "--cfpt-native-text",
+      read("--text-primary", "--color-text-primary", "--color-text") || surfaceStyle.color,
+    );
+    setVar("--cfpt-native-radius", surfaceStyle.borderRadius);
+    const accent =
+      read(
+        "--theme-submit-btn-bg",
+        "--theme-submit-button-bg",
+        "--accent-primary",
+        "--accent-color",
+        "--color-accent",
         "--color-text-composer-reference",
         "--app-color-border-focus",
         "--app-color-accent-blue",
         "--accent-blue",
-      ),
+      ) ||
+      (submit && !isTransparentColor(getComputedStyle(submit).backgroundColor)
+        ? getComputedStyle(submit).backgroundColor
+        : "");
+    setVar("--cfpt-accent", accent);
+    setVar(
+      "--cfpt-focus",
+      read("--app-color-border-focus", "--focus-ring", "--color-border-focus") || accent,
     );
     setVar(
       "--cfpt-field-surface",
-      readVar("--color-surface-secondary", "--app-color-background-surface-under"),
+      read(
+        "--composer-surface-secondary",
+        "--main-surface-secondary",
+        "--color-surface-secondary",
+        "--app-color-background-surface-under",
+      ),
     );
-    setVar("--cfpt-border", readVar("--color-border", "--app-color-border"));
-    setVar("--cfpt-border-strong", readVar("--color-border-strong", "--app-color-border-heavy"));
-    setVar("--cfpt-muted", readVar("--color-text-secondary", "--app-color-text-secondary"));
+    setVar("--cfpt-border", read("--border-light", "--color-border", "--app-color-border"));
+    setVar(
+      "--cfpt-border-strong",
+      read("--border-medium", "--color-border-strong", "--app-color-border-heavy"),
+    );
+    setVar(
+      "--cfpt-muted",
+      read("--text-secondary", "--color-text-secondary", "--app-color-text-secondary"),
+    );
+    if (surfaceStyle.colorScheme) this.overlayHost.style.colorScheme = surfaceStyle.colorScheme;
   }
 
   private applyNativeTakeover(): void {
@@ -531,10 +675,19 @@ export class Panel {
 
     this.restoreNativeTakeover(false);
     this.moveFocusOutsideNativeSurface(surface);
+    const composerCandidate = query("composer");
+    const composer =
+      composerCandidate instanceof HTMLElement && surface.contains(composerCandidate)
+        ? composerCandidate
+        : null;
     this.nativeSurface = {
       form,
       surface,
       parent,
+      composer,
+      composerContentEditable: composer?.getAttribute("contenteditable") ?? null,
+      composerTabIndex: composer?.getAttribute("tabindex") ?? null,
+      composerAriaDisabled: composer?.getAttribute("aria-disabled") ?? null,
       position: surface.style.position,
       inset: surface.style.inset,
       width: surface.style.width,
@@ -568,7 +721,27 @@ export class Panel {
     snapshot.surface.style.visibility = guarded ? "hidden" : snapshot.visibility;
     snapshot.surface.dataset["cfptNativeGuarded"] = String(guarded);
     snapshot.surface.setAttribute("aria-hidden", "true");
+    this.setNativeComposerEditable(snapshot, !guarded);
     if (guarded && snapshot.surface.contains(document.activeElement)) this.focusIntegratedSurface();
+  }
+
+  private setNativeComposerEditable(snapshot: NativeSurfaceSnapshot, editable: boolean): void {
+    const composer = snapshot.composer;
+    if (!composer) return;
+    if (!editable) {
+      composer.setAttribute("contenteditable", "false");
+      composer.setAttribute("tabindex", "-1");
+      composer.setAttribute("aria-disabled", "true");
+      return;
+    }
+    this.restoreAttribute(composer, "contenteditable", snapshot.composerContentEditable);
+    this.restoreAttribute(composer, "tabindex", snapshot.composerTabIndex);
+    this.restoreAttribute(composer, "aria-disabled", snapshot.composerAriaDisabled);
+  }
+
+  private restoreAttribute(element: HTMLElement, name: string, value: string | null): void {
+    if (value === null) element.removeAttribute(name);
+    else element.setAttribute(name, value);
   }
 
   private moveFocusOutsideNativeSurface(surface: HTMLElement): void {
@@ -580,11 +753,16 @@ export class Panel {
 
   private focusIntegratedSurface(): void {
     const target =
-      this.panelEl.querySelector<HTMLElement>(
-        '[data-ref="idea"], [data-ref="reply"], [data-ref="queue-next"], [data-ref="reponame"]',
-      ) ??
-      this.setupBackdropEl.querySelector<HTMLElement>("button, input, textarea") ??
-      this.panelEl.querySelector<HTMLElement>("button, input, textarea");
+      this.lastIntegratedField?.isConnected === true
+        ? this.lastIntegratedField
+        : (this.panelEl.querySelector<HTMLElement>(
+            '[data-ref="idea"], [data-ref="reply"], [data-ref="queue-next"], [data-ref="reponame"]',
+          ) ??
+          this.setupBackdropEl.querySelector<HTMLElement>("button, input, textarea") ??
+          this.panelEl.querySelector<HTMLElement>("button, input, textarea"));
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      this.lastIntegratedField = target;
+    }
     target?.focus({ preventScroll: true });
   }
 
@@ -601,6 +779,7 @@ export class Panel {
     snapshot.surface.style.pointerEvents = snapshot.pointerEvents;
     snapshot.surface.style.visibility = snapshot.visibility;
     snapshot.surface.inert = snapshot.inert;
+    this.setNativeComposerEditable(snapshot, true);
     if (snapshot.ariaHidden === null) snapshot.surface.removeAttribute("aria-hidden");
     else snapshot.surface.setAttribute("aria-hidden", snapshot.ariaHidden);
     delete snapshot.surface.dataset["cfptNativeHidden"];
