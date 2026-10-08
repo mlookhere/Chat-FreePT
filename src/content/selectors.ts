@@ -35,9 +35,11 @@ const REGISTRY: Record<TargetId, Target> = {
   composer: {
     required: true,
     candidates: [
+      { css: '[data-chatgpt-composer] [data-composer-input] [role="textbox"]' },
+      { css: 'form[data-chatgpt-composer] [role="textbox"]' },
+      { css: "#prompt-textarea" },
       { css: '[data-chatgpt-composer] [data-composer-input] [contenteditable="true"]' },
       { css: 'form[data-chatgpt-composer] [contenteditable="true"]' },
-      { css: "#prompt-textarea" },
       { css: 'div.ProseMirror[contenteditable="true"]' },
       { css: 'form[data-type="unified-composer"] [contenteditable="true"]' },
       { css: 'main [contenteditable="true"]' },
