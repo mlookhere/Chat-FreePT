@@ -280,8 +280,12 @@ export class Panel {
     this.shadow.addEventListener("beforeinput", (event) => this.stopComposerPropagation(event));
     this.shadow.addEventListener("input", (event) => this.stopComposerPropagation(event));
     this.shadow.addEventListener("paste", (event) => this.stopComposerPropagation(event));
-    this.shadow.addEventListener("compositionstart", (event) => this.stopComposerPropagation(event));
-    this.shadow.addEventListener("compositionupdate", (event) => this.stopComposerPropagation(event));
+    this.shadow.addEventListener("compositionstart", (event) =>
+      this.stopComposerPropagation(event),
+    );
+    this.shadow.addEventListener("compositionupdate", (event) =>
+      this.stopComposerPropagation(event),
+    );
     this.shadow.addEventListener("compositionend", (event) => this.stopComposerPropagation(event));
     this.shadow.addEventListener("keyup", (event) => this.stopComposerPropagation(event));
     this.shadow.addEventListener("keydown", (event) => {
@@ -445,7 +449,10 @@ export class Panel {
     this.restoreNativeTakeover(false);
     this.moveFocusOutsideNativeSurface(form);
     const children = Array.from(form.children)
-      .filter((child): child is HTMLElement => child instanceof HTMLElement && child !== this.overlayHost)
+      .filter(
+        (child): child is HTMLElement =>
+          child instanceof HTMLElement && child !== this.overlayHost,
+      )
       .map((child) => this.hideNativeChild(child));
     this.nativeSurface = { form, children };
     form.dataset["cfptTakeover"] = "true";
@@ -484,7 +491,9 @@ export class Panel {
 
   private focusIntegratedSurface(): void {
     const target =
-      this.panelEl.querySelector<HTMLElement>('[data-ref="idea"], [data-ref="reply"], [data-ref="queue-next"]') ??
+      this.panelEl.querySelector<HTMLElement>(
+        '[data-ref="idea"], [data-ref="reply"], [data-ref="queue-next"]',
+      ) ??
       this.setupBackdropEl.querySelector<HTMLElement>("button, input, textarea") ??
       this.panelEl.querySelector<HTMLElement>("button, input, textarea");
     target?.focus({ preventScroll: true });
