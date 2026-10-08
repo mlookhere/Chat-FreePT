@@ -85,7 +85,9 @@ export class Panel {
     this.takeoverBackdropEl = overlay.backdrop;
     this.panelEl = overlay.panel;
     this.setupBackdropEl = overlay.setup;
-    this.nativeComposer = new NativeComposerHost(this.overlayHost, () => this.focusIntegratedSurface());
+    this.nativeComposer = new NativeComposerHost(this.overlayHost, () =>
+      this.focusIntegratedSurface(),
+    );
 
     this.bindEvents();
     this.mountObserver = new MutationObserver(() => this.scheduleMount());
@@ -614,4 +616,3 @@ function appendStyle(root: ShadowRoot): void {
   style.textContent = PANEL_CSS;
   root.appendChild(style);
 }
-
