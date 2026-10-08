@@ -49,6 +49,7 @@ export class RunController {
   private readonly onShowModal: () => void;
   private readonly onContextInvalidated: () => void;
   private readonly onDiagnosticEvent: (event: ControllerDiagnosticEvent) => void;
+  private readonly onComposerAccessChange: (enabled: boolean) => void;
   private disposed = false;
 
   constructor(
@@ -59,6 +60,7 @@ export class RunController {
       onShowModal: () => void;
       onContextInvalidated?: () => void;
       onDiagnosticEvent?: (event: ControllerDiagnosticEvent) => void;
+      onComposerAccessChange?: (enabled: boolean) => void;
     },
   ) {
     this.state = initial;
@@ -67,6 +69,7 @@ export class RunController {
     this.onShowModal = hooks.onShowModal;
     this.onContextInvalidated = hooks.onContextInvalidated ?? (() => undefined);
     this.onDiagnosticEvent = hooks.onDiagnosticEvent ?? (() => undefined);
+    this.onComposerAccessChange = hooks.onComposerAccessChange ?? (() => undefined);
     this.watcher = new StreamWatcher(
       {
         onStart: () => {
@@ -497,33 +500,40 @@ export class RunController {
       }
     }
 
-    const prompt = this.buildPrompt(kind, text);
-    const inserted = await insertPrompt(prompt, () => this.disposed);
-    if (this.disposed) return;
-    if (!inserted.ok) {
-      this.dispatch({ type: "INSERT_FAIL", detail: inserted.error ?? "unknown" });
-      return;
+    this.onComposerAccessChange(true);
+    try {
+      const prompt = this.buildPrompt(kind, text);
+      const inserted = await insertPrompt(prompt, () => this.disposed);
+      if (this.disposed) return;
+      if (!inserted.ok) {
+        this.dispatch({ type: "INSERT_FAIL", detail: inserted.error ?? "unknown" });
+        return;
+      }
+      this.dispatch({ type: "INSERT_OK" });
+  
+      const baselineAssistantKey = lastAssistantMessage()?.key;
+      this.dispatch(
+        baselineAssistantKey
+          ? { type: "REPLY_EXPECTED", baselineAssistantKey }
+          : { type: "REPLY_EXPECTED" },
+      );
+      this.watcher.expectReply();
+      const sent = await clickSend(
+        () => this.watcher.isStreaming(),
+        () => this.disposed,
+      );
+      if (this.disposed) return;
+      if (!sent.ok) {
+        this.watcher.cancelExpectedReply();
+        this.dispatch({ type: "SEND_FAIL", detail: sent.error ?? "unknown" });
+        return;
+      }
+      this.dispatch({ type: "SEND_OK" });
     }
-    this.dispatch({ type: "INSERT_OK" });
-
-    const baselineAssistantKey = lastAssistantMessage()?.key;
-    this.dispatch(
-      baselineAssistantKey
-        ? { type: "REPLY_EXPECTED", baselineAssistantKey }
-        : { type: "REPLY_EXPECTED" },
-    );
-    this.watcher.expectReply();
-    const sent = await clickSend(
-      () => this.watcher.isStreaming(),
-      () => this.disposed,
-    );
-    if (this.disposed) return;
-    if (!sent.ok) {
-      this.watcher.cancelExpectedReply();
-      this.dispatch({ type: "SEND_FAIL", detail: sent.error ?? "unknown" });
-      return;
+  
+    } finally {
+      this.onComposerAccessChange(false);
     }
-    this.dispatch({ type: "SEND_OK" });
   }
 
   private async waitForComposerRestore(): Promise<ReturnType<typeof healthCheck>> {
