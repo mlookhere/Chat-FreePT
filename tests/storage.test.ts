@@ -135,6 +135,34 @@ describe("run state", () => {
     expect(await storage.loadRun("ultra")).toEqual(state);
   });
 
+  it("normalizes and restores complete repository state for one conversation", async () => {
+    const draft = {
+      ...newRunState("repo-conversation", 123),
+      repoName: "https://github.com/Owner/project.git",
+      repoMode: "new" as const,
+      idea: "keep this idea",
+    };
+
+    await storage.saveRun(draft);
+    const restoredDraft = await storage.loadRun("repo-conversation");
+    expect(restoredDraft?.repoName).toBe("Owner/project");
+    expect(restoredDraft?.repoMode).toBe("existing");
+    expect(restoredDraft?.idea).toBe("keep this idea");
+    expect(restoredDraft?.repo).toBeUndefined();
+
+    const locked = {
+      ...draft,
+      repo: "Owner/project",
+      repoName: "stale/value",
+      repoMode: "new" as const,
+    };
+    await storage.saveRun(locked);
+    const restoredLocked = await storage.loadRun("repo-conversation");
+    expect(restoredLocked?.repo).toBe("Owner/project");
+    expect(restoredLocked?.repoName).toBe("Owner/project");
+    expect(restoredLocked?.repoMode).toBe("existing");
+  });
+
   it("keeps simultaneous conversation state independent", async () => {
     const first = {
       ...newRunState("conversation-a", 1),
