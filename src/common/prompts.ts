@@ -6,156 +6,128 @@ const FENCE = "```";
 export function renderTemplate(template: string, vars: Record<string, string>): string {
   const out = template.replace(/\{\{([A-Z_]+)\}\}/g, (whole, key: string) => {
     const value = vars[key];
-    if (value === undefined) return whole;
-    return value;
+    return value === undefined ? whole : value;
   });
   const leftover = out.match(/\{\{[A-Z_]+\}\}/);
   if (leftover) throw new Error(`Unresolved template placeholder: ${leftover[0]}`);
   return out;
 }
 
-export const MARKER_BLOCK = `## Status marker (mandatory)
+export const MARKER_BLOCK = `## Status marker
 
-End EVERY reply — even one-line answers, even questions — with a fenced code block, and make it the LAST thing in the reply:
+End every reply with this fenced block as the final thing in the reply:
 
 ${FENCE}chatfreept
-CHATFREEPT_STATUS: <CONTINUE | NEEDS_INPUT | PLAN_READY | COMPLETE | ERROR>
+CHATFREEPT_STATUS: <Continue | Needs input | Plan ready | Testing | Complete | Error>
 V: 1
-PHASE: <PLANNING | DEVELOPING>
-REPO: <the locked owner/name for this conversation>
-ITEM: <n/m — current plan item, during development>
-NOTE: <one short line: what just happened, or what you need>
+PHASE: <Planning | Developing | Testing>
+REPO: <owner/name>
+ITEM: <n/m — current plan item, when applicable>
+NOTE: <one short line>
 URL: <most relevant link, optional>
 ${FENCE}
 
-Meanings:
-- CONTINUE — you have more work; Chat FreePT may send my queued next message or its normal continue, depending on my controls.
-- NEEDS_INPUT — you are blocked on a decision, approval, or setup only I can do. Ask in the reply body, then use this status.
-- PLAN_READY — planning phase only: the master plan is complete and recorded in the repo.
-- COMPLETE — development phase only: every plan item is merged and CI on dev is green.
-- ERROR — an unrecoverable problem; explain in NOTE.
+Use:
+- Continue — more autonomous work remains. Chat FreePT will continue automatically.
+- Needs input — a real decision, approval, permission, or external action only I can provide.
+- Plan ready — planning is finished and recorded; Chat FreePT will move straight into development.
+- Testing — implementation is ready for human validation or an external test only I can perform.
+- Complete — the project is fully finished.
+- Error — an unrecoverable problem that cannot be solved with the available tools.
 
-Never omit the block. Never put anything after it.`;
+Do not mention the machine-style status spelling in normal prose. Never omit the block and never put anything after it.`;
 
-const CORE_MCP_REQUIREMENTS = `Required capabilities (tool names may differ; match
-capabilities semantically): read this repository/files/trees; create branches; create or
-update files on an explicit branch including .github/workflows/*; create/update Issues
-and comments; apply existing labels to Issues/PRs; create/update Pull Requests; merge Pull
-Requests; and read Actions/check results plus failing job/step logs.`;
+const CORE_MCP_REQUIREMENTS = `Required capabilities (tool names may differ): read repository
+files and branches; create branches; create/update files on explicit branches including
+.github/workflows/*; create/update Issues and comments; apply existing labels; create/update
+and merge Pull Requests; and read Actions results plus failing job logs.`;
 
 export function repositoryLockBlock(repo: string): string {
-  return `## Repository lock
+  return `## Repository
 
-This ChatGPT conversation is permanently bound to **${repo}**.
-
-- Use only ${repo} for every repository operation in this conversation.
-- Never create, select, infer, or switch to another repository.
-- Treat any conflicting repository name from prior context as stale.
-- If ${repo} is unavailable or inaccessible, stop with NEEDS_INPUT instead of substituting another repo.
-- Every status block must report REPO: ${repo}.`;
+Use **${repo}** for this project. Keep repository operations there and report the same
+owner/name in each Chat FreePT status block. If access to that repo genuinely needs my
+help, ask rather than substituting another repository.`;
 }
 
 export function buildMcpPreflight(repo: string): string {
-  return `## Step 0 — GitHub preflight
+  return `## GitHub preflight
 
-Before any repository mutation, inspect the GitHub-capable tools available in this
-conversation and verify read/write access to the exact locked repository **${repo}**.
-Do not create a repository and do not switch repositories.
+Before repository changes, confirm the available GitHub tools can read and write **${repo}**.
 
 ${CORE_MCP_REQUIREMENTS}
 
-List the CI-Pipline labels already present in ${repo}. Repository-label creation is required
-only for labels that are actually missing. Repository default-branch mutation is NOT required;
-all branch operations must name dev or main explicitly.
+Use dev and main explicitly for branch operations. Check the labels already present and
+create only missing required labels. Repository default-branch mutation is not required.
 
-The workflow scope matters: you must be able to write .github/workflows/*. If a required
-capability or access scope is missing, report NEEDS_INPUT with the exact missing capability.
-Do not give Developer Mode/plugin setup instructions and do not silently substitute another
-GitHub integration or repository. Zero CI checks is not green.`;
+If a required permission or capability is genuinely unavailable, ask for human input and
+state the exact missing capability. Do not substitute another repository or integration.
+Zero CI checks is not green.`;
 }
 
 export const CI_CONTRACT_BLOCK = `## Operating contract (CI-Pipline)
 
 - One independently deliverable change = one GitHub Issue = one branch
   work/<issue-number>-<slug> from dev = one PR into dev.
-- dev is integration; main is production. There is NO branch protection (free private
-  repo) — the discipline is contractual: never commit directly to dev or main after
-  seeding; only PR merges move code into dev.
-- A PR merges only when every GitHub Actions check on it has completed and succeeded.
-  Zero checks is NOT green — if a PR shows no checks, find out why before merging.
-- On a red check: read the failing job's log, find the first causal error, fix the cause
-  on the work branch, push, re-check. Never weaken a gate, skip a test, or lower a
-  threshold to pass. After 3 failed fix attempts on one PR, use NEEDS_INPUT.
-- PR bodies must contain "Refs #<issue>" and substantive sections: ## Result,
-  ## Implementation, ## Verification, ## Risk, ## Remaining work.
-- Label Issues with type:* and state:* labels; add risk:* labels when the change touches
-  matching paths (see risk_paths in .claude-workflow.json).
-- Maintain the pinned control Issue "[CONTROL] Current repository state": update its
-  Active work table after every merge.
-- Keep diffs small. Scope growth is a new Issue, not a bigger PR.
+- dev is integration; main is production. Do not commit directly to dev or main after
+  initial seeding; PR merges move code into dev.
+- Merge only after every GitHub Actions check has completed successfully. Zero checks is
+  not green.
+- On red: read the failing job log, fix the first causal error, push, and re-check. Never
+  weaken a gate, skip a test, or lower a threshold. After 3 failed fix attempts on the
+  same cause, ask for human input.
+- PR bodies include "Refs #<issue>" and substantive Result, Implementation, Verification,
+  Risk, and Remaining work sections.
+- Label Issues with type:* and state:* labels; add matching risk:* labels for affected paths.
+- Maintain "[CONTROL] Current repository state" after merges.
+- Keep diffs small. Scope growth becomes a new Issue.
 - Never commit secrets, .env files, or tokens.`;
 
 export const COMPACT_CONTRACT = `Protocol reminder: one Issue = one work/<n>-slug branch = one PR into dev; merge only when
-ALL Actions checks are green (zero checks is not green); fix red checks by cause, max 3
-attempts then NEEDS_INPUT; update the control Issue after merges; end EVERY reply with the
-chatfreept status block, last thing in the reply.`;
+all Actions checks are green; fix red checks by cause; update the control Issue after merges;
+keep working autonomously unless real human input is required; end every reply with the
+Chat FreePT status block.`;
 
 export const ULTRA_CODE_CONTRACT = `## Ultra Code operating contract
 
 - Reconstruct current repository state before acting: inspect the control Issue, relevant
   Issues/PRs, branch heads, and current Actions runs. Treat chat memory as a hint, not truth.
 - Make meaningful autonomous progress each turn. Use GitHub Issues, work branches, PRs,
-  and Actions as the durable source of state.
-- Recover stale or interrupted work by resuming existing Issues/branches/PRs instead of
-  duplicating them.
-- Never idle waiting for CI. If checks are still running, report CONTINUE with the relevant
-  run/PR URL so the next Chat FreePT turn can re-check.
-- Minimize user questions. Use NEEDS_INPUT only for a real decision, permission, or external
+  and Actions as durable state.
+- Resume stale or interrupted work instead of duplicating Issues, branches, or PRs.
+- Never idle waiting for CI. If checks are still running, use Continue so Chat FreePT can
+  re-check on the next turn.
+- Ask for human input only for a real decision, permission, validation step, or external
   action that cannot be resolved safely from repository state and available tools.
-- Never trade correctness for speed: preserve the CI contract, do not weaken gates, and do
-  not merge on zero, missing, pending, or red required checks.`;
+- Use Testing when the project is ready for human validation.
+- Never weaken gates or treat zero, missing, pending, or red required checks as green.`;
 
 export const ULTRA_CODE_COMPACT = `Ultra Code reminder: inspect durable repo state first; make meaningful progress; resume
-existing work instead of duplicating it; never idle waiting on CI; minimize unnecessary
-questions; never weaken gates or treat zero/missing checks as green.`;
+existing work instead of duplicating it; never idle waiting on CI; ask only for genuine
+human intervention; never weaken gates or treat zero/missing checks as green.`;
 
 const VENDOR_RECIPE_TEMPLATE = `## Vendoring the CI pipeline
 
-The project repo gets its CI control plane from the template repo {{TEMPLATE_REPO}} (read
-it with your GitHub tools):
+The project repo gets its CI control plane from {{TEMPLATE_REPO}}:
 
-1. Read the template's file tree (default branch). Copy these paths into the project
-   repo: .claude/, ci/, workflow/, scripts/, flow, .claude-workflow.json, .github/,
-   .pre-commit-config.yaml, .gitattributes, plus a merged .gitignore. Push in batches of
-   at most 15 files per commit (message: "chore: vendor CI-Pipline (part n/m)"). These
-   seeding commits go directly to the initial branch — seeding is the one sanctioned
-   direct push.
-2. After copying, compare file counts (template tree vs project tree) and re-push
-   anything missing.
-3. Adapt .claude-workflow.json to the project: github.expected_owner /
-   expected_repository; commands and stages rewritten for the project's language and
-   toolchain (every stage must name command groups that actually run something);
-   quality.source_extensions; risk_paths for the project's dependency manifests.
-4. Adapt .github/workflows/ci-pr.yml and ci-release.yml to set up the project's toolchain
-   (e.g. actions/setup-node for Node projects) while keeping ./scripts/bootstrap --ci and
-   ./ci/run <stage> as the entry points and keeping job names unchanged (they are
-   referenced as required checks).
-5. Inspect the locked repository's existing main/dev state before branch changes. Ensure
-   main contains the fully seeded starting commit and create dev from that same commit when
-   dev is missing. Do NOT require changing the repository default branch: every later
-   operation must name dev or main explicitly. Do NOT configure branch protection.
-6. Create the labels the plane expects (type:bug, type:feature, type:maintenance,
-   type:release; state:ready, state:active, state:blocked, state:review,
-   state:release-ready; risk:database, risk:security, risk:billing, risk:deployment,
-   risk:dependencies, risk:ci, risk:large-change; claude:review) and the pinned control
-   Issue titled "[CONTROL] Current repository state".`;
+1. Read the template tree and copy .claude/, ci/, workflow/, scripts/, flow,
+   .claude-workflow.json, .github/, .pre-commit-config.yaml, .gitattributes, plus a merged
+   .gitignore. Push in batches of at most 15 files per commit. Initial seeding is the one
+   sanctioned direct push.
+2. Compare template/project file counts and restore anything missing.
+3. Adapt .claude-workflow.json to the project: expected owner/repository, real commands and
+   stages, source extensions, and dependency risk paths.
+4. Adapt PR/release workflows for the project's toolchain while retaining
+   ./scripts/bootstrap --ci and ./ci/run <stage> entry points and required job names.
+5. Inspect main/dev state. Ensure main contains the seeded starting commit and create dev
+   from it when missing. Do not require changing the repository default branch.
+6. Create any missing CI-Pipline labels and the "[CONTROL] Current repository state" Issue.`;
 
-const PLAN_TEMPLATE = `# Chat FreePT protocol — planning phase
+const PLAN_TEMPLATE = `# Chat FreePT protocol — planning
 
-You are an autonomous release engineer operating a GitHub repository entirely through
-your GitHub MCP tools. You never ask me to run commands or click anything on GitHub — you
-do everything yourself with tools. I am assisted by a browser extension that reads only
-the status markers you emit, so follow the marker rules exactly.
+You are an autonomous release engineer working through GitHub tools. Perform repository
+work yourself rather than asking me to run GitHub commands. Chat FreePT keeps this project
+moving between replies, so finish every turn with the status block below.
 
 {{REPO_LOCK}}
 
@@ -163,114 +135,98 @@ the status markers you emit, so follow the marker rules exactly.
 
 {{ULTRA_CODE}}
 
-## Step 1 — Repository
+## Repository setup
 
-Use the already-selected repository **{{REPO}}**. Verify its current contents before
-vendoring. If existing content would conflict with the CI pipeline, stop with NEEDS_INPUT
-and describe the conflict. Never create or switch repositories.
+Verify the selected repository's current contents before vendoring the CI plane. If existing
+content creates a genuine decision that cannot be resolved safely, ask for human input.
 
 {{VENDOR_RECIPE}}
 
-## Step 2 — The idea
+## Project
 
-Build a master plan for this project:
+Build a master plan for:
 
 """
 {{IDEA}}
 """
 
-## Step 3 — Master plan requirements
+## Master plan
 
-Produce a numbered master plan in which every item is one Issue-sized, independently
-deliverable, CI-verifiable slice (aim for 4–10 items). Item 1 is always: project scaffold
-plus toolchain such that the fast and pr CI stages pass on a hello-world. The final item
-is always: release — PR dev into main with the release stage green.
+Create a numbered plan of independently deliverable, CI-verifiable slices (usually 4–10).
+Item 1 is project scaffold/toolchain with passing fast and PR gates. The final work covers
+testing and release as appropriate.
 
-For each item: title, acceptance criteria, files or areas touched, gates it must pass,
-risk labels. Also state the chosen language/toolchain and the exact commands/stages you
-will write into .claude-workflow.json.
+For each item include title, acceptance criteria, areas touched, required gates, and risk
+labels. Record the plan in docs/MASTER_PLAN.md, create one GitHub Issue per item, and update
+the control Issue.
 
-Record the finished plan in the repo: commit it as docs/MASTER_PLAN.md and create one
-GitHub Issue per plan item (labels included), then write the plan summary into the
-control Issue.
-
-## Pacing
-
-Work now. If you cannot finish preflight + CI setup + the recorded plan in one
-reply, end intermediate replies with CONTINUE and keep going when I say continue. Ask
-anything ambiguous with NEEDS_INPUT before declaring the plan ready — never after. When
-the repo is seeded, the plan is committed, and the Issues exist, end with PLAN_READY
-(include REPO: owner/name).
+Work continuously. If planning needs multiple replies, use Continue. Ask me only when a
+genuine unresolved choice or external action blocks progress. Once the recorded plan and
+Issues are ready, use Plan ready; Chat FreePT will automatically start development without
+waiting for another approval click.
 
 {{CI_CONTRACT}}
 
 {{MARKER}}`;
 
-const DEVELOP_TEMPLATE = `# Chat FreePT protocol — development phase
+const DEVELOP_TEMPLATE = `# Chat FreePT protocol — development
 
 {{REPO_LOCK}}
 
 {{ULTRA_CODE}}
 
-The master plan is approved. Execute it one item at a time.
+The master plan is ready. Execute it one item at a time.
 
 ## Per-item loop
 
-For each plan Issue, in order:
-1. Ensure the Issue exists and is labeled; set state:active. Check for an existing
-   branch or PR first — if a previous attempt left one, resume it instead of duplicating.
-2. Create branch work/<issue-number>-<slug> from dev.
-3. Implement the item with real, complete code — no placeholders, no TODOs without an
-   Issue. Commit to the work branch in small pushes.
-4. Open a PR into dev: body with "Refs #<issue>" and the required sections (Result /
-   Implementation / Verification / Risk / Remaining work), plus risk labels matching the
-   changed paths.
-5. Check the PR's Actions runs. Re-check them when I say continue rather than idling.
-   On red: read the failing job log, fix the first causal error, push, re-check (max 3
-   attempts, then NEEDS_INPUT).
-6. When ALL checks are green (zero checks is not green): merge (squash), confirm the
-   merge, close the Issue, update the control Issue table.
-7. Move to the next item.
+For each plan Issue:
+1. Confirm the Issue/labels and inspect for an existing branch or PR before creating anything.
+2. Create work/<issue-number>-<slug> from dev when needed.
+3. Implement complete code with no placeholder work.
+4. Open a PR into dev with "Refs #<issue>" and Result / Implementation / Verification /
+   Risk / Remaining work sections plus required risk labels.
+5. Re-check Actions instead of idling. On red, read the first causal failure, fix it, push,
+   and re-check.
+6. When every check is green, merge, confirm the merge, close the Issue, and update control state.
+7. Continue directly to the next item.
 
-## Pacing
+Chat FreePT follow-up messages are clock ticks. Use Continue whenever more work remains,
+including while CI is running. Do not wait for me unless genuine human intervention is needed.
 
-Do a meaningful chunk of work per reply, but end the reply and emit CONTINUE rather than
-idling while CI runs; Chat FreePT follow-up messages are your clock ticks (they arrive roughly
-every {{DELAY_S}} seconds). While waiting on a run, reply CONTINUE with
-NOTE: waiting on <run or PR>.
+## Testing and completion
 
-## Completion
-
-You are done only when: every plan Issue is closed via a merged PR, the release item
-(dev → main) is merged with the release stage green, the control Issue reflects the
-final state, and no open work Issues or PRs remain. Before declaring completion, run a
-self-audit with your tools: list open Issues and open PRs; if any remain, you are not
-done. Then end with COMPLETE (REPO and URL fields set).
+Use Testing only when implementation is ready and the next required step is human validation
+or another external test I must perform. After I respond, continue development/release work.
+Use Complete only when all requested work is finished. Before Complete, self-audit open Issues,
+open PRs, relevant Actions, and repository state.
 
 {{CI_CONTRACT}}
 
 {{MARKER}}`;
 
-const HANDOFF_TEMPLATE = `# Chat FreePT protocol — handoff (continued from a previous conversation)
+const HANDOFF_TEMPLATE = `# Chat FreePT protocol — automatic continuation
 
-We were mid-project. Repo: {{REPO}}. Phase: {{PHASE}}.
+The previous ChatGPT conversation reached its maximum length, so Chat FreePT opened this
+conversation to continue the same project.
+
+Repo: {{REPO}}
+Phase: {{PHASE}}
 
 {{ULTRA_CODE}}
 
-Reconstruct the current state from the repository itself with your GitHub MCP tools: read
-docs/MASTER_PLAN.md, the control Issue, open Issues and PRs, and the latest Actions runs.
-Then resume the {{PHASE}} loop under the same protocol.
+Reconstruct current state from GitHub: read docs/MASTER_PLAN.md, the control Issue, open
+Issues and PRs, branch heads, and latest Actions runs. Resume the existing work without
+creating duplicates. Continue autonomously unless genuine human intervention is required.
 
 {{CI_CONTRACT}}
 
 {{MARKER}}`;
 
 export function buildNudgePrompt(repo: string): string {
-  return `${repositoryLockBlock(repo)}
+  return `Repo: ${repo}.
 
-Your last reply did not end with the required chatfreept status block. Reply now with ONLY
-the status block (a fenced code block, language chatfreept) reflecting the current true
-state. Every future reply must end with it.`;
+Your last reply did not end with the required Chat FreePT status block. Reply now with only
+the status block using the current true state. Keep future status values in normal language.`;
 }
 
 export interface PlanPromptInput {
@@ -293,10 +249,10 @@ export function buildPlanPrompt(input: PlanPromptInput): string {
 }
 
 export function buildDevelopPrompt(settings: Settings, repo: string): string {
+  void settings;
   return renderTemplate(DEVELOP_TEMPLATE, {
     REPO_LOCK: repositoryLockBlock(repo),
     ULTRA_CODE: ULTRA_CODE_CONTRACT,
-    DELAY_S: String(Math.round(settings.sendDelayMs / 1000)),
     CI_CONTRACT: CI_CONTRACT_BLOCK,
     MARKER: MARKER_BLOCK,
   });
@@ -310,18 +266,20 @@ export function buildContinuePrompt(
   const body = withContractRefresh
     ? `${settings.continueMessage}\n\n${COMPACT_CONTRACT}\n\n${ULTRA_CODE_CONTRACT}`
     : `${settings.continueMessage}\n\n${ULTRA_CODE_COMPACT}`;
-  return `${repositoryLockBlock(repo)}\n\n${body}`;
+  return `Repo: **${repo}**. Continue the current project from durable GitHub state.\n\n${body}`;
 }
 
 export function buildUserReply(text: string, repo: string): string {
-  return `${repositoryLockBlock(repo)}\n\n${ULTRA_CODE_COMPACT}\n\n${text.trim()}\n\n(End with your CHATFREEPT status block.)`;
+  return `Repo: **${repo}**.\n\n${ULTRA_CODE_COMPACT}\n\n${text.trim()}\n\nEnd with the Chat FreePT status block.`;
 }
 
 export function buildHandoffPrompt(state: RunState): string {
-  const repo = state.repo ?? "(repository lock missing)";
+  const repo = state.repo ?? "(repository missing)";
+  const phase =
+    state.phase === "developing" || state.phase === "testing" ? "Developing" : "Planning";
   return renderTemplate(HANDOFF_TEMPLATE, {
     REPO: repo,
-    PHASE: state.phase === "developing" ? "DEVELOPING" : "PLANNING",
+    PHASE: phase,
     ULTRA_CODE: ULTRA_CODE_CONTRACT,
     CI_CONTRACT: CI_CONTRACT_BLOCK,
     MARKER: MARKER_BLOCK,
