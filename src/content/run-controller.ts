@@ -3,6 +3,7 @@ import { parseMarker } from "../common/marker";
 import {
   buildContinuePrompt,
   buildDevelopPrompt,
+  buildHandoffPrompt,
   buildNudgePrompt,
   buildPlanPrompt,
   buildUserReply,
@@ -50,6 +51,7 @@ export class RunController {
   private observedAssistantSince = 0;
   private readonly onChange: (state: RunState) => void;
   private readonly onShowCompletion: () => void;
+  private readonly onConversationHandoff: (state: RunState) => void | Promise<void>;
   private readonly onContextInvalidated: () => void;
   private readonly onDiagnosticEvent: (event: ControllerDiagnosticEvent) => void;
   private readonly withComposerAccess: (task: () => Promise<void>) => Promise<void>;
@@ -62,6 +64,7 @@ export class RunController {
     hooks: {
       onChange: (state: RunState) => void;
       onShowCompletion: () => void;
+      onConversationHandoff?: (state: RunState) => void | Promise<void>;
       onContextInvalidated?: () => void;
       onDiagnosticEvent?: (event: ControllerDiagnosticEvent) => void;
       withComposerAccess?: (task: () => Promise<void>) => Promise<void>;
@@ -71,6 +74,7 @@ export class RunController {
     this.settings = settings;
     this.onChange = hooks.onChange;
     this.onShowCompletion = hooks.onShowCompletion;
+    this.onConversationHandoff = hooks.onConversationHandoff ?? (() => undefined);
     this.onContextInvalidated = hooks.onContextInvalidated ?? (() => undefined);
     this.onDiagnosticEvent = hooks.onDiagnosticEvent ?? (() => undefined);
     this.withComposerAccess = hooks.withComposerAccess ?? (async (task) => task());
@@ -511,6 +515,10 @@ export class RunController {
         this.onShowCompletion();
         break;
       }
+      case "handoffConversation": {
+        await this.onConversationHandoff({ ...this.state });
+        break;
+      }
       case "reconcile": {
         this.reconcile();
         break;
@@ -562,6 +570,8 @@ export class RunController {
         return buildContinuePrompt(this.settings, true, repo);
       case "nudge":
         return buildNudgePrompt(repo);
+      case "handoff":
+        return buildHandoffPrompt(this.state);
       case "user_text":
       case "queued_user_text":
         return buildUserReply(text ?? "", repo);
