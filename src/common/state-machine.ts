@@ -275,9 +275,18 @@ function reduceUserEvent(ctx: ReduceContext, event: UserEvent): boolean {
 
 function updateDraft(ctx: ReduceContext, idea: string, repoName: string): boolean {
   if (ctx.state.status !== "idle") return false;
-  if (ctx.state.idea === idea && ctx.state.repoName === repoName) return false;
+  const nextRepoName = ctx.state.repo ?? repoName;
+  const nextRepoMode = ctx.state.repo || normalizeRepositoryInput(repoName) ? "existing" : "new";
+  if (
+    ctx.state.idea === idea &&
+    ctx.state.repoName === nextRepoName &&
+    ctx.state.repoMode === nextRepoMode
+  ) {
+    return false;
+  }
   ctx.state.idea = idea;
-  if (!ctx.state.repo) ctx.state.repoName = repoName;
+  ctx.state.repoName = nextRepoName;
+  ctx.state.repoMode = nextRepoMode;
   return true;
 }
 
