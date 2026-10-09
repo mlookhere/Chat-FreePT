@@ -4,7 +4,7 @@ import { query, queryAll } from "./selectors";
 const RATE_LIMIT_RE =
   /you(?:'|’)?ve (?:hit|reached) (?:your|the) (?:limit|cap)|too many (?:requests|messages)|reached (?:your|the) message (?:limit|cap)|try again (?:later|after)|usage cap/i;
 const CONVERSATION_FULL_RE =
-  /maximum (?:conversation )?length|conversation is too long|start a new chat to continue/i;
+  /you(?:'|’)?ve reached the maximum length for this conversation|maximum conversation length|conversation is too long|start a new chat to continue/i;
 
 function alertTexts(): string[] {
   return queryAll("pageAlert")
