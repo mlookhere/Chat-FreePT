@@ -633,6 +633,9 @@ describe("state machine external signals and handoff", () => {
     expect(started.effects).toContainEqual({ do: "insertAndSend", kind: "handoff" });
   });
 
+});
+
+describe("state machine user recovery after handoff", () => {
   it("USER_REPLY sends the user's text with the marker re-arm", () => {
     const streaming = toStreaming(start());
     const paused = reduce(
