@@ -508,7 +508,7 @@ describe("conversation repository setup", () => {
     expect(overlayShadow().textContent).toContain("Enter a valid owner/repo");
   });
 
-  it("renders a locked repository read-only and explains how to switch", () => {
+  it("renders the project repository read-only while the project is running", () => {
     onboardingDone();
     const panel = makePanel();
     panel.render({ ...newRunState("conversation-1", 1), repo: "owner/project" });
@@ -517,7 +517,7 @@ describe("conversation repository setup", () => {
     const repo = overlayShadow().querySelector<HTMLInputElement>('[data-ref="reponame"]');
     expect(repo?.value).toBe("owner/project");
     expect(repo?.readOnly).toBe(true);
-    expect(overlayShadow().textContent).toContain("start a new ChatGPT conversation");
+    expect(overlayShadow().textContent).toContain("keeps this repository with the project");
   });
 
   it("opens repository-first setup without Developer Mode instructions", () => {
@@ -561,7 +561,8 @@ describe("first-run and plan-aware setup", () => {
     panel.toggle(true);
     overlayShadow().querySelector<HTMLButtonElement>('[data-action="setup-open"]')?.click();
 
-    expect(overlayShadow().textContent).toContain("One conversation · one repository");
+    expect(overlayShadow().textContent).toContain("One project · one repository");
+    expect(overlayShadow().textContent).toContain("automatic continuation into a new chat");
     expect(overlayShadow().textContent).toContain("Needs input");
     expect(overlayShadow().textContent).not.toContain("NEEDS_INPUT");
     expect(overlayShadow().querySelector('[aria-modal="true"]')).toBeNull();
