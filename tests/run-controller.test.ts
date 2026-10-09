@@ -73,7 +73,6 @@ vi.mock("../src/common/storage", () => ({
   saveRun: mocks.saveRun,
 }));
 
-
 vi.mock("../src/content/transcript", () => ({
   lastAssistantMessage: mocks.lastAssistantMessage,
   lastMessageRole: mocks.lastMessageRole,
