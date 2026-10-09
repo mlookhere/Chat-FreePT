@@ -376,7 +376,6 @@ function resumeRun(ctx: ReduceContext, lastUserText?: string): boolean {
     state.lastLifecycleSignal = "interruption-resumed";
     note(ctx, "info", "Resumed — continuing after interruption");
     handleContinue(ctx);
-    if (state.status === "cooldown") ctx.effects.push({ do: "badge", text: "RUN" });
     return true;
   }
 
@@ -666,7 +665,6 @@ function recoverInterruptedRun(ctx: ReduceContext): boolean {
   state.lastLifecycleSignal = "interruption-recovered";
   note(ctx, "info", "Recovered interrupted run after reload");
   handleContinue(ctx);
-  if (state.status === "cooldown") ctx.effects.push({ do: "badge", text: "RUN" });
   return true;
 }
 
@@ -845,7 +843,10 @@ function isContinuablePhase(state: RunState): boolean {
 function scheduleContinuation(ctx: ReduceContext): void {
   ctx.state.status = "cooldown";
   ctx.state.cooldownUntil = ctx.now + ctx.settings.sendDelayMs;
-  ctx.effects.push({ do: "startCooldown", ms: ctx.settings.sendDelayMs });
+  ctx.effects.push(
+    { do: "startCooldown", ms: ctx.settings.sendDelayMs },
+    { do: "badge", text: "RUN" },
+  );
 }
 
 function waitForManualContinue(ctx: ReduceContext): void {
