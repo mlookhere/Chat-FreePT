@@ -1,5 +1,12 @@
-/** Conversation-level lifecycle. `plan_ready` waits for the user to press Start development. */
-export type Phase = "idle" | "planning" | "plan_ready" | "developing" | "complete" | "stopped";
+/** Conversation-level lifecycle. Legacy `plan_ready` states auto-advance into development. */
+export type Phase =
+  | "idle"
+  | "planning"
+  | "plan_ready"
+  | "developing"
+  | "testing"
+  | "complete"
+  | "stopped";
 
 /** What the extension is doing right now inside a phase. */
 export type RunStatus =
@@ -13,7 +20,13 @@ export type RunStatus =
   | "error"
   | "complete";
 
-export type MarkerStatus = "CONTINUE" | "NEEDS_INPUT" | "PLAN_READY" | "COMPLETE" | "ERROR";
+export type MarkerStatus =
+  | "CONTINUE"
+  | "NEEDS_INPUT"
+  | "PLAN_READY"
+  | "TESTING"
+  | "COMPLETE"
+  | "ERROR";
 
 /** Parsed from the fenced `chatfreept` block at the tail of the last assistant message. */
 export interface Marker {
@@ -67,7 +80,7 @@ export interface RunState {
   planSummary?: string;
   pauseReason?: string;
   errorCode?: ErrorCode;
-  /** Defaults to true for legacy persisted runs where the field is absent. */
+  /** Legacy persisted control. Continuous mode now always behaves as enabled. */
   autoContinueEnabled?: boolean;
   /** Legacy single-message queue retained for persisted v1 compatibility. */
   queuedUserText?: string;
@@ -77,8 +90,10 @@ export interface RunState {
   lastUserText?: string;
   /** Last accepted ChatGPT lifecycle signal used by the durable checkpoint summary. */
   lastLifecycleSignal?: string;
-  /** Auto-sends used in the current phase (cap enforced per phase). */
+  /** Number of automatic continuation sends in this phase; informational only. */
   autoSends: number;
+  /** A max-length rollover is waiting to seed this new ChatGPT conversation. */
+  handoffPending?: boolean;
   /** Marker-recovery nudges since the last successful marker parse. Max 1. */
   nudges: number;
   /** Assistant replies since the last full-contract injection (refresh every N). */
@@ -97,6 +112,7 @@ export interface RunState {
 export interface Settings {
   v: 1;
   continueMessage: string;
+  /** Legacy compatibility value; continuous mode no longer stops at this count. */
   autoContinueCap: number;
   sendDelayMs: number;
   /** Quiet time after the last mutation before a reply counts as finished. */
