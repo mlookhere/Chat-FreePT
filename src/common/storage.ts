@@ -1,5 +1,6 @@
-import type { RunState, Settings } from "./types";
+import { normalizeRepositoryInput } from "./repository";
 import { normalizeSettings } from "./settings";
+import type { RunState, Settings } from "./types";
 
 const SETTINGS_KEY = "cfpt:settings";
 const RUN_PREFIX = "cfpt:run:";
@@ -21,11 +22,23 @@ export async function loadRun(conversationId: string): Promise<RunState | null> 
   const key = runKey(conversationId);
   const found = await chrome.storage.local.get(key);
   const state = found[key] as RunState | undefined;
-  return state && state.v === 1 ? state : null;
+  return state && state.v === 1 ? normalizeRunRepositoryState(state) : null;
 }
 
 export async function saveRun(state: RunState): Promise<void> {
-  await chrome.storage.local.set({ [runKey(state.conversationId)]: state });
+  const normalized = normalizeRunRepositoryState(state);
+  await chrome.storage.local.set({ [runKey(normalized.conversationId)]: normalized });
+}
+
+function normalizeRunRepositoryState(state: RunState): RunState {
+  const lockedRepo = state.repo ? normalizeRepositoryInput(state.repo) : null;
+  if (lockedRepo) {
+    return { ...state, repo: lockedRepo, repoName: lockedRepo, repoMode: "existing" };
+  }
+
+  const draftRepo = normalizeRepositoryInput(state.repoName);
+  if (draftRepo) return { ...state, repoName: draftRepo, repoMode: "existing" };
+  return state;
 }
 
 export async function deleteRun(conversationId: string): Promise<void> {
