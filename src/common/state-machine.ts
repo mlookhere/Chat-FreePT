@@ -373,6 +373,7 @@ function resumeRun(ctx: ReduceContext, lastUserText?: string): boolean {
   delete state.errorCode;
 
   if (state.lastLifecycleSignal === "generation-interrupted" && isContinuablePhase(state)) {
+    state.lastLifecycleSignal = "interruption-resumed";
     note(ctx, "info", "Resumed — continuing after interruption");
     handleContinue(ctx);
     if (state.status === "cooldown") ctx.effects.push({ do: "badge", text: "RUN" });
@@ -662,6 +663,7 @@ function recoverInterruptedRun(ctx: ReduceContext): boolean {
     return false;
   }
 
+  state.lastLifecycleSignal = "interruption-recovered";
   note(ctx, "info", "Recovered interrupted run after reload");
   handleContinue(ctx);
   if (state.status === "cooldown") ctx.effects.push({ do: "badge", text: "RUN" });
