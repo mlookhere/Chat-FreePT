@@ -568,12 +568,20 @@ describe("state machine external signals and handoff", () => {
       { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
       settings,
     ).state;
-    const first = reduce(interrupted, { type: "PAGE_SIGNAL", signal: "conversation-full" }, settings);
+    const first = reduce(
+      interrupted,
+      { type: "PAGE_SIGNAL", signal: "conversation-full" },
+      settings,
+    );
     expect(first.state.status).toBe("paused");
     expect(first.state.handoffStarted).toBe(true);
     expect(first.effects).toContainEqual({ do: "handoffConversation" });
 
-    const duplicate = reduce(first.state, { type: "PAGE_SIGNAL", signal: "conversation-full" }, settings);
+    const duplicate = reduce(
+      first.state,
+      { type: "PAGE_SIGNAL", signal: "conversation-full" },
+      settings,
+    );
     expect(duplicate.state).toBe(first.state);
     expect(duplicate.effects).toEqual([]);
 
