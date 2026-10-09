@@ -136,10 +136,35 @@ describe("panel Ultra Code queue and checkpoint", () => {
     expect(shadow.textContent).toContain("Ultra Code checkpoint");
     expect(shadow.textContent).toContain("owner/project");
     expect(shadow.textContent).toContain("3/7 — tests");
-    expect(shadow.textContent).toContain("Marker: CONTINUE");
+    expect(shadow.textContent).toContain("Marker: Continue");
     expect(shadow.textContent).toContain("Queue: 2");
-    expect(shadow.textContent).toContain("generation-start");
+    expect(shadow.textContent).toContain("Generation started");
     expect(shadow.innerHTML).toContain("https://github.com/owner/project/pull/42");
+  });
+
+  it("renders protocol status updates as normal language", () => {
+    const { panel: current } = makePanel();
+    current.render({
+      ...newRunState("c1", 1),
+      repo: "owner/project",
+      repoName: "owner/project",
+      repoMode: "existing",
+      phase: "plan_ready",
+      status: "awaiting_user",
+      lastLifecycleSignal: "generation-interrupted",
+      lastMarker: {
+        status: "NEEDS_INPUT",
+        version: 1,
+        raw: "NEEDS_INPUT",
+      },
+    });
+
+    expect(shadow.textContent).toContain("Plan ready");
+    expect(shadow.textContent).toContain("Marker: Needs input");
+    expect(shadow.textContent).toContain("Last lifecycle: Generation interrupted");
+    expect(shadow.textContent).not.toContain("plan_ready");
+    expect(shadow.textContent).not.toContain("NEEDS_INPUT");
+    expect(shadow.textContent).not.toContain("generation-interrupted");
   });
 
   it("derives the manual-continue view from machine state, not pause text", () => {
