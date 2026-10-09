@@ -192,6 +192,7 @@ export function prepareConversationHandoff(
       { at: now, kind: "info" as const, text: "Conversation full — continuing in a new chat" },
     ].slice(-MAX_LOG),
   };
+  delete next.handoffStarted;
   delete next.cooldownUntil;
   delete next.replyBaselineAssistantKey;
   delete next.lastProcessedAssistantKey;
@@ -670,11 +671,20 @@ function reduceSystemEvent(ctx: ReduceContext, event: SystemEvent): boolean {
       return recoverInterruptedRun(ctx);
     case "HANDOFF_READY":
       return startConversationHandoff(ctx);
-    case "PAGE_SIGNAL":
-      if (!isActive(ctx.state) && ctx.state.status !== "awaiting_user") return false;
+    case "PAGE_SIGNAL": {
+      const interruptedFullChat =
+        event.signal === "conversation-full" &&
+        ctx.state.status === "paused" &&
+        ctx.state.lastLifecycleSignal === "generation-interrupted" &&
+        isContinuablePhase(ctx.state);
+      if (!isActive(ctx.state) && ctx.state.status !== "awaiting_user" && !interruptedFullChat) {
+        return false;
+      }
+      if (event.signal === "conversation-full" && ctx.state.handoffStarted) return false;
       ctx.state.lastLifecycleSignal = `page:${event.signal}`;
       handlePageSignal(ctx, event.signal);
       return true;
+    }
   }
 }
 
@@ -749,6 +759,7 @@ function handlePageSignal(ctx: ReduceContext, signal: PageSignal): void {
         return;
       }
       ctx.state.status = "paused";
+      ctx.state.handoffStarted = true;
       ctx.state.pauseReason = "Conversation full — continuing automatically in a new chat.";
       note(ctx, "info", "Conversation full — starting automatic handoff");
       ctx.effects.push({ do: "handoffConversation" }, { do: "badge", text: "RUN" });
