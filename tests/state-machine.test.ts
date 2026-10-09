@@ -628,7 +628,6 @@ describe("state machine external signals and handoff", () => {
     expect(started.state.status).toBe("inserting");
     expect(started.effects).toContainEqual({ do: "insertAndSend", kind: "handoff" });
   });
-
 });
 
 describe("state machine user recovery after handoff", () => {
