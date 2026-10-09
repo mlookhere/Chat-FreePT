@@ -36,7 +36,7 @@ const LIFECYCLE_LABEL: Record<string, string> = {
 
 function humanizeToken(value: string): string {
   const words = value.replace(/[_-]+/g, " ").trim().toLowerCase();
-  return words ? words[0]?.toUpperCase() + words.slice(1) : "";
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
 }
 
 function statusLabel(status: string): string {
