@@ -1008,7 +1008,12 @@ describe("RunController max-length interruption handoff", () => {
     });
     mocks.scanPageSignals.mockReturnValue("conversation-full");
 
-    emitChatState({ version: 1, event: "generation-complete", requestId: "max-length", marker: null });
+    emitChatState({
+      version: 1,
+      event: "generation-complete",
+      requestId: "max-length",
+      marker: null,
+    });
     await flushAsync();
 
     expect(handoff).toHaveBeenCalledTimes(1);
