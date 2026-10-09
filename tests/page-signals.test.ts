@@ -55,13 +55,19 @@ describe("scanPageSignals", () => {
   });
 
   it("recognizes a native aside with a button when the role attribute is absent", () => {
-    append(`<aside><p>You've reached the maximum length for this conversation.</p><button>Start new chat</button></aside>`);
+    append(
+      `<aside><p>You've reached the maximum length for this conversation.</p><button>Start new chat</button></aside>`,
+    );
     expect(scanPageSignals()).toBe("conversation-full");
   });
 
   it("ignores hidden and quoted max-length alerts", () => {
-    append(`<aside role="alert" hidden>You've reached the maximum length for this conversation.</aside>`);
-    append(`<div data-message-author-role="assistant"><div role="alert">You've reached the maximum length for this conversation.</div></div>`);
+    append(
+      `<aside role="alert" hidden>You've reached the maximum length for this conversation.</aside>`,
+    );
+    append(
+      `<div data-message-author-role="assistant"><div role="alert">You've reached the maximum length for this conversation.</div></div>`,
+    );
     expect(scanPageSignals()).toBeNull();
   });
 
