@@ -42,6 +42,29 @@ describe("scanPageSignals", () => {
     expect(scanPageSignals()).toBe("conversation-full");
   });
 
+  it("detects the captured max-length notice inside a fallback turn", () => {
+    append(`
+      <div data-content-search-turn-key="fallback-turn-7">
+        <aside role="alert" class="border-text-danger/20 text-danger">
+          <div>You've reached the maximum length for this conversation, but you can keep talking by starting a new chat.</div>
+          <button type="button">Start new chat</button>
+        </aside>
+      </div>
+    `);
+    expect(scanPageSignals()).toBe("conversation-full");
+  });
+
+  it("recognizes a native aside with a button when the role attribute is absent", () => {
+    append(`<aside><p>You've reached the maximum length for this conversation.</p><button>Start new chat</button></aside>`);
+    expect(scanPageSignals()).toBe("conversation-full");
+  });
+
+  it("ignores hidden and quoted max-length alerts", () => {
+    append(`<aside role="alert" hidden>You've reached the maximum length for this conversation.</aside>`);
+    append(`<div data-message-author-role="assistant"><div role="alert">You've reached the maximum length for this conversation.</div></div>`);
+    expect(scanPageSignals()).toBeNull();
+  });
+
   it("ignores unrelated maximum-length alerts", () => {
     append('<aside role="alert">Maximum length exceeded for file name.</aside>');
     expect(scanPageSignals()).toBeNull();
