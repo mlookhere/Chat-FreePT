@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   lastUserMessageText: vi.fn(),
   lastMessageRole: vi.fn(),
   toolCallIndicatorVisible: vi.fn(),
+  saveRun: vi.fn(),
   chatStateListeners: [] as Array<
     (event: {
       version: number;
@@ -67,6 +68,11 @@ vi.mock("../src/content/selectors", () => ({
 vi.mock("../src/content/page-signals", () => ({
   scanPageSignals: mocks.scanPageSignals,
 }));
+
+vi.mock("../src/common/storage", () => ({
+  saveRun: mocks.saveRun,
+}));
+
 
 vi.mock("../src/content/transcript", () => ({
   lastAssistantMessage: mocks.lastAssistantMessage,
@@ -182,12 +188,55 @@ beforeEach(() => {
   mocks.lastUserMessageText.mockReset().mockReturnValue(null);
   mocks.lastMessageRole.mockReset().mockReturnValue(null);
   mocks.toolCallIndicatorVisible.mockReset().mockReturnValue(false);
+  mocks.saveRun.mockReset().mockResolvedValue(undefined);
   mocks.watchers.length = 0;
   mocks.chatStateListeners.length = 0;
 });
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("RunController state persistence", () => {
+  it("serializes writes and flushes the final repository snapshot", async () => {
+    const savedRepos: string[] = [];
+    const resolvers: Array<() => void> = [];
+    mocks.saveRun.mockImplementation(
+      (state: { repoName: string }) =>
+        new Promise<void>((resolve) => {
+          savedRepos.push(state.repoName);
+          resolvers.push(resolve);
+        }),
+    );
+
+    const controller = makeController();
+    controller.dispatch({
+      type: "USER_UPDATE_DRAFT",
+      repoName: "owner/first",
+      idea: "first",
+    });
+    controller.dispatch({
+      type: "USER_UPDATE_DRAFT",
+      repoName: "owner/latest",
+      idea: "latest",
+    });
+    await flushAsync();
+
+    expect(savedRepos).toEqual(["owner/first"]);
+
+    resolvers.shift()?.();
+    await flushAsync();
+    expect(savedRepos).toEqual(["owner/first", "owner/latest"]);
+
+    const flush = controller.flushState();
+    resolvers.shift()?.();
+    await flushAsync();
+    expect(savedRepos).toEqual(["owner/first", "owner/latest", "owner/latest"]);
+
+    resolvers.shift()?.();
+    await flush;
+    controller.dispose();
+  });
 });
 
 describe("RunController sends and continuation controls", () => {
