@@ -78,6 +78,14 @@ async function releaseOwnedLock(conversationId: string): Promise<void> {
   }
 }
 
+async function disposeControllerPersisted(): Promise<void> {
+  const ctl = controller;
+  controller = null;
+  if (!ctl) return;
+  ctl.dispose();
+  await ctl.flushState();
+}
+
 function startHeartbeat(): void {
   stopHeartbeat();
   if (contextGuard.invalidated) return;
@@ -179,8 +187,7 @@ function loseOwnership(conversationId: string): void {
 
 async function initConversation(convId: string): Promise<void> {
   if (contextGuard.invalidated) return;
-  controller?.dispose();
-  controller = null;
+  await disposeControllerPersisted();
   stopHeartbeat();
   stopTakeoverRetry();
   currentConvId = convId;
@@ -201,8 +208,7 @@ async function initConversation(convId: string): Promise<void> {
 async function leaveConversationForUtilityPage(mode: ChatGptPageMode): Promise<void> {
   panel?.toggle(false);
   stopTakeoverRetry();
-  controller?.dispose();
-  controller = null;
+  await disposeControllerPersisted();
   stopHeartbeat();
   const previous = currentConvId;
   currentConvId = "";
@@ -281,8 +287,7 @@ async function onComposerNavigate(href: string): Promise<void> {
   if (!urlConv && currentConvId.startsWith("pending:")) return;
 
   stopTakeoverRetry();
-  controller?.dispose();
-  controller = null;
+  await disposeControllerPersisted();
   stopHeartbeat();
   await releaseOwnedLock(currentConvId);
   if (contextGuard.invalidated) return;
@@ -313,6 +318,7 @@ function installLifecycleListeners(): void {
     stopHeartbeat();
     stopNavigation?.();
     stopNavigation = undefined;
+    void controller?.flushState();
     void releaseOwnedLock(currentConvId);
   });
 
