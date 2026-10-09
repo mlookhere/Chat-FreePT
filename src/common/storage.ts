@@ -90,8 +90,8 @@ export async function releaseTabLock(conversationId: string, nonce: string): Pro
  */
 export async function migrateRunKey(state: RunState, newConversationId: string): Promise<RunState> {
   const old = state.conversationId;
-  const next: RunState = { ...state, conversationId: newConversationId };
-  await chrome.storage.local.set({ [runKey(newConversationId)]: next });
+  const next = normalizeRunRepositoryState({ ...state, conversationId: newConversationId });
+  await saveRun(next);
   if (old !== newConversationId) await chrome.storage.local.remove(runKey(old));
   return next;
 }
