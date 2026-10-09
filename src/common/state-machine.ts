@@ -39,6 +39,7 @@ export type MachineEvent =
   | { type: "STREAM_INTERRUPTED"; reason?: string }
   | { type: "PERMISSION_CONTINUED" }
   | { type: "COOLDOWN_ELAPSED" }
+  | { type: "RECOVERY_CONTINUE" }
   | { type: "PAGE_SIGNAL"; signal: PageSignal };
 
 export type PromptKind =
@@ -103,7 +104,10 @@ type StreamEvent = Extract<
       | "PERMISSION_CONTINUED";
   }
 >;
-type SystemEvent = Extract<MachineEvent, { type: "COOLDOWN_ELAPSED" | "PAGE_SIGNAL" }>;
+type SystemEvent = Extract<
+  MachineEvent,
+  { type: "COOLDOWN_ELAPSED" | "RECOVERY_CONTINUE" | "PAGE_SIGNAL" }
+>;
 
 const MAX_LOG = 200;
 const ACTIVE_STATUSES = new Set(["inserting", "sending", "streaming", "cooldown"]);
@@ -365,9 +369,17 @@ function resumeRun(ctx: ReduceContext, lastUserText?: string): boolean {
   }
   const text = lastUserText?.trim();
   if (text) state.lastUserText = text;
-  state.status = "streaming";
   delete state.pauseReason;
   delete state.errorCode;
+
+  if (state.lastLifecycleSignal === "generation-interrupted" && isContinuablePhase(state)) {
+    note(ctx, "info", "Resumed — continuing after interruption");
+    handleContinue(ctx);
+    if (state.status === "cooldown") ctx.effects.push({ do: "badge", text: "RUN" });
+    return true;
+  }
+
+  state.status = "streaming";
   note(ctx, "info", "Resumed — re-checking conversation state");
   ctx.effects.push({ do: "reconcile" }, { do: "badge", text: "RUN" });
   return true;
@@ -630,12 +642,30 @@ function reduceSystemEvent(ctx: ReduceContext, event: SystemEvent): boolean {
   switch (event.type) {
     case "COOLDOWN_ELAPSED":
       return finishCooldown(ctx);
+    case "RECOVERY_CONTINUE":
+      return recoverInterruptedRun(ctx);
     case "PAGE_SIGNAL":
       if (!isActive(ctx.state) && ctx.state.status !== "awaiting_user") return false;
       ctx.state.lastLifecycleSignal = `page:${event.signal}`;
       handlePageSignal(ctx, event.signal);
       return true;
   }
+}
+
+function recoverInterruptedRun(ctx: ReduceContext): boolean {
+  const state = ctx.state;
+  if (
+    state.status !== "streaming" ||
+    state.lastLifecycleSignal !== "generation-interrupted" ||
+    !isContinuablePhase(state)
+  ) {
+    return false;
+  }
+
+  note(ctx, "info", "Recovered interrupted run after reload");
+  handleContinue(ctx);
+  if (state.status === "cooldown") ctx.effects.push({ do: "badge", text: "RUN" });
+  return true;
 }
 
 function finishCooldown(ctx: ReduceContext): boolean {
