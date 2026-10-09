@@ -671,21 +671,24 @@ function reduceSystemEvent(ctx: ReduceContext, event: SystemEvent): boolean {
       return recoverInterruptedRun(ctx);
     case "HANDOFF_READY":
       return startConversationHandoff(ctx);
-    case "PAGE_SIGNAL": {
-      const interruptedFullChat =
-        event.signal === "conversation-full" &&
-        ctx.state.status === "paused" &&
-        ctx.state.lastLifecycleSignal === "generation-interrupted" &&
-        isContinuablePhase(ctx.state);
-      if (!isActive(ctx.state) && ctx.state.status !== "awaiting_user" && !interruptedFullChat) {
-        return false;
-      }
-      if (event.signal === "conversation-full" && ctx.state.handoffStarted) return false;
-      ctx.state.lastLifecycleSignal = `page:${event.signal}`;
-      handlePageSignal(ctx, event.signal);
-      return true;
-    }
+    case "PAGE_SIGNAL":
+      return handleSystemPageSignal(ctx, event.signal);
   }
+}
+
+function handleSystemPageSignal(ctx: ReduceContext, signal: PageSignal): boolean {
+  const interruptedFullChat =
+    signal === "conversation-full" &&
+    ctx.state.status === "paused" &&
+    ctx.state.lastLifecycleSignal === "generation-interrupted" &&
+    isContinuablePhase(ctx.state);
+  if (!isActive(ctx.state) && ctx.state.status !== "awaiting_user" && !interruptedFullChat) {
+    return false;
+  }
+  if (signal === "conversation-full" && ctx.state.handoffStarted) return false;
+  ctx.state.lastLifecycleSignal = `page:${signal}`;
+  handlePageSignal(ctx, signal);
+  return true;
 }
 
 function startConversationHandoff(ctx: ReduceContext): boolean {
