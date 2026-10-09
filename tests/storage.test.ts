@@ -185,9 +185,11 @@ describe("run state", () => {
     await storage.saveRun(first);
     await storage.saveRun(second);
 
-    expect(await storage.loadRun("conversation-a")).toEqual(first);
-    expect(await storage.loadRun("conversation-b")).toEqual(second);
-    expect((await storage.loadRun("conversation-a"))?.repo).toBe("owner/first");
+    const restoredFirst = await storage.loadRun("conversation-a");
+    const restoredSecond = await storage.loadRun("conversation-b");
+    expect(restoredFirst).toEqual({ ...first, autoContinueEnabled: true });
+    expect(restoredSecond).toEqual(second);
+    expect(restoredFirst?.repo).toBe("owner/first");
     expect((await storage.loadRun("conversation-b"))?.repo).toBe("owner/second");
     expect(stores.local[storage.runKey("conversation-a")]).not.toEqual(
       stores.local[storage.runKey("conversation-b")],
