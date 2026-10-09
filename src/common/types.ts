@@ -83,6 +83,8 @@ export interface RunState {
   autoSends: number;
   /** A max-length rollover is waiting to seed this new ChatGPT conversation. */
   handoffPending?: boolean;
+  /** Prevents replaying a rollover when an exhausted source chat is revisited. */
+  handoffStarted?: boolean;
   /** Marker-recovery nudges since the last successful marker parse. Max 1. */
   nudges: number;
   /** Assistant replies since the last full-contract injection (refresh every N). */

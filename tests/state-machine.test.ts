@@ -562,6 +562,41 @@ describe("state machine external signals and handoff", () => {
     expect(result.effects).toContainEqual({ do: "handoffConversation" });
   });
 
+  it("hands off an interrupted full conversation without replaying after reload", () => {
+    const interrupted = reduce(
+      toStreaming(start()),
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    ).state;
+    const first = reduce(
+      interrupted,
+      { type: "PAGE_SIGNAL", signal: "conversation-full" },
+      settings,
+    );
+    expect(first.state.status).toBe("paused");
+    expect(first.state.handoffStarted).toBe(true);
+    expect(first.effects).toContainEqual({ do: "handoffConversation" });
+
+    const duplicate = reduce(
+      first.state,
+      { type: "PAGE_SIGNAL", signal: "conversation-full" },
+      settings,
+    );
+    expect(duplicate.state).toBe(first.state);
+    expect(duplicate.effects).toEqual([]);
+
+    const carried = prepareConversationHandoff(first.state, "pending:next", 5000);
+    expect(carried.handoffStarted).toBeUndefined();
+    expect(carried.handoffPending).toBe(true);
+  });
+
+  it("does not automatically hand off an intentionally paused chat", () => {
+    const paused = reduce(toStreaming(start()), { type: "USER_PAUSE" }, settings).state;
+    const result = reduce(paused, { type: "PAGE_SIGNAL", signal: "conversation-full" }, settings);
+    expect(result.state).toBe(paused);
+    expect(result.effects).toEqual([]);
+  });
+
   it("prepares and starts a max-length handoff with the same project context", () => {
     const source: RunState = {
       ...toStreaming(start()),
@@ -593,7 +628,9 @@ describe("state machine external signals and handoff", () => {
     expect(started.state.status).toBe("inserting");
     expect(started.effects).toContainEqual({ do: "insertAndSend", kind: "handoff" });
   });
+});
 
+describe("state machine user recovery after handoff", () => {
   it("USER_REPLY sends the user's text with the marker re-arm", () => {
     const streaming = toStreaming(start());
     const paused = reduce(

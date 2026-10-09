@@ -321,6 +321,11 @@ export class RunController {
       return;
     }
 
+    if (scanPageSignals() === "conversation-full") {
+      this.dispatch({ type: "PAGE_SIGNAL", signal: "conversation-full" });
+      return;
+    }
+
     const role = lastMessageRole();
     const assistant = role === "assistant" ? lastAssistantMessage() : null;
     if (assistant && this.isFreshAssistant(assistant)) {
@@ -345,6 +350,16 @@ export class RunController {
   private checkRuntime(): void {
     if (this.disposed) return;
     if (this.maybeContinueGitHubPermission()) return;
+    if (this.state.status === "paused") {
+      if (
+        this.state.lastLifecycleSignal === "generation-interrupted" &&
+        !this.state.handoffStarted &&
+        scanPageSignals() === "conversation-full"
+      ) {
+        this.dispatch({ type: "PAGE_SIGNAL", signal: "conversation-full" });
+      }
+      return;
+    }
     if (!isActive(this.state) && this.state.status !== "awaiting_user") return;
     this.pollSignals();
     this.reconcileLiveState(Date.now());
