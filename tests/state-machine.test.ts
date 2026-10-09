@@ -536,7 +536,6 @@ describe("state machine recovery and user control", () => {
     expect(state.repo).toBe("o/r");
     expect(state.repoName).toBe("o/r");
   });
-
 });
 
 describe("state machine external signals and handoff", () => {
