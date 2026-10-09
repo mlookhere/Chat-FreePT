@@ -688,10 +688,7 @@ function startConversationHandoff(ctx: ReduceContext): boolean {
   delete state.pauseReason;
   delete state.errorCode;
   note(ctx, "send", "Continuing project in the new conversation");
-  ctx.effects.push(
-    { do: "insertAndSend", kind: "handoff" },
-    { do: "badge", text: "RUN" },
-  );
+  ctx.effects.push({ do: "insertAndSend", kind: "handoff" }, { do: "badge", text: "RUN" });
   return true;
 }
 
@@ -844,10 +841,7 @@ function startPlannedDevelopment(ctx: ReduceContext, marker: Marker, text: strin
   state.autoSends = 0;
   state.nudges = 0;
   note(ctx, "info", "Plan ready — starting development automatically");
-  ctx.effects.push(
-    { do: "insertAndSend", kind: "develop" },
-    { do: "badge", text: "RUN" },
-  );
+  ctx.effects.push({ do: "insertAndSend", kind: "develop" }, { do: "badge", text: "RUN" });
 }
 
 function waitForTesting(ctx: ReduceContext, marker: Marker): void {
