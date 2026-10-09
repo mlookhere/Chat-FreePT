@@ -138,6 +138,9 @@ describe("panel Ultra Code queue and checkpoint", () => {
     expect(shadow.innerHTML).toContain("https://github.com/owner/project/pull/42");
   });
 
+});
+
+describe("panel checkpoint language and terminal states", () => {
   it("renders protocol status updates as normal language", () => {
     const { panel: current } = makePanel();
     current.render({
