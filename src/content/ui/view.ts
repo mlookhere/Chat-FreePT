@@ -255,9 +255,7 @@ function checkpointHtml(state: RunState): string {
   const queueDepth = queuedMessages(state).length;
   const marker = state.lastMarker?.status ? markerLabel(state.lastMarker.status) : "None";
   const item = state.lastMarker?.item ?? "None";
-  const lifecycle = state.lastLifecycleSignal
-    ? lifecycleLabel(state.lastLifecycleSignal)
-    : "None";
+  const lifecycle = state.lastLifecycleSignal ? lifecycleLabel(state.lastLifecycleSignal) : "None";
   const markerUrl = state.lastMarker?.url ?? "";
   const url = /^https:\/\/github\.com\//i.test(markerUrl)
     ? `<a class="cfpt-link" href="${esc(markerUrl)}" target="_blank" rel="noreferrer noopener">${esc(markerUrl)}</a>`
