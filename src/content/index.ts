@@ -16,7 +16,7 @@ import type { ContentRequest } from "../common/types";
 import { ensureChatStateBridge } from "./chat-state";
 import { DiagnosticsRecorder } from "./diagnostics";
 import { createExtensionContextGuard } from "./extension-context";
-import { conversationIdFromUrl, watchNavigation } from "./navigation";
+import { conversationIdFromUrl, freshConversationUrl, watchNavigation } from "./navigation";
 import { chatGptPageMode, type ChatGptPageMode } from "./page-mode";
 import { RunController } from "./run-controller";
 import { require_ } from "./selectors";
@@ -150,7 +150,7 @@ async function rolloverConversation(state: RunState): Promise<void> {
     stopTakeoverRetry();
     await releaseOwnedLock(sourceConversationId);
     if (contextGuard.invalidated) return;
-    window.location.assign("https://chatgpt.com/");
+    window.location.assign(freshConversationUrl(location.href));
   } catch (error) {
     reportAsyncFailure("automatic conversation handoff failed", error);
   }

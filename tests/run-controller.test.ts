@@ -980,6 +980,75 @@ describe("RunController max-length interruption handoff", () => {
     controller.dispose();
   });
 
+  it("prioritizes the recorded max-length alert over an empty watcher completion", async () => {
+    const handoff = vi.fn();
+    const controller = new RunController(streamingState(), settings, {
+      onChange: vi.fn(),
+      onShowCompletion: vi.fn(),
+      onConversationHandoff: handoff,
+    });
+    mocks.scanPageSignals.mockReturnValue("conversation-full");
+
+    watcher().callbacks.onComplete("");
+    await flushAsync();
+
+    expect(handoff).toHaveBeenCalledTimes(1);
+    expect(controller.state.handoffStarted).toBe(true);
+    expect(controller.state.status).toBe("paused");
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it("prioritizes the recorded max-length alert over an empty network completion", async () => {
+    const handoff = vi.fn();
+    const controller = new RunController(streamingState(), settings, {
+      onChange: vi.fn(),
+      onShowCompletion: vi.fn(),
+      onConversationHandoff: handoff,
+    });
+    mocks.scanPageSignals.mockReturnValue("conversation-full");
+
+    emitChatState({
+      version: 1,
+      event: "generation-complete",
+      requestId: "max-length",
+      marker: null,
+    });
+    await flushAsync();
+
+    expect(handoff).toHaveBeenCalledTimes(1);
+    expect(controller.state.handoffStarted).toBe(true);
+    expect(controller.state.lastMarker).toBeUndefined();
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it("blocks a scheduled continuation if the max-length banner appears before send", async () => {
+    vi.useFakeTimers();
+    const handoff = vi.fn();
+    const controller = new RunController(streamingState(), settings, {
+      onChange: vi.fn(),
+      onShowCompletion: vi.fn(),
+      onConversationHandoff: handoff,
+    });
+    controller.dispatch({
+      type: "REPLY_COMPLETE",
+      marker: { status: "CONTINUE", version: 1, raw: "Continue" },
+      text: "More work remains",
+    });
+    expect(controller.state.status).toBe("cooldown");
+    mocks.scanPageSignals.mockReturnValue("conversation-full");
+
+    await vi.advanceTimersByTimeAsync(110);
+    await flushAsync();
+
+    expect(handoff).toHaveBeenCalledTimes(1);
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    expect(controller.state.handoffStarted).toBe(true);
+    controller.dispose();
+  });
+
   it("never rolls over from a deliberate user pause", async () => {
     vi.useFakeTimers();
     const handoff = vi.fn();
