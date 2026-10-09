@@ -42,33 +42,34 @@ export function parseMarker(text: string): Marker | null {
     if (trimmed === "" || trimmed === "```") continue;
     const field = FIELD_LINE.exec(line);
     if (!field) break;
-    const key = field[1]?.toUpperCase();
-    const value = field[2] ?? "";
-    switch (key) {
-      case "V": {
-        const version = Number.parseInt(value, 10);
-        if (Number.isFinite(version)) marker.version = version;
-        break;
-      }
-      case "PHASE":
-        marker.phase = value;
-        break;
-      case "REPO":
-        if (REPO_RE.test(value)) marker.repo = value;
-        break;
-      case "ITEM":
-        marker.item = value;
-        break;
-      case "NOTE":
-        marker.note = value;
-        break;
-      case "URL":
-        marker.url = value;
-        break;
-    }
+    applyField(marker, field[1] ?? "", field[2] ?? "");
   }
   marker.raw = summarize(marker);
   return marker;
+}
+
+function applyField(marker: Marker, key: string, value: string): void {
+  switch (key.toUpperCase()) {
+    case "V": {
+      const version = Number.parseInt(value, 10);
+      if (Number.isFinite(version)) marker.version = version;
+      return;
+    }
+    case "PHASE":
+      marker.phase = value;
+      return;
+    case "REPO":
+      if (REPO_RE.test(value)) marker.repo = value;
+      return;
+    case "ITEM":
+      marker.item = value;
+      return;
+    case "NOTE":
+      marker.note = value;
+      return;
+    case "URL":
+      marker.url = value;
+  }
 }
 
 function normalizeStatus(value: string): MarkerStatus | null {
