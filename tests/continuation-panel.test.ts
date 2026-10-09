@@ -137,7 +137,6 @@ describe("panel Ultra Code queue and checkpoint", () => {
     expect(shadow.textContent).toContain("Generation started");
     expect(shadow.innerHTML).toContain("https://github.com/owner/project/pull/42");
   });
-
 });
 
 describe("panel checkpoint language and terminal states", () => {
