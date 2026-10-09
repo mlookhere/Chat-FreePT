@@ -883,9 +883,7 @@ describe("RunController interrupted reload recovery", () => {
     await vi.advanceTimersByTimeAsync(2_600);
     await flushAsync();
 
-    expect(String(mocks.insertPrompt.mock.calls[0]?.[0])).toContain(
-      "make the transition seamless",
-    );
+    expect(String(mocks.insertPrompt.mock.calls[0]?.[0])).toContain("make the transition seamless");
     expect(mocks.clickSend).toHaveBeenCalledTimes(1);
     expect(controller.state.queuedUserTexts).toBeUndefined();
     expect(controller.state.status).toBe("streaming");
