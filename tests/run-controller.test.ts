@@ -950,6 +950,55 @@ describe("RunController interrupted reload recovery", () => {
   });
 });
 
+describe("RunController max-length interruption handoff", () => {
+  it("detects the full-chat alert while interrupted rather than auto-resuming", async () => {
+    vi.useFakeTimers();
+    const handoff = vi.fn();
+    const interrupted = reduce(
+      streamingState(),
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    ).state;
+    mocks.scanPageSignals.mockReturnValue("conversation-full");
+    const controller = new RunController(interrupted, settings, {
+      onChange: vi.fn(),
+      onShowCompletion: vi.fn(),
+      onConversationHandoff: handoff,
+    });
+
+    await vi.advanceTimersByTimeAsync(2_100);
+    await flushAsync();
+
+    expect(handoff).toHaveBeenCalledTimes(1);
+    expect(controller.state.handoffStarted).toBe(true);
+    expect(controller.state.status).toBe("paused");
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flushAsync();
+    expect(handoff).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
+  it("never rolls over from a deliberate user pause", async () => {
+    vi.useFakeTimers();
+    const handoff = vi.fn();
+    const paused = reduce(streamingState(), { type: "USER_PAUSE" }, settings).state;
+    mocks.scanPageSignals.mockReturnValue("conversation-full");
+    const controller = new RunController(paused, settings, {
+      onChange: vi.fn(),
+      onShowCompletion: vi.fn(),
+      onConversationHandoff: handoff,
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flushAsync();
+    expect(handoff).not.toHaveBeenCalled();
+    expect(controller.state.status).toBe("paused");
+    controller.dispose();
+  });
+});
+
 describe("RunController stale stream isolation", () => {
   it("keeps NEEDS_INPUT stable when stale start and stuck signals arrive", () => {
     const controller = makeController(streamingState());
