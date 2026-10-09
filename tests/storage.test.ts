@@ -118,6 +118,7 @@ describe("run state", () => {
       ...newRunState("ultra", 123),
       repo: "owner/project",
       repoName: "owner/project",
+      repoMode: "existing" as const,
       idea: "persist my draft",
       lastUserText: "last human instruction",
       queuedUserTexts: ["first", "second"],
@@ -135,14 +136,48 @@ describe("run state", () => {
     expect(await storage.loadRun("ultra")).toEqual(state);
   });
 
+  it("normalizes and restores complete repository state for one conversation", async () => {
+    const draft = {
+      ...newRunState("repo-conversation", 123),
+      repoName: "https://github.com/Owner/project.git",
+      repoMode: "new" as const,
+      idea: "keep this idea",
+    };
+
+    await storage.saveRun(draft);
+    const restoredDraft = await storage.loadRun("repo-conversation");
+    expect(restoredDraft?.repoName).toBe("Owner/project");
+    expect(restoredDraft?.repoMode).toBe("existing");
+    expect(restoredDraft?.idea).toBe("keep this idea");
+    expect(restoredDraft?.repo).toBeUndefined();
+
+    const locked = {
+      ...draft,
+      repo: "Owner/project",
+      repoName: "stale/value",
+      repoMode: "new" as const,
+    };
+    await storage.saveRun(locked);
+    const restoredLocked = await storage.loadRun("repo-conversation");
+    expect(restoredLocked?.repo).toBe("Owner/project");
+    expect(restoredLocked?.repoName).toBe("Owner/project");
+    expect(restoredLocked?.repoMode).toBe("existing");
+  });
+
   it("keeps simultaneous conversation state independent", async () => {
     const first = {
       ...newRunState("conversation-a", 1),
+      repo: "owner/first",
+      repoName: "owner/first",
+      repoMode: "existing" as const,
       idea: "first project",
       autoContinueEnabled: false,
     };
     const second = {
       ...newRunState("conversation-b", 2),
+      repo: "owner/second",
+      repoName: "owner/second",
+      repoMode: "existing" as const,
       idea: "second project",
       queuedUserText: "second follow-up",
     };
@@ -152,6 +187,8 @@ describe("run state", () => {
 
     expect(await storage.loadRun("conversation-a")).toEqual(first);
     expect(await storage.loadRun("conversation-b")).toEqual(second);
+    expect((await storage.loadRun("conversation-a"))?.repo).toBe("owner/first");
+    expect((await storage.loadRun("conversation-b"))?.repo).toBe("owner/second");
     expect(stores.local[storage.runKey("conversation-a")]).not.toEqual(
       stores.local[storage.runKey("conversation-b")],
     );

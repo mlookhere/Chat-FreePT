@@ -43,6 +43,7 @@ describe("state persistence context", () => {
       settings,
     );
     expect(result.state.repoName).toBe("owner/draft");
+    expect(result.state.repoMode).toBe("existing");
     expect(result.state.idea).toBe("draft project");
     expect(result.effects).toEqual([]);
   });

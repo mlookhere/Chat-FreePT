@@ -51,6 +51,7 @@ export class RunController {
   private readonly onContextInvalidated: () => void;
   private readonly onDiagnosticEvent: (event: ControllerDiagnosticEvent) => void;
   private readonly withComposerAccess: (task: () => Promise<void>) => Promise<void>;
+  private persistQueue: Promise<void> = Promise.resolve();
   private disposed = false;
 
   constructor(
@@ -116,7 +117,19 @@ export class RunController {
   /** A brand-new chat gets its real /c/<uuid> id after the first reply; adopt it in place. */
   adoptConversationId(conversationId: string): void {
     this.state = { ...this.state, conversationId };
-    void saveRun(this.state).catch((err) => this.handleChromeFailure("state save failed", err));
+    void this.persistState(this.state);
+  }
+
+  /** Serialize storage writes and append one final snapshot before navigation/disposal. */
+  async flushState(): Promise<void> {
+    await this.persistState(this.state);
+  }
+
+  private persistState(state: RunState): Promise<void> {
+    this.persistQueue = this.persistQueue
+      .then(() => saveRun(state))
+      .catch((err) => this.handleChromeFailure("state save failed", err));
+    return this.persistQueue;
   }
 
   dispatch(event: MachineEvent): void {
@@ -145,7 +158,7 @@ export class RunController {
     if (previous.status === "cooldown" && state.status !== "cooldown") {
       this.clearCooldownTimer();
     }
-    void saveRun(state).catch((err) => this.handleChromeFailure("state save failed", err));
+    void this.persistState(state);
     this.onChange(state);
     for (const effect of effects) void this.execute(effect);
   }

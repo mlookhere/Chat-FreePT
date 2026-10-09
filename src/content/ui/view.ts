@@ -19,6 +19,38 @@ const STATUS_LABEL: Record<string, string> = {
   complete: "Complete",
 };
 
+const MARKER_LABEL: Record<string, string> = {
+  CONTINUE: "Continue",
+  NEEDS_INPUT: "Needs input",
+  PLAN_READY: "Plan ready",
+  COMPLETE: "Complete",
+  ERROR: "Error",
+};
+
+const LIFECYCLE_LABEL: Record<string, string> = {
+  "generation-start": "Generation started",
+  "generation-complete": "Generation completed",
+  "generation-interrupted": "Generation interrupted",
+  "permission-continued": "Permission continued",
+};
+
+function humanizeToken(value: string): string {
+  const words = value.replace(/[_-]+/g, " ").trim().toLowerCase();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
+}
+
+function statusLabel(status: string): string {
+  return STATUS_LABEL[status] ?? humanizeToken(status);
+}
+
+function markerLabel(status: string): string {
+  return MARKER_LABEL[status] ?? humanizeToken(status);
+}
+
+function lifecycleLabel(signal: string): string {
+  return LIFECYCLE_LABEL[signal] ?? humanizeToken(signal);
+}
+
 function esc(text: string): string {
   const div = document.createElement("div");
   div.textContent = text;
@@ -48,7 +80,7 @@ export function repositorySetupHtml(): string {
         <li>For a new project, <a class="cfpt-link" href="https://github.com/new" target="_blank" rel="noreferrer noopener">create a private repository on GitHub</a>.</li>
         <li>Return here and enter <strong>owner/repo</strong> or the root GitHub repository URL.</li>
         <li>Describe the project and press <strong>Start planning</strong>.</li>
-        <li>ChatGPT verifies write access and CI capabilities against that exact repository. Missing access stops with <strong>NEEDS_INPUT</strong>.</li>
+        <li>ChatGPT verifies write access and CI capabilities against that exact repository. Missing access stops with <strong>Needs input</strong>.</li>
       </ol>
       <p class="cfpt-setup-footnote">Once planning starts, the repository is read-only for this conversation. Start a new ChatGPT conversation to work in another repo.</p>
       <div class="cfpt-setup-actions">
@@ -153,7 +185,7 @@ export function updatePanelDynamic(
   }
 
   const statusLine = panel.querySelector('[data-ref="statusline"]');
-  if (statusLine) statusLine.textContent = STATUS_LABEL[state.status] ?? state.status;
+  if (statusLine) statusLine.textContent = statusLabel(state.status);
   updateDiagnosticsDom(panel, diagnostics);
 }
 
@@ -221,13 +253,13 @@ function automationControlsHtml(state: RunState): string {
 function checkpointHtml(state: RunState): string {
   if (!state.repo) return "";
   const queueDepth = queuedMessages(state).length;
-  const marker = state.lastMarker?.status ?? "none";
-  const item = state.lastMarker?.item ?? "none";
-  const lifecycle = state.lastLifecycleSignal ?? "none";
+  const marker = state.lastMarker?.status ? markerLabel(state.lastMarker.status) : "None";
+  const item = state.lastMarker?.item ?? "None";
+  const lifecycle = state.lastLifecycleSignal ? lifecycleLabel(state.lastLifecycleSignal) : "None";
   const markerUrl = state.lastMarker?.url ?? "";
   const url = /^https:\/\/github\.com\//i.test(markerUrl)
     ? `<a class="cfpt-link" href="${esc(markerUrl)}" target="_blank" rel="noreferrer noopener">${esc(markerUrl)}</a>`
-    : esc(markerUrl || "none");
+    : esc(markerUrl || "None");
   return `
     <div class="cfpt-field" data-ref="checkpoint">
       <strong>Ultra Code checkpoint</strong>
@@ -296,7 +328,7 @@ function passiveHtml(state: RunState): string {
     <h3>Active in another tab</h3>
     <p class="cfpt-note">Another ChatGPT tab currently owns this conversation. This tab is read-only and will take over automatically if the other tab closes or stops responding.</p>
     <p class="cfpt-note">Current state: ${esc(phaseLabel(state.phase))} · ${esc(
-      STATUS_LABEL[state.status] ?? state.status,
+      statusLabel(state.status),
     )}</p>
   `;
 }
@@ -336,7 +368,7 @@ function runningHtml(state: RunState): string {
       : "";
   return `
     <div class="cfpt-status-line"><span class="cfpt-spinner"></span>
-      <strong data-ref="statusline">${esc(STATUS_LABEL[state.status] ?? state.status)}</strong>
+      <strong data-ref="statusline">${esc(statusLabel(state.status))}</strong>
     </div>
     <div class="cfpt-counters" data-ref="counters"></div>
     <div class="cfpt-log" data-ref="log"></div>
@@ -414,7 +446,7 @@ function phaseLabel(phase: string): string {
     case "stopped":
       return "Stopped";
     default:
-      return phase;
+      return humanizeToken(phase);
   }
 }
 
