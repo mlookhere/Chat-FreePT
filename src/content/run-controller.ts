@@ -87,6 +87,7 @@ export class RunController {
           }
         },
         onComplete: (text) => {
+          if (this.detectMaxLength()) return;
           this.onDiagnosticEvent({
             kind: "watcher",
             detail: { event: "complete", textLength: text.length },
@@ -94,6 +95,7 @@ export class RunController {
           if (!this.networkCompletedCurrentTurn) this.consumeCompletedReply(text);
         },
         onStuck: () => {
+          if (this.detectMaxLength()) return;
           this.onDiagnosticEvent({ kind: "watcher", detail: { event: "stuck" } });
           if (this.state.status === "streaming") this.dispatch({ type: "STREAM_STUCK" });
         },
@@ -235,6 +237,7 @@ export class RunController {
         return;
       case "generation-complete": {
         this.clearNetworkSettleTimer();
+        if (this.detectMaxLength()) return;
         if (this.state.status !== "sending" && this.state.status !== "streaming") return;
         this.networkCompletedCurrentTurn = true;
         const markerText = event.marker?.text ?? "";
@@ -277,6 +280,7 @@ export class RunController {
         this.networkSettleTimer = undefined;
         if (this.disposed) return;
         if (this.state.status !== "sending" && this.state.status !== "streaming") return;
+        if (this.detectMaxLength()) return;
         this.reconcileLiveState(Date.now());
         if (this.state.status !== "sending" && this.state.status !== "streaming") return;
         this.dispatch({
@@ -321,10 +325,7 @@ export class RunController {
       return;
     }
 
-    if (scanPageSignals() === "conversation-full") {
-      this.dispatch({ type: "PAGE_SIGNAL", signal: "conversation-full" });
-      return;
-    }
+    if (this.detectMaxLength()) return;
 
     const role = lastMessageRole();
     const assistant = role === "assistant" ? lastAssistantMessage() : null;
@@ -356,7 +357,7 @@ export class RunController {
         !this.state.handoffStarted &&
         scanPageSignals() === "conversation-full"
       ) {
-        this.dispatch({ type: "PAGE_SIGNAL", signal: "conversation-full" });
+        this.detectMaxLength();
       }
       return;
     }
@@ -386,6 +387,14 @@ export class RunController {
     });
     button.click();
     this.dispatch({ type: "PERMISSION_CONTINUED" });
+    return true;
+  }
+
+  private detectMaxLength(): boolean {
+    if (scanPageSignals() !== "conversation-full") return false;
+    if (!this.state.handoffStarted) {
+      this.dispatch({ type: "PAGE_SIGNAL", signal: "conversation-full" });
+    }
     return true;
   }
 
@@ -607,7 +616,9 @@ export class RunController {
   }
 
   private async performInsertAndSend(kind: PromptKind, text?: string): Promise<void> {
+    if (this.detectMaxLength()) return;
     if (!(await this.composerAvailable())) return;
+    if (this.detectMaxLength()) return;
     if (!(await this.composerDraftSafe(kind))) return;
 
     const inserted = await insertPrompt(this.buildPrompt(kind, text), () => this.disposed);
@@ -661,11 +672,13 @@ export class RunController {
   }
 
   private async sendInsertedPrompt(): Promise<void> {
+    if (this.detectMaxLength()) return;
     const sent = await clickSend(
       () => this.watcher.isStreaming(),
       () => this.disposed,
     );
     if (this.disposed) return;
+    if (this.detectMaxLength()) return;
     if (!sent.ok) {
       this.watcher.cancelExpectedReply();
       this.dispatch({ type: "SEND_FAIL", detail: sent.error ?? "unknown" });
