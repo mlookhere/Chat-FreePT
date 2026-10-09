@@ -35,25 +35,25 @@ describe("renderTemplate", () => {
   });
 });
 
-describe("repository-locked prompts", () => {
-  it("binds planning to the selected repository and exact-repo preflight", () => {
+describe("repository-scoped prompts", () => {
+  it("keeps planning on the selected repo without repetitive lock language", () => {
     const prompt = buildPlanPrompt(planInput);
     expect(prompt).toContain(planInput.idea);
-    expect(prompt).toContain(`permanently bound to **${REPO}**`);
-    expect(prompt).toContain(`exact locked repository **${REPO}**`);
+    expect(prompt).toContain("Use **" + REPO + "** for this project");
     expect(prompt).toContain("mlookhere/CI-Pipline");
     expect(prompt).toContain("Operating contract (CI-Pipline)");
-    expect(prompt).toContain("PLAN_READY");
-    expect(prompt).not.toContain("Create a new PRIVATE repository");
+    expect(prompt).toContain("Plan ready");
+    expect(prompt).not.toContain("permanently bound");
+    expect(prompt).not.toContain("NEEDS_INPUT");
+    expect(prompt).not.toContain("PLAN_READY");
   });
 
-  it("preflights the exact repo without Developer Mode setup instructions", () => {
+  it("preflights the selected repo without setup boilerplate or raw status tokens", () => {
     const prompt = buildMcpPreflight(REPO);
     expect(prompt).toContain(REPO);
-    expect(prompt).toContain("Do not create a repository");
-    expect(prompt).toContain("do not switch repositories");
-    expect(prompt).toContain("NEEDS_INPUT");
-    expect(prompt).not.toContain("Settings → Security and login");
+    expect(prompt).toContain("dev and main explicitly");
+    expect(prompt).toContain("ask for human input");
+    expect(prompt).not.toContain("NEEDS_INPUT");
     expect(prompt).not.toContain("Developer mode");
     expect(prompt).not.toContain("Chat FreePT GitHub MCP");
   });
@@ -62,8 +62,7 @@ describe("repository-locked prompts", () => {
     const plan = buildPlanPrompt(planInput);
     const develop = buildDevelopPrompt(DEFAULT_SETTINGS, REPO);
     expect(plan).toContain("dev is integration; main is production");
-    expect(plan).toContain("release — PR dev into main");
-    expect(develop).toContain("dev → main");
+    expect(develop).toContain("PR into dev");
     expect(plan).not.toContain("master is production");
   });
 
@@ -73,22 +72,23 @@ describe("repository-locked prompts", () => {
 });
 
 describe("develop and follow-up prompts", () => {
-  it("develop prompt includes the locked repo and per-item loop", () => {
+  it("develop prompt is continuous and includes testing as the human checkpoint", () => {
     const prompt = buildDevelopPrompt(DEFAULT_SETTINGS, REPO);
     expect(prompt).toContain(repositoryLockBlock(REPO));
     expect(prompt).toContain("work/<issue-number>-<slug>");
     expect(prompt).toContain("Refs #<issue>");
     expect(prompt).toContain("self-audit");
-    expect(prompt).toContain(String(Math.round(DEFAULT_SETTINGS.sendDelayMs / 1000)));
     expect(prompt).toContain(ULTRA_CODE_CONTRACT);
-    expect(prompt).toContain("Never idle waiting for CI");
+    expect(prompt).toContain("Use Testing only when");
+    expect(prompt).toContain("Do not wait for me unless genuine human intervention is needed");
   });
 
-  it("continue always reinforces the locked repo", () => {
+  it("follow-up prompts use a compact repo reminder instead of the full repository block", () => {
     const plain = buildContinuePrompt(DEFAULT_SETTINGS, false, REPO);
-    expect(plain).toContain(repositoryLockBlock(REPO));
+    expect(plain).toContain(REPO);
     expect(plain).toContain(DEFAULT_SETTINGS.continueMessage);
     expect(plain).toContain(ULTRA_CODE_COMPACT);
+    expect(plain).not.toContain("## Repository");
 
     const refresh = buildContinuePrompt(DEFAULT_SETTINGS, true, REPO);
     expect(refresh).toContain(COMPACT_CONTRACT);
@@ -96,20 +96,21 @@ describe("develop and follow-up prompts", () => {
     expect(refresh).toContain(REPO);
   });
 
-  it("nudge and user replies reinforce the locked repo", () => {
+  it("nudge and user replies stay concise while preserving repo context", () => {
     expect(buildNudgePrompt(REPO)).toContain(REPO);
-    expect(buildNudgePrompt(REPO)).toContain("ONLY");
+    expect(buildNudgePrompt(REPO)).toContain("only");
     expect(buildUserReply("use sqlite", REPO)).toContain("use sqlite");
     expect(buildUserReply("use sqlite", REPO)).toContain(REPO);
     expect(buildUserReply("use sqlite", REPO)).toContain(ULTRA_CODE_COMPACT);
-    expect(buildUserReply("use sqlite", REPO)).toContain("CHATFREEPT status block");
+    expect(buildUserReply("use sqlite", REPO)).toContain("Chat FreePT status block");
   });
 
-  it("handoff embeds the locked repo and phase", () => {
+  it("handoff states that it exists because the old conversation reached max length", () => {
     const state = { ...newRunState("c1", 0), repo: REPO, phase: "developing" as const };
     const prompt = buildHandoffPrompt(state);
     expect(prompt).toContain(REPO);
-    expect(prompt).toContain("DEVELOPING");
+    expect(prompt).toContain("Phase: Developing");
+    expect(prompt).toContain("maximum length");
     expect(prompt).toContain("Operating contract");
     expect(prompt).toContain(ULTRA_CODE_CONTRACT);
   });
@@ -123,13 +124,16 @@ describe("marker block", () => {
       buildDevelopPrompt(DEFAULT_SETTINGS, REPO),
       buildHandoffPrompt(state),
     ]) {
-      expect(prompt.split("Status marker (mandatory)").length - 1).toBe(1);
+      expect(prompt.split("## Status marker").length - 1).toBe(1);
     }
     expect(MARKER_BLOCK).toContain("Never omit the block");
   });
 
-  it("requires the locked repository in every marker", () => {
-    expect(MARKER_BLOCK).toContain("locked owner/name");
-    expect(MARKER_BLOCK).toContain("queued next message");
+  it("uses normal-language status values", () => {
+    expect(MARKER_BLOCK).toContain("Needs input");
+    expect(MARKER_BLOCK).toContain("Plan ready");
+    expect(MARKER_BLOCK).toContain("Testing");
+    expect(MARKER_BLOCK).not.toContain("NEEDS_INPUT");
+    expect(MARKER_BLOCK).not.toContain("PLAN_READY");
   });
 });

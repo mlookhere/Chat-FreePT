@@ -498,12 +498,6 @@ export class Panel {
       case "copyhandoff":
         this.copyHandoff(target);
         break;
-      case "auto-continue":
-        this.hooks.onEvent({
-          type: "USER_SET_AUTO_CONTINUE",
-          enabled: (target as HTMLInputElement).checked,
-        });
-        break;
       case "showqueue":
         this.showQueueEditor();
         break;

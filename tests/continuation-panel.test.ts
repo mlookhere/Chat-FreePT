@@ -51,18 +51,14 @@ afterEach(() => {
 });
 
 describe("panel continuation controls", () => {
-  it("dispatches the auto-continue toggle from the shared controls", () => {
+  it("shows continuous mode without an off toggle", () => {
     const { panel: current, onEvent } = makePanel();
     current.render({ ...newRunState("c1", 1), phase: "planning", status: "streaming" });
 
-    const toggle = shadow.querySelector<HTMLInputElement>('[data-action="auto-continue"]');
-    expect(toggle?.checked).toBe(true);
-    toggle?.click();
-
-    expect(onEvent).toHaveBeenCalledWith({
-      type: "USER_SET_AUTO_CONTINUE",
-      enabled: false,
-    });
+    expect(shadow.textContent).toContain("Continuous mode");
+    expect(shadow.textContent).toContain("keeps the project moving automatically");
+    expect(shadow.querySelector('[data-action="auto-continue"]')).toBeNull();
+    expect(onEvent).not.toHaveBeenCalled();
   });
 
   it("opens the queue editor and dispatches the next user message", () => {
@@ -141,7 +137,9 @@ describe("panel Ultra Code queue and checkpoint", () => {
     expect(shadow.textContent).toContain("Generation started");
     expect(shadow.innerHTML).toContain("https://github.com/owner/project/pull/42");
   });
+});
 
+describe("panel checkpoint language and terminal states", () => {
   it("renders protocol status updates as normal language", () => {
     const { panel: current } = makePanel();
     current.render({
@@ -167,19 +165,22 @@ describe("panel Ultra Code queue and checkpoint", () => {
     expect(shadow.textContent).not.toContain("generation-interrupted");
   });
 
-  it("derives the manual-continue view from machine state, not pause text", () => {
+  it("renders testing as an intentional human checkpoint", () => {
     const { panel: current } = makePanel();
     current.render({
       ...newRunState("c1", 1),
-      phase: "developing",
+      repo: "owner/project",
+      repoName: "owner/project",
+      phase: "testing",
       status: "awaiting_user",
-      autoContinueEnabled: false,
-      lastMarker: { status: "CONTINUE", version: 1, raw: "CONTINUE" },
-      pauseReason: "Copy can change without changing semantics.",
+      lastMarker: { status: "TESTING", version: 1, raw: "Testing" },
+      pauseReason: "Please verify the extension in Chrome.",
     });
 
-    expect(shadow.textContent).toContain("Auto-continue is off");
-    expect(shadow.querySelector('[data-ref="reply"]')).toBeNull();
+    expect(shadow.textContent).toContain("Ready for testing");
+    expect(shadow.textContent).toContain("Please verify the extension in Chrome.");
+    expect(shadow.querySelector('[data-ref="reply"]')).not.toBeNull();
+    expect(shadow.textContent).not.toContain("TESTING");
   });
 
   it("dispatches New project through the machine event channel", () => {
@@ -198,8 +199,8 @@ describe("panel Ultra Code queue and checkpoint", () => {
     const { panel: current } = makePanel();
     current.render(newRunState("c1", 1));
 
-    expect(shadow.textContent).toContain("Auto-continue");
-    expect(shadow.querySelector('[data-action="auto-continue"]')).not.toBeNull();
+    expect(shadow.textContent).toContain("Continuous mode");
+    expect(shadow.querySelector('[data-action="auto-continue"]')).toBeNull();
     expect(shadow.querySelector('[data-action="showqueue"]')).toBeNull();
   });
 });

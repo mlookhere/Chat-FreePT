@@ -31,14 +31,15 @@ export async function saveRun(state: RunState): Promise<void> {
 }
 
 function normalizeRunRepositoryState(state: RunState): RunState {
-  const lockedRepo = state.repo ? normalizeRepositoryInput(state.repo) : null;
+  const continuous = { ...state, autoContinueEnabled: true };
+  const lockedRepo = continuous.repo ? normalizeRepositoryInput(continuous.repo) : null;
   if (lockedRepo) {
-    return { ...state, repo: lockedRepo, repoName: lockedRepo, repoMode: "existing" };
+    return { ...continuous, repo: lockedRepo, repoName: lockedRepo, repoMode: "existing" };
   }
 
-  const draftRepo = normalizeRepositoryInput(state.repoName);
-  if (draftRepo) return { ...state, repoName: draftRepo, repoMode: "existing" };
-  return state;
+  const draftRepo = normalizeRepositoryInput(continuous.repoName);
+  if (draftRepo) return { ...continuous, repoName: draftRepo, repoMode: "existing" };
+  return continuous;
 }
 
 export async function deleteRun(conversationId: string): Promise<void> {

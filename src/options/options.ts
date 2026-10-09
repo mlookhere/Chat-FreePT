@@ -16,7 +16,6 @@ function setBounds(id: string, min: number, max: number): void {
 
 function render(settings: Settings): void {
   el<HTMLTextAreaElement>("continueMessage").value = settings.continueMessage;
-  el<HTMLInputElement>("autoContinueCap").value = String(settings.autoContinueCap);
   el<HTMLInputElement>("sendDelaySec").value = String(Math.round(settings.sendDelayMs / 1000));
   el<HTMLInputElement>("quietSec").value = String(Math.round(settings.quietMs / 1000));
   el<HTMLInputElement>("templateRepo").value = settings.templateRepo;
@@ -24,11 +23,6 @@ function render(settings: Settings): void {
 }
 
 function configureBounds(): void {
-  setBounds(
-    "autoContinueCap",
-    SETTINGS_LIMITS.autoContinueCap.min,
-    SETTINGS_LIMITS.autoContinueCap.max,
-  );
   setBounds(
     "sendDelaySec",
     SETTINGS_LIMITS.sendDelayMs.min / 1000,
@@ -47,7 +41,6 @@ async function init(): Promise<void> {
       const next = normalizeSettings({
         ...settings,
         continueMessage: el<HTMLTextAreaElement>("continueMessage").value,
-        autoContinueCap: el<HTMLInputElement>("autoContinueCap").valueAsNumber,
         sendDelayMs: el<HTMLInputElement>("sendDelaySec").valueAsNumber * 1000,
         quietMs: el<HTMLInputElement>("quietSec").valueAsNumber * 1000,
         templateRepo: el<HTMLInputElement>("templateRepo").value,

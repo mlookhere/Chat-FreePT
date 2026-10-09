@@ -40,10 +40,18 @@ export type MachineEvent =
   | { type: "PERMISSION_CONTINUED" }
   | { type: "COOLDOWN_ELAPSED" }
   | { type: "RECOVERY_CONTINUE" }
+  | { type: "HANDOFF_READY" }
   | { type: "PAGE_SIGNAL"; signal: PageSignal };
 
 export type PromptKind =
-  "plan" | "develop" | "continue" | "contract_refresh" | "nudge" | "user_text" | "queued_user_text";
+  | "plan"
+  | "develop"
+  | "continue"
+  | "contract_refresh"
+  | "nudge"
+  | "handoff"
+  | "user_text"
+  | "queued_user_text";
 
 export type Effect =
   | { do: "insertAndSend"; kind: PromptKind; text?: string }
@@ -51,6 +59,7 @@ export type Effect =
   | { do: "notify"; title: string; message: string }
   | { do: "badge"; text: string }
   | { do: "showCompletion" }
+  | { do: "handoffConversation" }
   | { do: "reconcile" };
 
 export interface ReduceResult {
@@ -106,7 +115,7 @@ type StreamEvent = Extract<
 >;
 type SystemEvent = Extract<
   MachineEvent,
-  { type: "COOLDOWN_ELAPSED" | "RECOVERY_CONTINUE" | "PAGE_SIGNAL" }
+  { type: "COOLDOWN_ELAPSED" | "RECOVERY_CONTINUE" | "HANDOFF_READY" | "PAGE_SIGNAL" }
 >;
 
 const MAX_LOG = 200;
@@ -160,12 +169,43 @@ export function newRunState(conversationId: string, now: number): RunState {
   };
 }
 
+/** Carry durable project context into a new chat only after ChatGPT reports max length. */
+export function prepareConversationHandoff(
+  state: RunState,
+  conversationId: string,
+  now: number,
+): RunState {
+  const next: RunState = {
+    ...state,
+    conversationId,
+    phase: state.phase === "plan_ready" || state.phase === "testing" ? "developing" : state.phase,
+    status: "paused",
+    autoContinueEnabled: true,
+    autoSends: 0,
+    nudges: 0,
+    repliesSinceContract: 0,
+    handoffPending: true,
+    lastLifecycleSignal: "conversation-handoff",
+    updatedAt: now,
+    log: [
+      ...state.log,
+      { at: now, kind: "info" as const, text: "Conversation full — continuing in a new chat" },
+    ].slice(-MAX_LOG),
+  };
+  delete next.cooldownUntil;
+  delete next.replyBaselineAssistantKey;
+  delete next.lastProcessedAssistantKey;
+  delete next.pauseReason;
+  delete next.errorCode;
+  return next;
+}
+
 export function isActive(state: RunState): boolean {
   return ACTIVE_STATUSES.has(state.status);
 }
 
-export function autoContinueEnabled(state: RunState): boolean {
-  return state.autoContinueEnabled !== false;
+export function autoContinueEnabled(_state: RunState): boolean {
+  return true;
 }
 
 /** Ordered queued user messages, including migration from the legacy single-message slot. */
@@ -182,13 +222,8 @@ function setQueuedMessages(state: RunState, messages: string[]): void {
   else delete state.queuedUserTexts;
 }
 
-export function isWaitingForManualContinue(state: RunState): boolean {
-  return (
-    state.status === "awaiting_user" &&
-    state.lastMarker?.status === "CONTINUE" &&
-    !autoContinueEnabled(state) &&
-    isContinuablePhase(state)
-  );
+export function isWaitingForManualContinue(_state: RunState): boolean {
+  return false;
 }
 
 /** Remaining delay for a persisted cooldown. Legacy cooldowns without a deadline resume now. */
@@ -369,6 +404,7 @@ function resumeRun(ctx: ReduceContext, lastUserText?: string): boolean {
   }
   const text = lastUserText?.trim();
   if (text) state.lastUserText = text;
+  if (state.phase === "testing") state.phase = "developing";
   delete state.pauseReason;
   delete state.errorCode;
 
@@ -386,10 +422,9 @@ function resumeRun(ctx: ReduceContext, lastUserText?: string): boolean {
 }
 
 function resetRun(ctx: ReduceContext, logText: string): void {
-  const enabled = autoContinueEnabled(ctx.state);
   const lockedRepo = ctx.state.repo;
   const reset = newRunState(ctx.state.conversationId, ctx.now);
-  reset.autoContinueEnabled = enabled;
+  reset.autoContinueEnabled = true;
   if (lockedRepo) {
     reset.repo = lockedRepo;
     reset.repoMode = "existing";
@@ -416,6 +451,7 @@ function sendUserReply(ctx: ReduceContext, event: UserReplyEvent): boolean {
   if (state.status !== "awaiting_user" && state.status !== "paused" && state.status !== "error") {
     return false;
   }
+  if (state.phase === "testing") state.phase = "developing";
   state.status = "inserting";
   state.nudges = 0;
   state.lastUserText = event.text.trim();
@@ -429,25 +465,16 @@ function sendUserReply(ctx: ReduceContext, event: UserReplyEvent): boolean {
   return true;
 }
 
-function setAutoContinue(ctx: ReduceContext, enabled: boolean): boolean {
-  const state = ctx.state;
-  if (autoContinueEnabled(state) === enabled && state.autoContinueEnabled !== undefined)
-    return false;
-  state.autoContinueEnabled = enabled;
-  note(ctx, "info", `Auto-continue ${enabled ? "enabled" : "disabled"}`);
-
-  if (!enabled && state.status === "cooldown" && queuedMessages(state).length === 0) {
-    waitForManualContinue(ctx);
-    return true;
-  }
-
+function setAutoContinue(ctx: ReduceContext, _enabled: boolean): boolean {
+  if (ctx.state.autoContinueEnabled === true) return false;
+  ctx.state.autoContinueEnabled = true;
+  note(ctx, "info", "Continuous mode enabled");
   if (
-    enabled &&
-    state.status === "awaiting_user" &&
-    state.lastMarker?.status === "CONTINUE" &&
-    isContinuablePhase(state)
+    ctx.state.status === "awaiting_user" &&
+    ctx.state.lastMarker?.status === "CONTINUE" &&
+    isContinuablePhase(ctx.state)
   ) {
-    delete state.pauseReason;
+    delete ctx.state.pauseReason;
     handleContinue(ctx);
   }
   return true;
@@ -474,9 +501,6 @@ function removeQueuedMessage(ctx: ReduceContext, event: RemoveQueueEvent): boole
   queue.splice(event.index, 1);
   setQueuedMessages(ctx.state, queue);
   note(ctx, "info", "Removed queued user message");
-  if (!autoContinueEnabled(ctx.state) && ctx.state.status === "cooldown" && queue.length === 0) {
-    waitForManualContinue(ctx);
-  }
   return true;
 }
 
@@ -504,9 +528,6 @@ function clearQueuedMessages(ctx: ReduceContext): boolean {
   if (queuedMessages(ctx.state).length === 0) return false;
   setQueuedMessages(ctx.state, []);
   note(ctx, "info", "Cleared queued user messages");
-  if (!autoContinueEnabled(ctx.state) && ctx.state.status === "cooldown") {
-    waitForManualContinue(ctx);
-  }
   return true;
 }
 
@@ -563,6 +584,7 @@ function startStream(ctx: ReduceContext): boolean {
   if (ctx.state.status === "paused" && ctx.state.lastLifecycleSignal !== "generation-interrupted") {
     return false;
   }
+  if (ctx.state.phase === "testing") ctx.state.phase = "developing";
   ctx.state.status = "streaming";
   ctx.state.lastLifecycleSignal = "generation-start";
   delete ctx.state.pauseReason;
@@ -589,7 +611,9 @@ function canConsumeReply(state: RunState, marker: Marker | null): boolean {
   return (
     state.status === "streaming" ||
     state.status === "sending" ||
-    (state.status === "awaiting_user" && marker !== null && isContinuablePhase(state))
+    (state.status === "awaiting_user" &&
+      marker !== null &&
+      (isContinuablePhase(state) || state.phase === "testing"))
   );
 }
 
@@ -644,12 +668,28 @@ function reduceSystemEvent(ctx: ReduceContext, event: SystemEvent): boolean {
       return finishCooldown(ctx);
     case "RECOVERY_CONTINUE":
       return recoverInterruptedRun(ctx);
+    case "HANDOFF_READY":
+      return startConversationHandoff(ctx);
     case "PAGE_SIGNAL":
       if (!isActive(ctx.state) && ctx.state.status !== "awaiting_user") return false;
       ctx.state.lastLifecycleSignal = `page:${event.signal}`;
       handlePageSignal(ctx, event.signal);
       return true;
   }
+}
+
+function startConversationHandoff(ctx: ReduceContext): boolean {
+  const state = ctx.state;
+  if (!state.handoffPending || !state.repo || !isContinuablePhase(state)) return false;
+  state.handoffPending = false;
+  state.status = "inserting";
+  state.autoContinueEnabled = true;
+  state.lastLifecycleSignal = "conversation-handoff-started";
+  delete state.pauseReason;
+  delete state.errorCode;
+  note(ctx, "send", "Continuing project in the new conversation");
+  ctx.effects.push({ do: "insertAndSend", kind: "handoff" }, { do: "badge", text: "RUN" });
+  return true;
 }
 
 function recoverInterruptedRun(ctx: ReduceContext): boolean {
@@ -683,11 +723,6 @@ function finishCooldown(ctx: ReduceContext): boolean {
     return true;
   }
 
-  if (!autoContinueEnabled(state)) {
-    waitForManualContinue(ctx);
-    return true;
-  }
-
   state.status = "inserting";
   state.autoSends += 1;
   const refresh = state.repliesSinceContract >= ctx.settings.contractRefreshEvery;
@@ -709,11 +744,15 @@ function handlePageSignal(ctx: ReduceContext, signal: PageSignal): void {
       fail(ctx, "network-error", "ChatGPT hit an error mid-reply. Use Regenerate, then Resume.");
       return;
     case "conversation-full":
-      fail(
-        ctx,
-        "conversation-full",
-        "This conversation hit its length limit. Use the handoff prompt in a new chat.",
-      );
+      if (!ctx.state.repo || !isContinuablePhase(ctx.state)) {
+        fail(ctx, "conversation-full", "This conversation reached its maximum length.");
+        return;
+      }
+      ctx.state.status = "paused";
+      ctx.state.pauseReason = "Conversation full — continuing automatically in a new chat.";
+      note(ctx, "info", "Conversation full — starting automatic handoff");
+      ctx.effects.push({ do: "handoffConversation" }, { do: "badge", text: "RUN" });
+      return;
   }
 }
 
@@ -762,75 +801,89 @@ function validateMarkerRepository(ctx: ReduceContext, marker: Marker): boolean {
 }
 
 function handleMarker(ctx: ReduceContext, marker: Marker, text: string): void {
-  const state = ctx.state;
   switch (marker.status) {
     case "CONTINUE":
       handleContinue(ctx);
       return;
     case "NEEDS_INPUT":
     case "ERROR":
-      state.status = "awaiting_user";
-      state.pauseReason = marker.note ?? "ChatGPT needs your input.";
-      ctx.effects.push(
-        { do: "badge", text: "?" },
-        {
-          do: "notify",
-          title: "Chat FreePT needs you",
-          message: marker.note ?? "ChatGPT is waiting for your input.",
-        },
-      );
+      waitForHumanInput(ctx, marker);
       return;
     case "PLAN_READY":
-      state.phase = "plan_ready";
-      state.status = "awaiting_user";
-      state.planSummary = marker.note ?? excerpt(text);
-      ctx.effects.push(
-        { do: "badge", text: "PLAN" },
-        {
-          do: "notify",
-          title: "Master plan ready",
-          message: "Review the plan, then press Start development.",
-        },
-      );
+      startPlannedDevelopment(ctx, marker, text);
+      return;
+    case "TESTING":
+      waitForTesting(ctx, marker);
       return;
     case "COMPLETE":
-      state.phase = "complete";
-      state.status = "complete";
-      ctx.effects.push(
-        { do: "badge", text: "DONE" },
-        { do: "showCompletion" },
-        {
-          do: "notify",
-          title: "Development complete",
-          message: state.repo
-            ? `ChatGPT reports ${state.repo} is done.`
-            : "ChatGPT reports the project is done.",
-        },
-      );
+      completeProject(ctx);
   }
+}
+
+function waitForHumanInput(ctx: ReduceContext, marker: Marker): void {
+  ctx.state.status = "awaiting_user";
+  ctx.state.pauseReason = marker.note ?? "ChatGPT needs your input.";
+  ctx.effects.push(
+    { do: "badge", text: "?" },
+    {
+      do: "notify",
+      title: "Chat FreePT needs you",
+      message: marker.note ?? "ChatGPT is waiting for your input.",
+    },
+  );
+}
+
+function startPlannedDevelopment(ctx: ReduceContext, marker: Marker, text: string): void {
+  const state = ctx.state;
+  state.planSummary = marker.note ?? excerpt(text);
+  state.phase = "developing";
+  state.status = "inserting";
+  state.autoSends = 0;
+  state.nudges = 0;
+  note(ctx, "info", "Plan ready — starting development automatically");
+  ctx.effects.push({ do: "insertAndSend", kind: "develop" }, { do: "badge", text: "RUN" });
+}
+
+function waitForTesting(ctx: ReduceContext, marker: Marker): void {
+  ctx.state.phase = "testing";
+  ctx.state.status = "awaiting_user";
+  ctx.state.pauseReason = marker.note ?? "The project is ready for your testing.";
+  ctx.effects.push(
+    { do: "badge", text: "TEST" },
+    {
+      do: "notify",
+      title: "Chat FreePT is ready for testing",
+      message: marker.note ?? "The project is ready for your validation.",
+    },
+  );
+}
+
+function completeProject(ctx: ReduceContext): void {
+  ctx.state.phase = "complete";
+  ctx.state.status = "complete";
+  ctx.effects.push(
+    { do: "badge", text: "DONE" },
+    { do: "showCompletion" },
+    {
+      do: "notify",
+      title: "Development complete",
+      message: ctx.state.repo
+        ? `ChatGPT reports ${ctx.state.repo} is done.`
+        : "ChatGPT reports the project is done.",
+    },
+  );
 }
 
 function handleContinue(ctx: ReduceContext): void {
   const state = ctx.state;
   if (state.phase === "plan_ready") state.phase = "planning";
+  if (state.phase === "testing") state.phase = "developing";
   if (!isContinuablePhase(state)) {
     state.status = "awaiting_user";
     return;
   }
   if (queuedMessages(state).length > 0) {
     scheduleContinuation(ctx);
-    return;
-  }
-  if (!autoContinueEnabled(state)) {
-    waitForManualContinue(ctx);
-    return;
-  }
-  if (state.autoSends >= ctx.settings.autoContinueCap) {
-    fail(
-      ctx,
-      "cap-reached",
-      `Auto-continue cap (${ctx.settings.autoContinueCap}) reached for this phase.`,
-    );
     return;
   }
   scheduleContinuation(ctx);
@@ -847,13 +900,6 @@ function scheduleContinuation(ctx: ReduceContext): void {
     { do: "startCooldown", ms: ctx.settings.sendDelayMs },
     { do: "badge", text: "RUN" },
   );
-}
-
-function waitForManualContinue(ctx: ReduceContext): void {
-  ctx.state.status = "awaiting_user";
-  ctx.state.pauseReason = "Auto-continue is off.";
-  note(ctx, "info", "Waiting because auto-continue is off");
-  ctx.effects.push({ do: "badge", text: "II" });
 }
 
 function excerpt(text: string): string {

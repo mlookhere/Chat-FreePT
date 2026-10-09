@@ -1,6 +1,6 @@
 import { log } from "../common/log";
 import { buildHandoffPrompt } from "../common/prompts";
-import { isActive, newRunState } from "../common/state-machine";
+import { isActive, newRunState, prepareConversationHandoff } from "../common/state-machine";
 import {
   acquireTabLock,
   adoptConversationOwnership,
@@ -9,6 +9,7 @@ import {
   loadRun,
   loadSettings,
   releaseTabLock,
+  saveRun,
 } from "../common/storage";
 import type { RunState, Settings } from "../common/types";
 import type { ContentRequest } from "../common/types";
@@ -23,6 +24,7 @@ import { Panel } from "./ui/panel";
 
 const HEARTBEAT_MS = 5000;
 const TAKEOVER_RETRY_MS = 5000;
+const ROLLOVER_SESSION_KEY = "cfpt:conversation-rollover:v1";
 const tabNonce = crypto.randomUUID();
 
 let panel: Panel | null = null;
@@ -39,8 +41,37 @@ const diagnostics = new DiagnosticsRecorder({
 
 const contextGuard = createExtensionContextGuard(() => shutdownInvalidatedContext());
 
+function pendingRolloverId(): string | null {
+  try {
+    const value = sessionStorage.getItem(ROLLOVER_SESSION_KEY);
+    return value?.startsWith("pending:") ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberRollover(conversationId: string): void {
+  try {
+    sessionStorage.setItem(ROLLOVER_SESSION_KEY, conversationId);
+  } catch {
+    // Chrome storage still holds the handoff state; session storage only binds it to this tab.
+  }
+}
+
+function clearRollover(conversationId: string): void {
+  try {
+    if (sessionStorage.getItem(ROLLOVER_SESSION_KEY) === conversationId) {
+      sessionStorage.removeItem(ROLLOVER_SESSION_KEY);
+    }
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
 function conversationKeyFromLocation(): string {
-  return conversationIdFromUrl(location.href) ?? `pending:${crypto.randomUUID()}`;
+  return (
+    conversationIdFromUrl(location.href) ?? pendingRolloverId() ?? `pending:${crypto.randomUUID()}`
+  );
 }
 
 function stopHeartbeat(): void {
@@ -104,6 +135,27 @@ function startHeartbeat(): void {
   }, HEARTBEAT_MS);
 }
 
+async function rolloverConversation(state: RunState): Promise<void> {
+  if (contextGuard.invalidated || !state.repo) return;
+
+  const sourceConversationId = currentConvId;
+  const nextConversationId = `pending:${crypto.randomUUID()}`;
+  const nextState = prepareConversationHandoff(state, nextConversationId, Date.now());
+
+  try {
+    await controller?.flushState();
+    await saveRun(nextState);
+    rememberRollover(nextConversationId);
+    stopHeartbeat();
+    stopTakeoverRetry();
+    await releaseOwnedLock(sourceConversationId);
+    if (contextGuard.invalidated) return;
+    window.location.assign("https://chatgpt.com/");
+  } catch (error) {
+    reportAsyncFailure("automatic conversation handoff failed", error);
+  }
+}
+
 function startController(state: RunState, settings: Settings): void {
   if (contextGuard.invalidated) return;
   stopTakeoverRetry();
@@ -116,6 +168,7 @@ function startController(state: RunState, settings: Settings): void {
     onShowCompletion: () => {
       if (controller) panel?.showCompletion(controller.state);
     },
+    onConversationHandoff: (handoffState) => rolloverConversation(handoffState),
     onContextInvalidated: () => contextGuard.invalidate(),
     onDiagnosticEvent: (event) => diagnostics.recordControllerEvent(event),
     withComposerAccess: async (task) => {
@@ -125,6 +178,24 @@ function startController(state: RunState, settings: Settings): void {
   });
   controller = ctl;
   panel?.render(state);
+
+  if (state.handoffPending) {
+    log.info("resuming project in a new conversation");
+    setTimeout(() => {
+      if (controller === ctl && !contextGuard.invalidated) ctl.dispatch({ type: "HANDOFF_READY" });
+    }, 500);
+    return;
+  }
+
+  if (state.phase === "plan_ready" && state.status === "awaiting_user") {
+    log.info("auto-advancing legacy plan-ready state into development");
+    setTimeout(() => {
+      if (controller === ctl && !contextGuard.invalidated) {
+        ctl.dispatch({ type: "USER_START_DEVELOPMENT" });
+      }
+    }, 500);
+    return;
+  }
 
   if (isActive(state)) {
     log.info("resuming active run", state.phase, state.status);
@@ -272,6 +343,7 @@ async function onComposerNavigate(href: string): Promise<void> {
       if (contextGuard.invalidated) return;
       currentConvId = urlConv;
       const state = (await loadRun(urlConv)) ?? newRunState(urlConv, Date.now());
+      clearRollover(pendingId);
       log.info("another tab owns the permanent conversation id; staying passive");
       enterPassive(state);
       return;
@@ -281,6 +353,7 @@ async function onComposerNavigate(href: string): Promise<void> {
     ctl.state = migrated;
     await ctl.flushState();
     await deleteRun(pendingId);
+    clearRollover(pendingId);
     panel?.render(ctl.state);
     startHeartbeat();
     log.info("adopted conversation id", urlConv);

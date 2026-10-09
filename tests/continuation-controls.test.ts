@@ -36,85 +36,59 @@ function streamingRun(): RunState {
   ]).state;
 }
 
-describe("auto-continue control", () => {
-  it("defaults new and legacy runs to auto-continue enabled", () => {
+describe("continuous mode", () => {
+  it("is always enabled, including legacy runs that stored false", () => {
     expect(autoContinueEnabled(newRunState("new", 1))).toBe(true);
-    const legacy = newRunState("legacy", 1);
-    delete legacy.autoContinueEnabled;
+    const legacy = { ...newRunState("legacy", 1), autoContinueEnabled: false };
     expect(autoContinueEnabled(legacy)).toBe(true);
+    expect(isWaitingForManualContinue(legacy)).toBe(false);
   });
 
-  it("waits on CONTINUE when auto-continue is disabled", () => {
-    let state = streamingRun();
-    state = reduce(state, { type: "USER_SET_AUTO_CONTINUE", enabled: false }, settings).state;
+  it("continues even if a legacy state says auto-continue was off", () => {
+    const state = { ...streamingRun(), autoContinueEnabled: false };
     const result = reduce(
       state,
       { type: "REPLY_COMPLETE", marker: marker("CONTINUE"), text: "continue" },
       settings,
     );
 
-    expect(result.state.status).toBe("awaiting_user");
-    expect(result.state.pauseReason).toBe("Auto-continue is off.");
-    expect(isWaitingForManualContinue(result.state)).toBe(true);
-    expect(result.effects).not.toContainEqual({ do: "startCooldown", ms: 1000 });
+    expect(result.state.status).toBe("cooldown");
+    expect(result.effects).toContainEqual({ do: "startCooldown", ms: 1000 });
   });
 
-  it("derives manual continuation from machine state instead of pause copy", () => {
-    const waiting: RunState = {
-      ...streamingRun(),
-      phase: "developing",
-      status: "awaiting_user",
-      autoContinueEnabled: false,
-      lastMarker: marker("CONTINUE"),
-      pauseReason: "Localized or revised UI copy",
-    };
-    expect(isWaitingForManualContinue(waiting)).toBe(true);
-
-    const needsInput = { ...waiting, lastMarker: marker("NEEDS_INPUT") };
-    expect(isWaitingForManualContinue(needsInput)).toBe(false);
-  });
-
-  it("disabling a pending automatic cooldown stops it and re-enabling resumes it", () => {
-    let state = streamingRun();
+  it("does not stop at the old per-phase continuation cap", () => {
+    let state = { ...streamingRun(), autoSends: settings.autoContinueCap + 20 };
     state = reduce(
       state,
       { type: "REPLY_COMPLETE", marker: marker("CONTINUE"), text: "" },
       settings,
     ).state;
-    expect(state.status).toBe("cooldown");
+    const result = reduce(state, { type: "COOLDOWN_ELAPSED" }, settings);
 
-    state = reduce(state, { type: "USER_SET_AUTO_CONTINUE", enabled: false }, settings).state;
-    expect(state.status).toBe("awaiting_user");
-    expect(state.cooldownUntil).toBeUndefined();
-
-    const resumed = reduce(state, { type: "USER_SET_AUTO_CONTINUE", enabled: true }, settings);
-    expect(resumed.state.status).toBe("cooldown");
-    expect(resumed.effects).toContainEqual({ do: "startCooldown", ms: 1000 });
+    expect(result.state.status).toBe("inserting");
+    expect(result.state.autoSends).toBe(settings.autoContinueCap + 21);
+    expect(result.effects).toContainEqual({ do: "insertAndSend", kind: "continue" });
+    expect(result.state.errorCode).toBeUndefined();
   });
 });
 
 describe("queued continuation input", () => {
-  it("sends a queued user message before continue even when auto-continue is off", () => {
+  it("sends queued user text before generic continuation", () => {
     let state = streamingRun();
-    state = reduce(state, { type: "USER_SET_AUTO_CONTINUE", enabled: false }, settings).state;
     state = reduce(
       state,
       { type: "USER_QUEUE_NEXT", text: "  Run the audit first.  " },
       settings,
     ).state;
-    state = { ...state, autoSends: settings.autoContinueCap };
-
     state = reduce(
       state,
       { type: "REPLY_COMPLETE", marker: marker("CONTINUE"), text: "" },
       settings,
     ).state;
-    expect(state.status).toBe("cooldown");
 
     const result = reduce(state, { type: "COOLDOWN_ELAPSED" }, settings);
     expect(result.state.status).toBe("inserting");
     expect(queuedMessages(result.state)).toEqual([]);
-    expect(result.state.autoSends).toBe(settings.autoContinueCap);
     expect(result.effects).toContainEqual({
       do: "insertAndSend",
       kind: "queued_user_text",
@@ -158,30 +132,8 @@ describe("queued continuation input", () => {
     expect(queuedMessages(appended)).toEqual(["legacy next", "new next"]);
   });
 
-  it("returns to waiting after a queued message reply while auto-continue remains off", () => {
+  it("clearing a queue does not cancel continuous mode", () => {
     let state = streamingRun();
-    state = reduce(state, { type: "USER_SET_AUTO_CONTINUE", enabled: false }, settings).state;
-    state = reduce(state, { type: "USER_QUEUE_NEXT", text: "Check the tests." }, settings).state;
-    state = reduce(
-      state,
-      { type: "REPLY_COMPLETE", marker: marker("CONTINUE"), text: "" },
-      settings,
-    ).state;
-    state = reduce(state, { type: "COOLDOWN_ELAPSED" }, settings).state;
-    state = drive(state, [{ type: "INSERT_OK" }, { type: "SEND_OK" }]).state;
-
-    const result = reduce(
-      state,
-      { type: "REPLY_COMPLETE", marker: marker("CONTINUE"), text: "" },
-      settings,
-    );
-    expect(result.state.status).toBe("awaiting_user");
-    expect(result.state.pauseReason).toBe("Auto-continue is off.");
-  });
-
-  it("clearing the only queued message cancels a cooldown when auto-continue is off", () => {
-    let state = streamingRun();
-    state = reduce(state, { type: "USER_SET_AUTO_CONTINUE", enabled: false }, settings).state;
     state = reduce(state, { type: "USER_QUEUE_NEXT", text: "Do this next." }, settings).state;
     state = reduce(
       state,
@@ -191,14 +143,13 @@ describe("queued continuation input", () => {
     expect(state.status).toBe("cooldown");
 
     state = reduce(state, { type: "USER_CLEAR_QUEUE" }, settings).state;
-    expect(state.status).toBe("awaiting_user");
+    expect(state.status).toBe("cooldown");
     expect(queuedMessages(state)).toEqual([]);
-    expect(state.cooldownUntil).toBeUndefined();
   });
 });
 
 describe("run reset semantics", () => {
-  it("STOP resets stale run state while preserving the auto-continue preference", () => {
+  it("STOP resets stale run state, preserves the repo, and restores continuous mode", () => {
     const dirty: RunState = {
       ...streamingRun(),
       phase: "developing",
@@ -219,7 +170,7 @@ describe("run reset semantics", () => {
     const result = reduce(dirty, { type: "USER_STOP" }, settings);
     expect(result.state.phase).toBe("idle");
     expect(result.state.status).toBe("idle");
-    expect(result.state.autoContinueEnabled).toBe(false);
+    expect(result.state.autoContinueEnabled).toBe(true);
     expect(queuedMessages(result.state)).toEqual([]);
     expect(result.state.repo).toBe("owner/repo");
     expect(result.state.lastMarker).toBeUndefined();
@@ -232,7 +183,7 @@ describe("run reset semantics", () => {
     expect(result.effects).toContainEqual({ do: "badge", text: "" });
   });
 
-  it("NEW PROJECT uses the same clean reset while preserving the toggle", () => {
+  it("NEW PROJECT uses the same clean reset", () => {
     const dirty: RunState = {
       ...streamingRun(),
       phase: "complete",
@@ -248,7 +199,7 @@ describe("run reset semantics", () => {
     const result = reduce(dirty, { type: "USER_NEW_PROJECT" }, settings);
     expect(result.state.phase).toBe("idle");
     expect(result.state.status).toBe("idle");
-    expect(result.state.autoContinueEnabled).toBe(false);
+    expect(result.state.autoContinueEnabled).toBe(true);
     expect(result.state.idea).toBe("");
     expect(result.state.repo).toBe("owner/repo");
     expect(queuedMessages(result.state)).toEqual([]);

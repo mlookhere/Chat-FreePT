@@ -3,6 +3,7 @@ import { parseMarker } from "../common/marker";
 import {
   buildContinuePrompt,
   buildDevelopPrompt,
+  buildHandoffPrompt,
   buildNudgePrompt,
   buildPlanPrompt,
   buildUserReply,
@@ -32,7 +33,7 @@ const COMPOSER_BUSY_RETRIES = 3;
 const COMPOSER_BUSY_WAIT_MS = 5000;
 const COMPOSER_RESTORE_RETRIES = 10;
 const COMPOSER_RESTORE_WAIT_MS = 500;
-const INTERRUPTED_RELOAD_RECOVERY_MS = 2500;
+const INTERRUPTED_RECOVERY_MS = 2500;
 
 export class RunController {
   state: RunState;
@@ -50,6 +51,7 @@ export class RunController {
   private observedAssistantSince = 0;
   private readonly onChange: (state: RunState) => void;
   private readonly onShowCompletion: () => void;
+  private readonly onConversationHandoff: (state: RunState) => void | Promise<void>;
   private readonly onContextInvalidated: () => void;
   private readonly onDiagnosticEvent: (event: ControllerDiagnosticEvent) => void;
   private readonly withComposerAccess: (task: () => Promise<void>) => Promise<void>;
@@ -62,6 +64,7 @@ export class RunController {
     hooks: {
       onChange: (state: RunState) => void;
       onShowCompletion: () => void;
+      onConversationHandoff?: (state: RunState) => void | Promise<void>;
       onContextInvalidated?: () => void;
       onDiagnosticEvent?: (event: ControllerDiagnosticEvent) => void;
       withComposerAccess?: (task: () => Promise<void>) => Promise<void>;
@@ -71,6 +74,7 @@ export class RunController {
     this.settings = settings;
     this.onChange = hooks.onChange;
     this.onShowCompletion = hooks.onShowCompletion;
+    this.onConversationHandoff = hooks.onConversationHandoff ?? (() => undefined);
     this.onContextInvalidated = hooks.onContextInvalidated ?? (() => undefined);
     this.onDiagnosticEvent = hooks.onDiagnosticEvent ?? (() => undefined);
     this.withComposerAccess = hooks.withComposerAccess ?? (async (task) => task());
@@ -102,7 +106,7 @@ export class RunController {
     window.addEventListener("pageshow", this.onPageShow);
     this.runtimeTimer = setInterval(() => this.checkRuntime(), RUNTIME_CHECK_MS);
     this.repairCooldown();
-    this.scheduleInterruptedReloadRecovery();
+    this.scheduleInterruptedRecovery();
   }
 
   dispose(): void {
@@ -204,6 +208,7 @@ export class RunController {
     switch (event.event) {
       case "generation-start":
         this.clearNetworkSettleTimer();
+        this.clearReloadRecoveryTimer();
         this.networkCompletedCurrentTurn = false;
         if (
           this.state.status === "sending" ||
@@ -225,6 +230,7 @@ export class RunController {
           this.state.phase === "plan_ready"
         ) {
           this.dispatch({ type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" });
+          this.scheduleInterruptedRecovery();
         }
         return;
       case "generation-complete": {
@@ -258,6 +264,7 @@ export class RunController {
               ? `Generation interrupted (${event.reason})`
               : "Generation interrupted",
           });
+          this.scheduleInterruptedRecovery();
         }
         return;
     }
@@ -288,24 +295,25 @@ export class RunController {
     this.networkSettleTimer = undefined;
   }
 
-  private scheduleInterruptedReloadRecovery(): void {
+  private scheduleInterruptedRecovery(): void {
     if (
-      this.state.status !== "streaming" ||
+      (this.state.status !== "paused" && this.state.status !== "streaming") ||
       this.state.lastLifecycleSignal !== "generation-interrupted"
     ) {
       return;
     }
 
+    this.clearReloadRecoveryTimer();
     this.reloadRecoveryTimer = setTimeout(() => {
       this.reloadRecoveryTimer = undefined;
-      this.recoverInterruptedReload();
-    }, INTERRUPTED_RELOAD_RECOVERY_MS);
+      this.recoverInterruptedState();
+    }, INTERRUPTED_RECOVERY_MS);
   }
 
-  private recoverInterruptedReload(): void {
+  private recoverInterruptedState(): void {
     if (
       this.disposed ||
-      this.state.status !== "streaming" ||
+      (this.state.status !== "paused" && this.state.status !== "streaming") ||
       this.state.lastLifecycleSignal !== "generation-interrupted" ||
       this.watcher.isStreaming() ||
       toolCallIndicatorVisible()
@@ -316,16 +324,17 @@ export class RunController {
     const role = lastMessageRole();
     const assistant = role === "assistant" ? lastAssistantMessage() : null;
     if (assistant && this.isFreshAssistant(assistant)) {
+      if (this.state.status === "paused") this.dispatch({ type: "STREAM_STARTED" });
       this.reconcileLiveState(Date.now());
       return;
     }
-    if (role === "user") return;
 
     this.onDiagnosticEvent({
       kind: "recovery",
-      detail: { event: "interrupted-reload-continuation" },
+      detail: { event: "interrupted-continuation" },
     });
-    this.dispatch({ type: "RECOVERY_CONTINUE" });
+    if (this.state.status === "paused") this.dispatch({ type: "USER_RESUME" });
+    else this.dispatch({ type: "RECOVERY_CONTINUE" });
   }
 
   private clearReloadRecoveryTimer(): void {
@@ -355,6 +364,7 @@ export class RunController {
     if (!button || button.getAttribute("aria-disabled") === "true") return false;
     if (button instanceof HTMLButtonElement && button.disabled) return false;
 
+    this.clearReloadRecoveryTimer();
     this.onDiagnosticEvent({
       kind: "permission-recovery",
       detail: { event: "continue-clicked" },
@@ -511,6 +521,10 @@ export class RunController {
         this.onShowCompletion();
         break;
       }
+      case "handoffConversation": {
+        await this.onConversationHandoff({ ...this.state });
+        break;
+      }
       case "reconcile": {
         this.reconcile();
         break;
@@ -562,6 +576,8 @@ export class RunController {
         return buildContinuePrompt(this.settings, true, repo);
       case "nudge":
         return buildNudgePrompt(repo);
+      case "handoff":
+        return buildHandoffPrompt(this.state);
       case "user_text":
       case "queued_user_text":
         return buildUserReply(text ?? "", repo);

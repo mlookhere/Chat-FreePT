@@ -10,7 +10,7 @@ beforeEach(() => {
 });
 
 describe("continuation state storage", () => {
-  it("loads a legacy v1 run without the new toggle as enabled", async () => {
+  it("loads a legacy v1 run in continuous mode", async () => {
     const legacy = newRunState("legacy", 1);
     delete legacy.autoContinueEnabled;
     stores.local[runKey("legacy")] = legacy;
@@ -20,7 +20,7 @@ describe("continuation state storage", () => {
     expect(autoContinueEnabled(loaded!)).toBe(true);
   });
 
-  it("persists the toggle and queued user message with the conversation run", async () => {
+  it("normalizes a legacy off flag while preserving the queued message", async () => {
     const state = {
       ...newRunState("c1", 1),
       phase: "developing" as const,
@@ -32,7 +32,7 @@ describe("continuation state storage", () => {
     await saveRun(state);
     const loaded = await loadRun("c1");
 
-    expect(loaded?.autoContinueEnabled).toBe(false);
+    expect(loaded?.autoContinueEnabled).toBe(true);
     expect(loaded?.queuedUserText).toBe("Run this next.");
   });
 });
