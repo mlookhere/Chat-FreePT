@@ -537,6 +537,9 @@ describe("state machine recovery and user control", () => {
     expect(state.repoName).toBe("o/r");
   });
 
+});
+
+describe("state machine external signals and handoff", () => {
   it("external blocking page signals pause with the right code", () => {
     const cases = [
       ["rate-limit", "rate-limited"],
