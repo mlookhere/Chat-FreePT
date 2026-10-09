@@ -8,7 +8,6 @@ export function freshConversationUrl(href: string): string {
   return `${url.origin}${customGpt ? `/g/${customGpt[1]}` : "/"}`;
 }
 
-
 export function conversationIdFromUrl(href: string): string | null {
   return CONV_RE.exec(href)?.[1] ?? null;
 }
