@@ -12,7 +12,7 @@
     "lint": "eslint src tests scripts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,html,json,css}\" \"tests/**/*.ts\" \"scripts/*.mjs\" \"*.md\"",
-    "format:check": "prettier --write tests/state-machine.test.ts && git diff -- tests/state-machine.test.ts && exit 1"
+    "format:check": "prettier --check \"src/**/*.{ts,html,json,css}\" \"tests/**/*.ts\" \"scripts/*.mjs\""
   },
   "repository": {
     "type": "git",
