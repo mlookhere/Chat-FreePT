@@ -804,64 +804,80 @@ function validateMarkerRepository(ctx: ReduceContext, marker: Marker): boolean {
 }
 
 function handleMarker(ctx: ReduceContext, marker: Marker, text: string): void {
-  const state = ctx.state;
   switch (marker.status) {
     case "CONTINUE":
       handleContinue(ctx);
       return;
     case "NEEDS_INPUT":
     case "ERROR":
-      state.status = "awaiting_user";
-      state.pauseReason = marker.note ?? "ChatGPT needs your input.";
-      ctx.effects.push(
-        { do: "badge", text: "?" },
-        {
-          do: "notify",
-          title: "Chat FreePT needs you",
-          message: marker.note ?? "ChatGPT is waiting for your input.",
-        },
-      );
+      waitForHumanInput(ctx, marker);
       return;
     case "PLAN_READY":
-      state.planSummary = marker.note ?? excerpt(text);
-      state.phase = "developing";
-      state.status = "inserting";
-      state.autoSends = 0;
-      state.nudges = 0;
-      note(ctx, "info", "Plan ready — starting development automatically");
-      ctx.effects.push(
-        { do: "insertAndSend", kind: "develop" },
-        { do: "badge", text: "RUN" },
-      );
+      startPlannedDevelopment(ctx, marker, text);
       return;
     case "TESTING":
-      state.phase = "testing";
-      state.status = "awaiting_user";
-      state.pauseReason = marker.note ?? "The project is ready for your testing.";
-      ctx.effects.push(
-        { do: "badge", text: "TEST" },
-        {
-          do: "notify",
-          title: "Chat FreePT is ready for testing",
-          message: marker.note ?? "The project is ready for your validation.",
-        },
-      );
+      waitForTesting(ctx, marker);
       return;
     case "COMPLETE":
-      state.phase = "complete";
-      state.status = "complete";
-      ctx.effects.push(
-        { do: "badge", text: "DONE" },
-        { do: "showCompletion" },
-        {
-          do: "notify",
-          title: "Development complete",
-          message: state.repo
-            ? `ChatGPT reports ${state.repo} is done.`
-            : "ChatGPT reports the project is done.",
-        },
-      );
+      completeProject(ctx);
   }
+}
+
+function waitForHumanInput(ctx: ReduceContext, marker: Marker): void {
+  ctx.state.status = "awaiting_user";
+  ctx.state.pauseReason = marker.note ?? "ChatGPT needs your input.";
+  ctx.effects.push(
+    { do: "badge", text: "?" },
+    {
+      do: "notify",
+      title: "Chat FreePT needs you",
+      message: marker.note ?? "ChatGPT is waiting for your input.",
+    },
+  );
+}
+
+function startPlannedDevelopment(ctx: ReduceContext, marker: Marker, text: string): void {
+  const state = ctx.state;
+  state.planSummary = marker.note ?? excerpt(text);
+  state.phase = "developing";
+  state.status = "inserting";
+  state.autoSends = 0;
+  state.nudges = 0;
+  note(ctx, "info", "Plan ready — starting development automatically");
+  ctx.effects.push(
+    { do: "insertAndSend", kind: "develop" },
+    { do: "badge", text: "RUN" },
+  );
+}
+
+function waitForTesting(ctx: ReduceContext, marker: Marker): void {
+  ctx.state.phase = "testing";
+  ctx.state.status = "awaiting_user";
+  ctx.state.pauseReason = marker.note ?? "The project is ready for your testing.";
+  ctx.effects.push(
+    { do: "badge", text: "TEST" },
+    {
+      do: "notify",
+      title: "Chat FreePT is ready for testing",
+      message: marker.note ?? "The project is ready for your validation.",
+    },
+  );
+}
+
+function completeProject(ctx: ReduceContext): void {
+  ctx.state.phase = "complete";
+  ctx.state.status = "complete";
+  ctx.effects.push(
+    { do: "badge", text: "DONE" },
+    { do: "showCompletion" },
+    {
+      do: "notify",
+      title: "Development complete",
+      message: ctx.state.repo
+        ? `ChatGPT reports ${ctx.state.repo} is done.`
+        : "ChatGPT reports the project is done.",
+    },
+  );
 }
 
 function handleContinue(ctx: ReduceContext): void {
