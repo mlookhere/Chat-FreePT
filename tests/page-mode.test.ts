@@ -35,8 +35,8 @@ describe("max-length handoff destination", () => {
   });
 
   it("opens the ordinary composer for a regular ChatGPT conversation", () => {
-    expect(
-      freshConversationUrl("https://chatgpt.com/c/11111111-1111-4111-8111-111111111111"),
-    ).toBe("https://chatgpt.com/");
+    expect(freshConversationUrl("https://chatgpt.com/c/11111111-1111-4111-8111-111111111111")).toBe(
+      "https://chatgpt.com/",
+    );
   });
 });
