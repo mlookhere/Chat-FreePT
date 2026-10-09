@@ -1,12 +1,6 @@
 /** Conversation-level lifecycle. Legacy `plan_ready` states auto-advance into development. */
 export type Phase =
-  | "idle"
-  | "planning"
-  | "plan_ready"
-  | "developing"
-  | "testing"
-  | "complete"
-  | "stopped";
+  "idle" | "planning" | "plan_ready" | "developing" | "testing" | "complete" | "stopped";
 
 /** What the extension is doing right now inside a phase. */
 export type RunStatus =
@@ -21,12 +15,7 @@ export type RunStatus =
   | "complete";
 
 export type MarkerStatus =
-  | "CONTINUE"
-  | "NEEDS_INPUT"
-  | "PLAN_READY"
-  | "TESTING"
-  | "COMPLETE"
-  | "ERROR";
+  "CONTINUE" | "NEEDS_INPUT" | "PLAN_READY" | "TESTING" | "COMPLETE" | "ERROR";
 
 /** Parsed from the fenced `chatfreept` block at the tail of the last assistant message. */
 export interface Marker {
