@@ -25,17 +25,18 @@ describe("ChatGPT page mode", () => {
   });
 });
 
-
 describe("max-length handoff destination", () => {
   it("keeps a new chat in the same custom GPT after reaching the length limit", () => {
     expect(
-      freshConversationUrl("https://chatgpt.com/g/g-example-gpt/c/11111111-1111-4111-8111-111111111111"),
+      freshConversationUrl(
+        "https://chatgpt.com/g/g-example-gpt/c/11111111-1111-4111-8111-111111111111",
+      ),
     ).toBe("https://chatgpt.com/g/g-example-gpt");
   });
 
   it("opens the ordinary composer for a regular ChatGPT conversation", () => {
-    expect(freshConversationUrl("https://chatgpt.com/c/11111111-1111-4111-8111-111111111111")).toBe(
-      "https://chatgpt.com/",
-    );
+    expect(
+      freshConversationUrl("https://chatgpt.com/c/11111111-1111-4111-8111-111111111111"),
+    ).toBe("https://chatgpt.com/");
   });
 });
