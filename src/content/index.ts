@@ -4,6 +4,7 @@ import { isActive, newRunState } from "../common/state-machine";
 import {
   acquireTabLock,
   adoptConversationOwnership,
+  deleteRun,
   heartbeatTabLock,
   loadRun,
   loadSettings,
@@ -266,6 +267,7 @@ async function onComposerNavigate(href: string): Promise<void> {
     if (!migrated) {
       ctl.dispose();
       controller = null;
+      await ctl.flushState();
       await releaseOwnedLock(pendingId);
       if (contextGuard.invalidated) return;
       currentConvId = urlConv;
@@ -277,7 +279,9 @@ async function onComposerNavigate(href: string): Promise<void> {
 
     currentConvId = urlConv;
     ctl.state = migrated;
-    panel?.render(migrated);
+    await ctl.flushState();
+    await deleteRun(pendingId);
+    panel?.render(ctl.state);
     startHeartbeat();
     log.info("adopted conversation id", urlConv);
     return;
