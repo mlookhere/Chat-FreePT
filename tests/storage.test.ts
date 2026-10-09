@@ -118,6 +118,7 @@ describe("run state", () => {
       ...newRunState("ultra", 123),
       repo: "owner/project",
       repoName: "owner/project",
+      repoMode: "existing" as const,
       idea: "persist my draft",
       lastUserText: "last human instruction",
       queuedUserTexts: ["first", "second"],
