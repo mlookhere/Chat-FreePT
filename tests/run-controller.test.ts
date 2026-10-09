@@ -643,7 +643,8 @@ describe("RunController permission recovery", () => {
     controller.dispatch({ type: "USER_RESUME" });
 
     expect(controller.state.lastUserText).toBe("I approved the GitHub prompt");
-    expect(controller.state.status).toBe("streaming");
+    expect(controller.state.status).toBe("cooldown");
+    expect(controller.state.lastLifecycleSignal).toBe("interruption-resumed");
     controller.dispose();
   });
 });
@@ -854,6 +855,90 @@ describe("RunController runtime reconciliation", () => {
     expect(mocks.clickSend).toHaveBeenCalledTimes(1);
     expect(controller.state.autoSends).toBe(1);
     expect(controller.state.status).toBe("streaming");
+    controller.dispose();
+  });
+});
+
+describe("RunController interrupted reload recovery", () => {
+  function staleInterruptedState(queued = true): ReturnType<typeof newRunState> {
+    let state = streamingState();
+    if (queued) {
+      state = reduce(
+        state,
+        { type: "USER_QUEUE_NEXT", text: "make the transition seamless" },
+        settings,
+      ).state;
+    }
+    state = reduce(
+      state,
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    ).state;
+    return { ...state, status: "streaming" };
+  }
+
+  it("sends the queued message once after reloading a phantom stream", async () => {
+    vi.useFakeTimers();
+    const controller = makeController(staleInterruptedState());
+
+    await vi.advanceTimersByTimeAsync(2_600);
+    await flushAsync();
+
+    expect(String(mocks.insertPrompt.mock.calls[0]?.[0])).toContain("make the transition seamless");
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.queuedUserTexts).toBeUndefined();
+    expect(controller.state.status).toBe("streaming");
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    await flushAsync();
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
+  it("does not recover over a real active generation", async () => {
+    vi.useFakeTimers();
+    const controller = makeController(staleInterruptedState());
+    watcher().streaming = true;
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    await flushAsync();
+
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    expect(controller.state.lastLifecycleSignal).toBe("generation-start");
+    controller.dispose();
+  });
+
+  it("lets a fresh assistant marker win over reload recovery", async () => {
+    vi.useFakeTimers();
+    mocks.lastMessageRole.mockReturnValue("assistant");
+    mocks.lastAssistantMessage.mockReturnValue({
+      el: document.createElement("div"),
+      text: "Need a choice.\nCHATFREEPT_STATUS: NEEDS_INPUT\nV: 1",
+      key: "message:fresh-after-reload",
+    });
+    const controller = makeController(staleInterruptedState());
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    await flushAsync();
+
+    expect(controller.state.status).toBe("awaiting_user");
+    expect(controller.state.lastMarker?.status).toBe("NEEDS_INPUT");
+    expect(mocks.insertPrompt).not.toHaveBeenCalled();
+    expect(mocks.clickSend).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it("falls back to normal auto-continue when no queued message exists", async () => {
+    vi.useFakeTimers();
+    const controller = makeController(staleInterruptedState(false));
+
+    await vi.advanceTimersByTimeAsync(2_600);
+    await flushAsync();
+
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.autoSends).toBe(1);
     controller.dispose();
   });
 });

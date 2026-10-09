@@ -32,6 +32,7 @@ const COMPOSER_BUSY_RETRIES = 3;
 const COMPOSER_BUSY_WAIT_MS = 5000;
 const COMPOSER_RESTORE_RETRIES = 10;
 const COMPOSER_RESTORE_WAIT_MS = 500;
+const INTERRUPTED_RELOAD_RECOVERY_MS = 2500;
 
 export class RunController {
   state: RunState;
@@ -40,6 +41,7 @@ export class RunController {
   private cooldownTimer: ReturnType<typeof setTimeout> | undefined;
   private runtimeTimer: ReturnType<typeof setInterval> | undefined;
   private networkSettleTimer: ReturnType<typeof setTimeout> | undefined;
+  private reloadRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
   private networkCompletedCurrentTurn = false;
   private readonly unsubscribeChatState: () => void;
   private lastSignal: string | null = null;
@@ -100,6 +102,7 @@ export class RunController {
     window.addEventListener("pageshow", this.onPageShow);
     this.runtimeTimer = setInterval(() => this.checkRuntime(), RUNTIME_CHECK_MS);
     this.repairCooldown();
+    this.scheduleInterruptedReloadRecovery();
   }
 
   dispose(): void {
@@ -109,6 +112,7 @@ export class RunController {
     this.watcher.stop();
     this.unsubscribeChatState();
     this.clearNetworkSettleTimer();
+    this.clearReloadRecoveryTimer();
     this.clearCooldownTimer();
     if (this.runtimeTimer !== undefined) clearInterval(this.runtimeTimer);
     this.runtimeTimer = undefined;
@@ -282,6 +286,51 @@ export class RunController {
   private clearNetworkSettleTimer(): void {
     if (this.networkSettleTimer !== undefined) clearTimeout(this.networkSettleTimer);
     this.networkSettleTimer = undefined;
+  }
+
+  private scheduleInterruptedReloadRecovery(): void {
+    if (
+      this.state.status !== "streaming" ||
+      this.state.lastLifecycleSignal !== "generation-interrupted"
+    ) {
+      return;
+    }
+
+    this.reloadRecoveryTimer = setTimeout(() => {
+      this.reloadRecoveryTimer = undefined;
+      this.recoverInterruptedReload();
+    }, INTERRUPTED_RELOAD_RECOVERY_MS);
+  }
+
+  private recoverInterruptedReload(): void {
+    if (
+      this.disposed ||
+      this.state.status !== "streaming" ||
+      this.state.lastLifecycleSignal !== "generation-interrupted" ||
+      this.watcher.isStreaming() ||
+      toolCallIndicatorVisible()
+    ) {
+      return;
+    }
+
+    const role = lastMessageRole();
+    const assistant = role === "assistant" ? lastAssistantMessage() : null;
+    if (assistant && this.isFreshAssistant(assistant)) {
+      this.reconcileLiveState(Date.now());
+      return;
+    }
+    if (role === "user") return;
+
+    this.onDiagnosticEvent({
+      kind: "recovery",
+      detail: { event: "interrupted-reload-continuation" },
+    });
+    this.dispatch({ type: "RECOVERY_CONTINUE" });
+  }
+
+  private clearReloadRecoveryTimer(): void {
+    if (this.reloadRecoveryTimer !== undefined) clearTimeout(this.reloadRecoveryTimer);
+    this.reloadRecoveryTimer = undefined;
   }
 
   private checkRuntime(): void {
