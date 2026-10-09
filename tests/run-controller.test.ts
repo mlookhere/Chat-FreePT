@@ -643,7 +643,8 @@ describe("RunController permission recovery", () => {
     controller.dispatch({ type: "USER_RESUME" });
 
     expect(controller.state.lastUserText).toBe("I approved the GitHub prompt");
-    expect(controller.state.status).toBe("streaming");
+    expect(controller.state.status).toBe("cooldown");
+    expect(controller.state.lastLifecycleSignal).toBe("interruption-resumed");
     controller.dispose();
   });
 });
