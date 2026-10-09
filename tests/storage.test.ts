@@ -166,11 +166,17 @@ describe("run state", () => {
   it("keeps simultaneous conversation state independent", async () => {
     const first = {
       ...newRunState("conversation-a", 1),
+      repo: "owner/first",
+      repoName: "owner/first",
+      repoMode: "existing" as const,
       idea: "first project",
       autoContinueEnabled: false,
     };
     const second = {
       ...newRunState("conversation-b", 2),
+      repo: "owner/second",
+      repoName: "owner/second",
+      repoMode: "existing" as const,
       idea: "second project",
       queuedUserText: "second follow-up",
     };
@@ -180,6 +186,8 @@ describe("run state", () => {
 
     expect(await storage.loadRun("conversation-a")).toEqual(first);
     expect(await storage.loadRun("conversation-b")).toEqual(second);
+    expect((await storage.loadRun("conversation-a"))?.repo).toBe("owner/first");
+    expect((await storage.loadRun("conversation-b"))?.repo).toBe("owner/second");
     expect(stores.local[storage.runKey("conversation-a")]).not.toEqual(
       stores.local[storage.runKey("conversation-b")],
     );
