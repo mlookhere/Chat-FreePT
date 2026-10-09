@@ -404,6 +404,7 @@ function resumeRun(ctx: ReduceContext, lastUserText?: string): boolean {
   }
   const text = lastUserText?.trim();
   if (text) state.lastUserText = text;
+  if (state.phase === "testing") state.phase = "developing";
   delete state.pauseReason;
   delete state.errorCode;
 
@@ -610,7 +611,9 @@ function canConsumeReply(state: RunState, marker: Marker | null): boolean {
   return (
     state.status === "streaming" ||
     state.status === "sending" ||
-    (state.status === "awaiting_user" && marker !== null && isContinuablePhase(state))
+    (state.status === "awaiting_user" &&
+      marker !== null &&
+      (isContinuablePhase(state) || state.phase === "testing"))
   );
 }
 
@@ -864,6 +867,7 @@ function handleMarker(ctx: ReduceContext, marker: Marker, text: string): void {
 function handleContinue(ctx: ReduceContext): void {
   const state = ctx.state;
   if (state.phase === "plan_ready") state.phase = "planning";
+  if (state.phase === "testing") state.phase = "developing";
   if (!isContinuablePhase(state)) {
     state.status = "awaiting_user";
     return;
