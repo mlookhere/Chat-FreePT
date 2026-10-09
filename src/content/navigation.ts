@@ -1,6 +1,14 @@
 const CONV_RE = /\/c\/([0-9a-f-]{20,})/i;
 const POLL_MS = 500;
 
+/** Start a fresh conversation in the same custom GPT, when the old conversation is full. */
+export function freshConversationUrl(href: string): string {
+  const url = new URL(href);
+  const customGpt = /^\/g\/([^/?#]+)\/c\//.exec(url.pathname);
+  return `${url.origin}${customGpt ? `/g/${customGpt[1]}` : "/"}`;
+}
+
+
 export function conversationIdFromUrl(href: string): string | null {
   return CONV_RE.exec(href)?.[1] ?? null;
 }
