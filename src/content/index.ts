@@ -70,9 +70,7 @@ function clearRollover(conversationId: string): void {
 
 function conversationKeyFromLocation(): string {
   return (
-    conversationIdFromUrl(location.href) ??
-    pendingRolloverId() ??
-    `pending:${crypto.randomUUID()}`
+    conversationIdFromUrl(location.href) ?? pendingRolloverId() ?? `pending:${crypto.randomUUID()}`
   );
 }
 
