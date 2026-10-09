@@ -6,8 +6,23 @@ const RATE_LIMIT_RE =
 const CONVERSATION_FULL_RE =
   /you(?:'|’)?ve reached the maximum length for this conversation|maximum conversation length|conversation is too long|start a new chat to continue/i;
 
+/** Only native page alerts count, not quoted warnings in a chat reply or FreePT UI. */
+function isNativeAlert(node: Element): boolean {
+  return !node.closest('#cfpt-root, [data-message-author-role], [hidden], [aria-hidden="true"]');
+}
+
 function alertTexts(): string[] {
-  return queryAll("pageAlert")
+  const alerts = queryAll("pageAlert").filter(isNativeAlert);
+  // Some ChatGPT layouts render the same alert as an aside without role=alert.
+  // Require the native action button for that fallback, so chat text cannot trigger a rollover.
+  const asideFallbacks = Array.from(document.querySelectorAll("aside"))
+    .filter(isNativeAlert)
+    .filter((aside) =>
+      Array.from(aside.querySelectorAll("button")).some((button) =>
+        /^start new chat$/i.test(button.textContent?.trim() ?? ""),
+      ),
+    );
+  return [...new Set([...alerts, ...asideFallbacks])]
     .map((node) => (node as HTMLElement).innerText ?? node.textContent ?? "")
     .filter(Boolean);
 }
