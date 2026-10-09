@@ -1,8 +1,4 @@
-import {
-  autoContinueEnabled,
-  isWaitingForManualContinue,
-  queuedMessages,
-} from "../../common/state-machine";
+import { queuedMessages } from "../../common/state-machine";
 import type { RunState } from "../../common/types";
 import type { DiagnosticsStatus } from "../diagnostics";
 import { healthCheck } from "../selectors";
@@ -23,6 +19,7 @@ const MARKER_LABEL: Record<string, string> = {
   CONTINUE: "Continue",
   NEEDS_INPUT: "Needs input",
   PLAN_READY: "Plan ready",
+  TESTING: "Testing",
   COMPLETE: "Complete",
   ERROR: "Error",
 };
@@ -32,6 +29,10 @@ const LIFECYCLE_LABEL: Record<string, string> = {
   "generation-complete": "Generation completed",
   "generation-interrupted": "Generation interrupted",
   "permission-continued": "Permission continued",
+  "conversation-handoff": "Conversation handoff",
+  "conversation-handoff-started": "New conversation started",
+  "interruption-resumed": "Interruption resumed",
+  "interruption-recovered": "Interruption recovered",
 };
 
 function humanizeToken(value: string): string {
@@ -73,16 +74,16 @@ export function repositorySetupHtml(): string {
     <section class="cfpt-setup-card" role="region" aria-labelledby="cfpt-setup-title">
       <button class="cfpt-icon-close" type="button" data-action="setup-done" aria-label="Close repository setup">×</button>
       <div class="cfpt-setup-icon" aria-hidden="true">${airplaneSvg()}</div>
-      <div class="cfpt-plan-badge">One conversation · one repository</div>
+      <div class="cfpt-plan-badge">One project · one repository</div>
       <h2 id="cfpt-setup-title">Choose the GitHub repository first</h2>
-      <p class="cfpt-setup-lead">Chat FreePT locks this ChatGPT conversation to one repository before planning starts. Existing repositories work immediately.</p>
+      <p class="cfpt-setup-lead">Chat FreePT keeps the project tied to this repository while it works, including automatic continuation into a new chat if the current conversation reaches its limit.</p>
       <ol class="cfpt-setup-steps">
         <li>For a new project, <a class="cfpt-link" href="https://github.com/new" target="_blank" rel="noreferrer noopener">create a private repository on GitHub</a>.</li>
         <li>Return here and enter <strong>owner/repo</strong> or the root GitHub repository URL.</li>
         <li>Describe the project and press <strong>Start planning</strong>.</li>
         <li>ChatGPT verifies write access and CI capabilities against that exact repository. Missing access stops with <strong>Needs input</strong>.</li>
       </ol>
-      <p class="cfpt-setup-footnote">Once planning starts, the repository is read-only for this conversation. Start a new ChatGPT conversation to work in another repo.</p>
+      <p class="cfpt-setup-footnote">Once planning starts, Chat FreePT keeps using this repository for the project.</p>
       <div class="cfpt-setup-actions">
         <button class="cfpt-btn cfpt-btn-primary" type="button" data-action="setup-done">Continue</button>
       </div>
@@ -111,7 +112,6 @@ export function panelViewKey(state: RunState, passive: boolean): string {
     state.lastMarker?.url ?? "",
     state.lastLifecycleSignal ?? "",
     queuedMessages(state).join("\u001f"),
-    String(autoContinueEnabled(state)),
     String(passive),
   ].join("|");
 }
@@ -222,6 +222,7 @@ function statusBodyHtml(state: RunState): string {
     case "cooldown":
       return runningHtml(state);
     case "awaiting_user":
+      if (state.phase === "testing") return testingHtml(state);
       return state.phase === "plan_ready" ? planReadyHtml(state) : needsInputHtml(state);
     case "paused":
     case "error":
@@ -234,17 +235,13 @@ function statusBodyHtml(state: RunState): string {
 }
 
 function automationControlsHtml(state: RunState): string {
-  const enabled = autoContinueEnabled(state);
   const queue = queuedMessages(state);
   const queueControls =
     canQueueNext(state) || queue.length > 0 ? queueControlsHtml(queue, canQueueNext(state)) : "";
   return `
     <div class="cfpt-field">
-      <label class="cfpt-check-row">
-        <input type="checkbox" data-action="auto-continue" ${enabled ? "checked" : ""} />
-        <span><strong>Auto-continue</strong></span>
-      </label>
-      <p class="cfpt-note">When off, Chat FreePT waits instead of sending a generic continue. Queued messages still send one at a time at safe turn boundaries.</p>
+      <strong>Continuous mode</strong>
+      <p class="cfpt-note">Chat FreePT keeps the project moving automatically. It waits only when ChatGPT needs you, reaches testing, or finishes.</p>
       ${queueControls}
     </div>
   `;
@@ -299,7 +296,7 @@ function queueControlsHtml(queue: string[], allowAdd: boolean): string {
   return `
     <div class="cfpt-field">
       <strong>Message queue · ${queue.length}</strong>
-      <p class="cfpt-note">Queued messages run FIFO before generic auto-continue.</p>
+      <p class="cfpt-note">Queued messages run FIFO before the next automatic continuation.</p>
       ${items}
       ${allowAdd ? '<button class="cfpt-btn" type="button" data-action="showqueue">Add queued message</button>' : ""}
       ${queue.length > 0 ? '<button class="cfpt-btn" type="button" data-action="clearqueue">Clear all</button>' : ""}
@@ -336,9 +333,9 @@ function passiveHtml(state: RunState): string {
 function ideaFormHtml(state: RunState): string {
   const repoField = state.repo
     ? `<div class="cfpt-field">
-         <label>Repository locked to this conversation</label>
+         <label>Project repository</label>
          <input type="text" data-ref="reponame" value="${esc(state.repo)}" readonly />
-         <p class="cfpt-note">To use a different repository, start a new ChatGPT conversation.</p>
+         <p class="cfpt-note">Chat FreePT keeps this repository with the project while it runs.</p>
        </div>`
     : `<div class="cfpt-field">
          <label>GitHub repository</label>
@@ -355,7 +352,7 @@ function ideaFormHtml(state: RunState): string {
         state.idea,
       )}</textarea>
     </div>
-    <p class="cfpt-note">One ChatGPT conversation is permanently bound to one GitHub repository. Chat FreePT will verify access to that exact repo before work begins.</p>
+    <p class="cfpt-note">Chat FreePT uses this repository as the durable project state and verifies access before work begins.</p>
     <button class="cfpt-btn" type="button" data-action="setup-open">Repository setup</button>
     <button class="cfpt-btn cfpt-btn-primary" data-action="start">Start planning</button>
   `;
@@ -381,28 +378,36 @@ function runningHtml(state: RunState): string {
 function planReadyHtml(state: RunState): string {
   return `
     <h3>Master plan ready</h3>
-    <p class="cfpt-note">${esc(state.planSummary ?? "Review the plan in the conversation.")}</p>
+    <p class="cfpt-note">${esc(state.planSummary ?? "The recorded plan is ready.")}</p>
     ${repoLine(state)}
-    <p class="cfpt-note">Want changes? Reply in the chat and the plan phase resumes automatically. Happy with it?</p>
-    <button class="cfpt-btn cfpt-btn-primary" data-action="startdev">Start development</button>
+    <p class="cfpt-note">Development starts automatically.</p>
     <button class="cfpt-btn cfpt-btn-danger" data-action="stop">Stop</button>
   `;
 }
 
 function needsInputHtml(state: RunState): string {
-  const autoPaused = isWaitingForManualContinue(state);
   return `
-    <h3>${autoPaused ? "Auto-continue is off" : "ChatGPT needs your input"}</h3>
+    <h3>ChatGPT needs your input</h3>
     <p class="cfpt-note">${esc(state.pauseReason ?? "See the conversation for the question.")}</p>
-    ${
-      autoPaused
-        ? ""
-        : `<div class="cfpt-field">
-             <textarea data-ref="reply" rows="4" placeholder="Type your answer…"></textarea>
-           </div>
-           <button class="cfpt-btn cfpt-btn-primary" data-action="reply">Send reply</button>
-           <button class="cfpt-btn" data-action="resume">I answered in the chat — resume</button>`
-    }
+    <div class="cfpt-field">
+      <textarea data-ref="reply" rows="4" placeholder="Type your answer…"></textarea>
+    </div>
+    <button class="cfpt-btn cfpt-btn-primary" data-action="reply">Send reply</button>
+    <button class="cfpt-btn" data-action="resume">I answered in the chat — resume</button>
+    <button class="cfpt-btn cfpt-btn-danger" data-action="stop">Stop</button>
+  `;
+}
+
+function testingHtml(state: RunState): string {
+  return `
+    <h3>Ready for testing</h3>
+    <p class="cfpt-note">${esc(state.pauseReason ?? "The project is ready for your validation.")}</p>
+    ${repoLine(state)}
+    <div class="cfpt-field">
+      <textarea data-ref="reply" rows="4" placeholder="Add test results or requested changes…"></textarea>
+    </div>
+    <button class="cfpt-btn cfpt-btn-primary" data-action="reply">Send test result</button>
+    <button class="cfpt-btn" data-action="resume">I responded in the chat — resume</button>
     <button class="cfpt-btn cfpt-btn-danger" data-action="stop">Stop</button>
   `;
 }
@@ -441,6 +446,8 @@ function phaseLabel(phase: string): string {
       return "Plan ready";
     case "developing":
       return "Developing";
+    case "testing":
+      return "Testing";
     case "complete":
       return "Complete";
     case "stopped":
