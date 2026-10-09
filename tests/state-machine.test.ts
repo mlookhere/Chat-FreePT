@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Effect, MachineEvent } from "../src/common/state-machine";
-import { isActive, newRunState, reduce } from "../src/common/state-machine";
+import {
+  isActive,
+  newRunState,
+  prepareConversationHandoff,
+  reduce,
+} from "../src/common/state-machine";
 import type { Marker, RunState, Settings } from "../src/common/types";
 import { DEFAULT_SETTINGS } from "../src/common/types";
 
@@ -248,25 +253,19 @@ describe("state machine continuation lifecycle", () => {
     expect(effects).toContainEqual({ do: "insertAndSend", kind: "continue" });
   });
 
-  it("enforces the auto-continue cap", () => {
-    let state = start();
-    for (let i = 0; i < settings.autoContinueCap; i++) {
-      state = toStreaming(state);
-      state = reduce(
-        state,
-        { type: "REPLY_COMPLETE", marker: marker("CONTINUE"), text: "" },
-        settings,
-      ).state;
-      state = reduce(state, { type: "COOLDOWN_ELAPSED" }, settings).state;
-    }
-    state = toStreaming(state);
-    const result = reduce(
+  it("keeps continuing beyond the legacy auto-continue cap", () => {
+    let state = { ...toStreaming(start()), autoSends: settings.autoContinueCap + 10 };
+    state = reduce(
       state,
       { type: "REPLY_COMPLETE", marker: marker("CONTINUE"), text: "" },
       settings,
-    );
-    expect(result.state.status).toBe("error");
-    expect(result.state.errorCode).toBe("cap-reached");
+    ).state;
+    const result = reduce(state, { type: "COOLDOWN_ELAPSED" }, settings);
+
+    expect(result.state.status).toBe("inserting");
+    expect(result.state.autoSends).toBe(settings.autoContinueCap + 11);
+    expect(result.state.errorCode).toBeUndefined();
+    expect(result.effects).toContainEqual({ do: "insertAndSend", kind: "continue" });
   });
 
   it("refreshes the contract every N auto-continues", () => {
@@ -393,9 +392,9 @@ describe("state machine marker transitions", () => {
     expect(effects.some((e) => e.do === "notify")).toBe(true);
   });
 
-  it("PLAN_READY transitions to plan_ready and waits", () => {
+  it("PLAN_READY starts development automatically", () => {
     const streaming = toStreaming(start());
-    const { state } = reduce(
+    const { state, effects } = reduce(
       streaming,
       {
         type: "REPLY_COMPLETE",
@@ -404,52 +403,67 @@ describe("state machine marker transitions", () => {
       },
       settings,
     );
-    expect(state.phase).toBe("plan_ready");
-    expect(state.status).toBe("awaiting_user");
+    expect(state.phase).toBe("developing");
+    expect(state.status).toBe("inserting");
     expect(state.repo).toBe("o/r");
     expect(state.planSummary).toBe("5 items");
+    expect(effects).toContainEqual({ do: "insertAndSend", kind: "develop" });
   });
 
-  it("USER_START_DEVELOPMENT resets counters and sends the develop prompt", () => {
-    const streaming = toStreaming(start());
-    let state = reduce(
-      streaming,
-      { type: "REPLY_COMPLETE", marker: marker("PLAN_READY"), text: "" },
-      settings,
-    ).state;
-    const result = reduce(state, { type: "USER_START_DEVELOPMENT" }, settings);
-    state = result.state;
-    expect(state.phase).toBe("developing");
-    expect(state.autoSends).toBe(0);
+  it("still starts development from a legacy persisted plan-ready state", () => {
+    const legacy: RunState = {
+      ...newRunState("c1", 1),
+      repo: "o/r",
+      repoName: "o/r",
+      repoMode: "existing",
+      phase: "plan_ready",
+      status: "awaiting_user",
+      autoSends: 9,
+    };
+    const result = reduce(legacy, { type: "USER_START_DEVELOPMENT" }, settings);
+    expect(result.state.phase).toBe("developing");
+    expect(result.state.status).toBe("inserting");
+    expect(result.state.autoSends).toBe(0);
     expect(result.effects).toContainEqual({ do: "insertAndSend", kind: "develop" });
   });
 
-  it("plan revision: CONTINUE from plan_ready re-enters planning", () => {
-    const streaming = toStreaming(start());
-    let state = reduce(
-      streaming,
-      { type: "REPLY_COMPLETE", marker: marker("PLAN_READY"), text: "" },
-      settings,
-    ).state;
-    state = reduce(state, { type: "STREAM_STARTED" }, settings).state;
-    const result = reduce(
-      state,
-      { type: "REPLY_COMPLETE", marker: marker("CONTINUE"), text: "" },
+  it("TESTING waits for human validation and a reply resumes development", () => {
+    const developing = { ...toStreaming(start()), phase: "developing" as const };
+    const waiting = reduce(
+      developing,
+      {
+        type: "REPLY_COMPLETE",
+        marker: marker("TESTING", { note: "Verify the extension in Chrome." }),
+        text: "",
+      },
       settings,
     );
-    expect(result.state.phase).toBe("planning");
-    expect(result.state.status).toBe("cooldown");
+    expect(waiting.state.phase).toBe("testing");
+    expect(waiting.state.status).toBe("awaiting_user");
+    expect(waiting.state.pauseReason).toBe("Verify the extension in Chrome.");
+    expect(waiting.effects.some((effect) => effect.do === "notify")).toBe(true);
+
+    const resumed = reduce(
+      waiting.state,
+      { type: "USER_REPLY", text: "Chrome test passed." },
+      settings,
+    );
+    expect(resumed.state.phase).toBe("developing");
+    expect(resumed.state.status).toBe("inserting");
+    expect(resumed.effects).toContainEqual({
+      do: "insertAndSend",
+      kind: "user_text",
+      text: "Chrome test passed.",
+    });
   });
 
-  it("COMPLETE shows the modal", () => {
-    const streaming = toStreaming(start());
+  it("COMPLETE stops the continuous project only after development", () => {
     let state = reduce(
-      streaming,
+      toStreaming(start()),
       { type: "REPLY_COMPLETE", marker: marker("PLAN_READY"), text: "" },
       settings,
     ).state;
-    state = reduce(state, { type: "USER_START_DEVELOPMENT" }, settings).state;
-    state = toStreaming(state);
+    state = drive(state, [{ type: "INSERT_OK" }, { type: "SEND_OK" }]).state;
     const { state: done, effects } = reduce(
       state,
       { type: "REPLY_COMPLETE", marker: marker("COMPLETE", { repo: "o/r" }), text: "" },
@@ -523,12 +537,11 @@ describe("state machine recovery and user control", () => {
     expect(state.repoName).toBe("o/r");
   });
 
-  it("page signals pause with the right code", () => {
+  it("external blocking page signals pause with the right code", () => {
     const cases = [
       ["rate-limit", "rate-limited"],
       ["logged-out", "logged-out"],
       ["network-error", "network-error"],
-      ["conversation-full", "conversation-full"],
     ] as const;
     for (const [signal, code] of cases) {
       const state = toStreaming(start());
@@ -536,6 +549,47 @@ describe("state machine recovery and user control", () => {
       expect(result.state.status).toBe("error");
       expect(result.state.errorCode).toBe(code);
     }
+  });
+
+  it("conversation-full requests automatic handoff instead of human intervention", () => {
+    const state = toStreaming(start());
+    const result = reduce(state, { type: "PAGE_SIGNAL", signal: "conversation-full" }, settings);
+    expect(result.state.status).toBe("paused");
+    expect(result.state.errorCode).toBeUndefined();
+    expect(result.state.pauseReason).toContain("continuing automatically");
+    expect(result.effects).toContainEqual({ do: "handoffConversation" });
+  });
+
+  it("prepares and starts a max-length handoff with the same project context", () => {
+    const source: RunState = {
+      ...toStreaming(start()),
+      phase: "developing",
+      repo: "o/r",
+      repoName: "o/r",
+      queuedUserTexts: ["verify package"],
+      lastUserText: "keep going",
+      cooldownUntil: 9999,
+      replyBaselineAssistantKey: "old-baseline",
+      lastProcessedAssistantKey: "old-reply",
+    };
+    const handoff = prepareConversationHandoff(source, "pending:new", 5000);
+
+    expect(handoff.conversationId).toBe("pending:new");
+    expect(handoff.repo).toBe("o/r");
+    expect(handoff.idea).toBe(source.idea);
+    expect(handoff.queuedUserTexts).toEqual(["verify package"]);
+    expect(handoff.lastUserText).toBe("keep going");
+    expect(handoff.phase).toBe("developing");
+    expect(handoff.status).toBe("paused");
+    expect(handoff.handoffPending).toBe(true);
+    expect(handoff.cooldownUntil).toBeUndefined();
+    expect(handoff.replyBaselineAssistantKey).toBeUndefined();
+    expect(handoff.lastProcessedAssistantKey).toBeUndefined();
+
+    const started = reduce(handoff, { type: "HANDOFF_READY" }, settings);
+    expect(started.state.handoffPending).toBe(false);
+    expect(started.state.status).toBe("inserting");
+    expect(started.effects).toContainEqual({ do: "insertAndSend", kind: "handoff" });
   });
 
   it("USER_REPLY sends the user's text with the marker re-arm", () => {
