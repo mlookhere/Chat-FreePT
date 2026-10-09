@@ -427,7 +427,6 @@ describe("persisted conversation context", () => {
     expect(onEvent).toHaveBeenLastCalledWith({
       type: "USER_UPDATE_DRAFT",
       repoName: "owner/persisted",
-      repoMode: "existing" as const,
       idea: "keep this project idea",
     });
 
