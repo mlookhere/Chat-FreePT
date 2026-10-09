@@ -78,6 +78,62 @@ describe("state persistence context", () => {
     expect(resumed.state.pauseReason).toBeUndefined();
   });
 
+  it("resumes an interrupted run through the queued continuation boundary", () => {
+    let state = toStreaming(start());
+    state = reduce(
+      state,
+      { type: "USER_QUEUE_NEXT", text: "make the transition seamless" },
+      settings,
+    ).state;
+    state = reduce(
+      state,
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    ).state;
+
+    const resumed = reduce(state, { type: "USER_RESUME" }, settings);
+    expect(resumed.state.status).toBe("cooldown");
+    expect(resumed.effects).toContainEqual({ do: "startCooldown", ms: 1000 });
+
+    const sent = reduce(resumed.state, { type: "COOLDOWN_ELAPSED" }, settings);
+    expect(sent.state.status).toBe("inserting");
+    expect(sent.state.lastUserText).toBe("make the transition seamless");
+    expect(sent.state.queuedUserTexts).toBeUndefined();
+    expect(sent.effects).toContainEqual({
+      do: "insertAndSend",
+      kind: "queued_user_text",
+      text: "make the transition seamless",
+    });
+  });
+
+  it("resumes an interrupted run with normal auto-continue when the queue is empty", () => {
+    const interrupted = reduce(
+      toStreaming(start()),
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    ).state;
+
+    const resumed = reduce(interrupted, { type: "USER_RESUME" }, settings);
+    expect(resumed.state.status).toBe("cooldown");
+
+    const sent = reduce(resumed.state, { type: "COOLDOWN_ELAPSED" }, settings);
+    expect(sent.state.autoSends).toBe(1);
+    expect(sent.effects).toContainEqual({ do: "insertAndSend", kind: "continue" });
+  });
+
+  it("repairs a persisted phantom stream from an interrupted resume", () => {
+    let stale = reduce(
+      toStreaming(start()),
+      { type: "STREAM_INTERRUPTED", reason: "Generation stopped in ChatGPT" },
+      settings,
+    ).state;
+    stale = { ...stale, status: "streaming" };
+
+    const recovered = reduce(stale, { type: "RECOVERY_CONTINUE" }, settings);
+    expect(recovered.state.status).toBe("cooldown");
+    expect(recovered.effects).toContainEqual({ do: "startCooldown", ms: 1000 });
+  });
+
   it("recovers only an interrupted permission flow", () => {
     const interrupted = reduce(
       toStreaming(start()),
