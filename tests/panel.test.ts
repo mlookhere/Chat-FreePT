@@ -427,6 +427,7 @@ describe("persisted conversation context", () => {
     expect(onEvent).toHaveBeenLastCalledWith({
       type: "USER_UPDATE_DRAFT",
       repoName: "owner/persisted",
+      repoMode: "existing" as const,
       idea: "keep this project idea",
     });
 
@@ -562,7 +563,8 @@ describe("first-run and plan-aware setup", () => {
     overlayShadow().querySelector<HTMLButtonElement>('[data-action="setup-open"]')?.click();
 
     expect(overlayShadow().textContent).toContain("One conversation · one repository");
-    expect(overlayShadow().textContent).toContain("NEEDS_INPUT");
+    expect(overlayShadow().textContent).toContain("Needs input");
+    expect(overlayShadow().textContent).not.toContain("NEEDS_INPUT");
     expect(overlayShadow().querySelector('[aria-modal="true"]')).toBeNull();
     expect(overlayShadow().textContent).not.toContain("Follow along");
   });
