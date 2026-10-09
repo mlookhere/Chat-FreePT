@@ -42,6 +42,11 @@ describe("scanPageSignals", () => {
     expect(scanPageSignals()).toBe("conversation-full");
   });
 
+  it("ignores unrelated maximum-length alerts", () => {
+    append('<aside role="alert">Maximum length exceeded for file name.</aside>');
+    expect(scanPageSignals()).toBeNull();
+  });
+
   it("does not treat a quoted max-length notice inside a chat message as a page signal", () => {
     append(`
       <div data-message-author-role="assistant">
