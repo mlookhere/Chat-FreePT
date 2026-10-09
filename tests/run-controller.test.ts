@@ -280,22 +280,22 @@ describe("RunController sends and continuation controls", () => {
     controller.dispose();
   });
 
-  it("cancels a pending automatic continuation when auto-continue is turned off", async () => {
+  it("keeps a pending continuation active when a legacy off event arrives", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(15_000);
     const controller = makeController(streamingState());
 
-    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    watcher().callbacks.onComplete("CHATFREEPT_STATUS: Continue\nV: 1");
     expect(controller.state.status).toBe("cooldown");
 
     controller.dispatch({ type: "USER_SET_AUTO_CONTINUE", enabled: false });
-    expect(controller.state.status).toBe("awaiting_user");
-    expect(controller.state.cooldownUntil).toBeUndefined();
+    expect(controller.state.status).toBe("cooldown");
 
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(100);
     await flushAsync();
-    expect(mocks.insertPrompt).not.toHaveBeenCalled();
-    expect(mocks.clickSend).not.toHaveBeenCalled();
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
 
@@ -329,12 +329,11 @@ describe("RunController sends and continuation controls", () => {
     stopped.dispose();
   });
 
-  it("sends queued user text once while auto-continue is disabled", async () => {
+  it("sends queued user text once before continuous follow-up", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(17_000);
     const controller = makeController(streamingState());
 
-    controller.dispatch({ type: "USER_SET_AUTO_CONTINUE", enabled: false });
     controller.dispatch({ type: "USER_QUEUE_NEXT", text: "Run the accessibility audit next." });
     watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
     expect(controller.state.status).toBe("cooldown");
@@ -650,7 +649,8 @@ describe("RunController permission recovery", () => {
 });
 
 describe("RunController interrupted network lifecycle", () => {
-  it("pauses automation when ChatGPT stop_conversation is observed", () => {
+  it("treats ChatGPT stop_conversation as a transient pause and automatically continues", async () => {
+    vi.useFakeTimers();
     const controller = makeController(streamingState());
 
     emitChatState({
@@ -663,6 +663,13 @@ describe("RunController interrupted network lifecycle", () => {
     expect(controller.state.status).toBe("paused");
     expect(controller.state.pauseReason).toContain("stopped");
     expect(controller.state.lastLifecycleSignal).toBe("generation-interrupted");
+
+    await vi.advanceTimersByTimeAsync(2_600);
+    await flushAsync();
+
+    expect(mocks.insertPrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.clickSend).toHaveBeenCalledTimes(1);
+    expect(controller.state.status).toBe("streaming");
     controller.dispose();
   });
 
@@ -958,17 +965,20 @@ describe("RunController stale stream isolation", () => {
     controller.dispose();
   });
 
-  it("keeps auto-continue-off waiting stable when stale stream signals arrive", () => {
+  it("keeps Testing stable when stale watcher signals arrive", () => {
     const controller = makeController(streamingState());
-    controller.dispatch({ type: "USER_SET_AUTO_CONTINUE", enabled: false });
 
-    watcher().callbacks.onComplete("CHATFREEPT_STATUS: CONTINUE\nV: 1");
+    watcher().callbacks.onComplete(
+      "CHATFREEPT_STATUS: Testing\nNOTE: verify the extension in Chrome",
+    );
     expect(controller.state.status).toBe("awaiting_user");
+    expect(controller.state.phase).toBe("testing");
 
     watcher().callbacks.onStart();
     watcher().callbacks.onStuck();
 
     expect(controller.state.status).toBe("awaiting_user");
+    expect(controller.state.phase).toBe("testing");
     expect(controller.state.errorCode).toBeUndefined();
     controller.dispose();
   });
