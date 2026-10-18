@@ -21,6 +21,22 @@ function allowedSender(url: string): boolean {
   }
 }
 
+function requestKeys(request: Partial<StorageRequest>): unknown[] {
+  const payload = request.payload;
+  if (request.operation === "set") {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+    return Object.keys(payload);
+  }
+  return Array.isArray(payload) ? payload : [payload];
+}
+
+function allowedKey(area: StorageRequest["area"], key: unknown): boolean {
+  return typeof key === "string" &&
+    key.startsWith("cfpt:") &&
+    key.length <= 230 &&
+    (area === "local" || key === "cfpt:settings");
+}
+
 export function validStorageRequest(value: unknown, senderUrl: string): value is StorageRequest {
   if (!allowedSender(senderUrl) || !value || typeof value !== "object") return false;
   const request = value as Partial<StorageRequest>;
@@ -29,15 +45,8 @@ export function validStorageRequest(value: unknown, senderUrl: string): value is
   if (request.operation !== "get" && request.operation !== "set" && request.operation !== "remove") return false;
   if (request.area === "sync" && request.operation === "remove") return false;
 
-  const { payload } = request;
-  if (request.operation === "set" && (!payload || typeof payload !== "object" || Array.isArray(payload))) return false;
-  const keys = request.operation === "set"
-    ? Object.keys(payload as Record<string, unknown>)
-    : Array.isArray(payload) ? payload : [payload];
-  return keys.length > 0 && keys.length <= 50 && keys.every((key) =>
-    typeof key === "string" && key.startsWith("cfpt:") && key.length <= 230 &&
-    (request.area === "local" || key === "cfpt:settings")
-  );
+  const keys = requestKeys(request);
+  return keys.length > 0 && keys.length <= 50 && keys.every((key) => allowedKey(request.area!, key));
 }
 
 export async function handleStorageRequest(message: unknown, senderUrl: string): Promise<StorageResponse> {
