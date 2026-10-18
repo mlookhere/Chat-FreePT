@@ -1,3 +1,4 @@
+import { handleStorageRequest } from "./storage-broker";
 import type { BgRequest, ContentRequest } from "../common/types";
 
 /**
@@ -39,4 +40,13 @@ chrome.action.onClicked.addListener((tab) => {
   } else {
     void chrome.runtime.openOptionsPage();
   }
+});
+
+/** Keep the response channel open while the privileged worker completes the request. */
+chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
+  if (!message || typeof message !== "object" ||
+      (message as { type?: string }).type !== "cfpt-storage") return false;
+  void handleStorageRequest(message, sender.tab?.url ?? "")
+    .then(respond, () => respond({ ok: false, error: "storage service failed" }));
+  return true;
 });
