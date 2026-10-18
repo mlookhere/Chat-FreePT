@@ -405,6 +405,15 @@ function installLifecycleListeners(): void {
 }
 
 async function boot(): Promise<void> {
+  // Old content worlds can outlive an unpacked extension reload. Do not
+  // register listeners or partially mount a launcher with revoked APIs.
+  if (
+    typeof globalThis.chrome?.runtime?.sendMessage !== "function" ||
+    typeof globalThis.chrome?.runtime?.onMessage?.addListener !== "function"
+  ) {
+    log.warn("Chat FreePT extension context unavailable; reload the ChatGPT tab.");
+    return;
+  }
   ensureChatStateBridge();
   installLifecycleListeners();
   const mode = chatGptPageMode(location.href);

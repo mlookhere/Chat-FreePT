@@ -2,6 +2,23 @@ import { normalizeSettings, SETTINGS_LIMITS } from "../common/settings";
 import { loadSettings, saveSettings } from "../common/storage";
 import type { Settings } from "../common/types";
 
+/**
+ * Options pages are extension pages (not ChatGPT tabs); they cannot use the
+ * content-script RPC broker. Prefer synced settings, then native local storage.
+ */
+async function readOptionsSettings(): Promise<Settings> {
+  const area = chrome.storage?.sync ?? chrome.storage?.local;
+  if (!area) return loadSettings();
+  const found = await area.get("cfpt:settings");
+  return normalizeSettings(found["cfpt:settings"]);
+}
+
+async function writeOptionsSettings(settings: Settings): Promise<void> {
+  const area = chrome.storage?.sync ?? chrome.storage?.local;
+  if (!area) return saveSettings(settings);
+  await area.set({ "cfpt:settings": normalizeSettings(settings) });
+}
+
 function el<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
   if (!found) throw new Error(`missing element #${id}`);
@@ -33,7 +50,7 @@ function configureBounds(): void {
 
 async function init(): Promise<void> {
   configureBounds();
-  let settings = await loadSettings();
+  let settings = await readOptionsSettings();
   render(settings);
 
   el<HTMLButtonElement>("save").addEventListener("click", () => {
@@ -46,7 +63,7 @@ async function init(): Promise<void> {
         templateRepo: el<HTMLInputElement>("templateRepo").value,
         notificationsEnabled: el<HTMLInputElement>("notificationsEnabled").checked,
       });
-      await saveSettings(next);
+      await writeOptionsSettings(next);
       settings = next;
       render(settings);
 

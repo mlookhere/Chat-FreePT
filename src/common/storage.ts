@@ -3,15 +3,53 @@ import { normalizeSettings } from "./settings";
 import type { RunState, Settings } from "./types";
 
 const SETTINGS_KEY = "cfpt:settings";
+
+/**
+ * In content scripts, Chrome may temporarily omit chrome.storage while runtime
+ * messaging is still available. Delegate only FreePT storage keys to the worker.
+ * Never fall back to page localStorage: run and lock state must stay extension-owned.
+ */
+export async function extensionStorage(
+  area: "sync" | "local",
+  operation: "get" | "set" | "remove",
+  payload: string | string[] | Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const native = globalThis.chrome?.storage?.[area];
+  const method = native?.[operation];
+  if (typeof method === "function") {
+    if (operation === "get")
+      return (await native.get(payload as string | string[])) as Record<string, unknown>;
+    if (operation === "set") await native.set(payload as Record<string, unknown>);
+    if (operation === "remove") await native.remove(payload as string | string[]);
+    return {};
+  }
+  if (typeof globalThis.chrome?.runtime?.sendMessage !== "function") {
+    throw new Error(
+      "Extension context invalidated: Chrome storage and messaging unavailable. Reload ChatGPT.",
+    );
+  }
+  const response = (await chrome.runtime.sendMessage({
+    type: "cfpt-storage",
+    area,
+    operation,
+    payload,
+  })) as { ok?: boolean; value?: Record<string, unknown>; error?: string } | undefined;
+  if (!response?.ok) {
+    throw new Error(
+      `Extension context invalidated: FreePT storage service unavailable (${response?.error ?? "no response"}). Reload ChatGPT.`,
+    );
+  }
+  return response.value ?? {};
+}
 const RUN_PREFIX = "cfpt:run:";
 
 export async function loadSettings(): Promise<Settings> {
-  const found = await chrome.storage.sync.get(SETTINGS_KEY);
+  const found = await extensionStorage("sync", "get", SETTINGS_KEY);
   return normalizeSettings(found[SETTINGS_KEY]);
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
-  await chrome.storage.sync.set({ [SETTINGS_KEY]: normalizeSettings(settings) });
+  await extensionStorage("sync", "set", { [SETTINGS_KEY]: normalizeSettings(settings) });
 }
 
 export function runKey(conversationId: string): string {
@@ -20,14 +58,14 @@ export function runKey(conversationId: string): string {
 
 export async function loadRun(conversationId: string): Promise<RunState | null> {
   const key = runKey(conversationId);
-  const found = await chrome.storage.local.get(key);
+  const found = await extensionStorage("local", "get", key);
   const state = found[key] as RunState | undefined;
   return state && state.v === 1 ? normalizeRunRepositoryState(state) : null;
 }
 
 export async function saveRun(state: RunState): Promise<void> {
   const normalized = normalizeRunRepositoryState(state);
-  await chrome.storage.local.set({ [runKey(normalized.conversationId)]: normalized });
+  await extensionStorage("local", "set", { [runKey(normalized.conversationId)]: normalized });
 }
 
 function normalizeRunRepositoryState(state: RunState): RunState {
@@ -43,7 +81,7 @@ function normalizeRunRepositoryState(state: RunState): RunState {
 }
 
 export async function deleteRun(conversationId: string): Promise<void> {
-  await chrome.storage.local.remove(runKey(conversationId));
+  await extensionStorage("local", "remove", runKey(conversationId));
 }
 
 const LOCK_PREFIX = "cfpt:lock:";
@@ -61,28 +99,28 @@ function lockKey(conversationId: string): string {
 /** One tab drives a conversation at a time; a lock is stale after 15s without heartbeat. */
 export async function acquireTabLock(conversationId: string, nonce: string): Promise<boolean> {
   const key = lockKey(conversationId);
-  const found = await chrome.storage.local.get(key);
+  const found = await extensionStorage("local", "get", key);
   const lock = found[key] as TabLock | undefined;
   if (lock && lock.nonce !== nonce && Date.now() - lock.at < LOCK_STALE_MS) return false;
-  await chrome.storage.local.set({ [key]: { nonce, at: Date.now() } satisfies TabLock });
+  await extensionStorage("local", "set", { [key]: { nonce, at: Date.now() } satisfies TabLock });
   return true;
 }
 
 /** Refresh only a lock this tab still owns; never overwrite a newer owner after suspension. */
 export async function heartbeatTabLock(conversationId: string, nonce: string): Promise<boolean> {
   const key = lockKey(conversationId);
-  const found = await chrome.storage.local.get(key);
+  const found = await extensionStorage("local", "get", key);
   const lock = found[key] as TabLock | undefined;
   if (!lock || lock.nonce !== nonce) return false;
-  await chrome.storage.local.set({ [key]: { nonce, at: Date.now() } satisfies TabLock });
+  await extensionStorage("local", "set", { [key]: { nonce, at: Date.now() } satisfies TabLock });
   return true;
 }
 
 export async function releaseTabLock(conversationId: string, nonce: string): Promise<void> {
   const key = lockKey(conversationId);
-  const found = await chrome.storage.local.get(key);
+  const found = await extensionStorage("local", "get", key);
   const lock = found[key] as TabLock | undefined;
-  if (lock && lock.nonce === nonce) await chrome.storage.local.remove(key);
+  if (lock && lock.nonce === nonce) await extensionStorage("local", "remove", key);
 }
 
 /**
@@ -93,7 +131,7 @@ export async function migrateRunKey(state: RunState, newConversationId: string):
   const old = state.conversationId;
   const next = normalizeRunRepositoryState({ ...state, conversationId: newConversationId });
   await saveRun(next);
-  if (old !== newConversationId) await chrome.storage.local.remove(runKey(old));
+  if (old !== newConversationId) await extensionStorage("local", "remove", runKey(old));
   return next;
 }
 
