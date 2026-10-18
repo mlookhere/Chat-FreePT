@@ -1,0 +1,27 @@
+name: Temporary format reconciliation (remove before merge)
+on:
+  push:
+    branches:
+      - work/163-storage-context-recovery
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Print exact formatted changes
+        run: |
+          npx prettier --write src/background/index.ts src/background/storage-broker.ts src/common/storage.ts src/content/index.ts tests/storage-broker.test.ts tests/storage-fallback.test.ts
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          for (const path of ["src/background/index.ts","src/background/storage-broker.ts","src/common/storage.ts","src/content/index.ts","tests/storage-broker.test.ts","tests/storage-fallback.test.ts"]) {
+            console.log("CFPT_FILE:" + JSON.stringify({path,content:readFileSync(path,"utf8")}));
+          }
+          NODE
