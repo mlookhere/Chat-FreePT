@@ -48,17 +48,21 @@ describe("storage context recovery", () => {
     const send = vi.fn(async () => ({ ok: true, value: {} }));
     chrome.runtime.sendMessage = send as typeof chrome.runtime.sendMessage;
     await saveRun(newRunState("native-reply", 123));
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({
-      type: "cfpt-storage",
-      area: "local",
-      operation: "set",
-      payload: expect.objectContaining({ "cfpt:run:native-reply": expect.any(Object) }),
-    }));
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "cfpt-storage",
+        area: "local",
+        operation: "set",
+        payload: expect.objectContaining({ "cfpt:run:native-reply": expect.any(Object) }),
+      }),
+    );
   });
 
   it("fails closed without native storage or a responding service", async () => {
     Object.defineProperty(chrome, "storage", { configurable: true, value: undefined });
     chrome.runtime.sendMessage = vi.fn(async () => undefined) as typeof chrome.runtime.sendMessage;
-    await expect(extensionStorage("local", "get", "cfpt:run:1")).rejects.toThrow(/Extension context invalidated/);
+    await expect(extensionStorage("local", "get", "cfpt:run:1")).rejects.toThrow(
+      /Extension context invalidated/,
+    );
   });
 });
