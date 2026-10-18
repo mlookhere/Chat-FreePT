@@ -17,13 +17,16 @@ export async function extensionStorage(
   const native = globalThis.chrome?.storage?.[area];
   const method = native?.[operation];
   if (typeof method === "function") {
-    if (operation === "get") return (await native.get(payload as string | string[])) as Record<string, unknown>;
+    if (operation === "get")
+      return (await native.get(payload as string | string[])) as Record<string, unknown>;
     if (operation === "set") await native.set(payload as Record<string, unknown>);
     if (operation === "remove") await native.remove(payload as string | string[]);
     return {};
   }
   if (typeof globalThis.chrome?.runtime?.sendMessage !== "function") {
-    throw new Error("Extension context invalidated: Chrome storage and messaging unavailable. Reload ChatGPT.");
+    throw new Error(
+      "Extension context invalidated: Chrome storage and messaging unavailable. Reload ChatGPT.",
+    );
   }
   const response = (await chrome.runtime.sendMessage({
     type: "cfpt-storage",
@@ -32,7 +35,9 @@ export async function extensionStorage(
     payload,
   })) as { ok?: boolean; value?: Record<string, unknown>; error?: string } | undefined;
   if (!response?.ok) {
-    throw new Error(`Extension context invalidated: FreePT storage service unavailable (${response?.error ?? "no response"}). Reload ChatGPT.`);
+    throw new Error(
+      `Extension context invalidated: FreePT storage service unavailable (${response?.error ?? "no response"}). Reload ChatGPT.`,
+    );
   }
   return response.value ?? {};
 }
